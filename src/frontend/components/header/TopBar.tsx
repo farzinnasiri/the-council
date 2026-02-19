@@ -1,6 +1,5 @@
 import { Menu, Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
 import {
@@ -29,6 +28,8 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
     .filter(Boolean);
   const inactiveMembers = members.filter((member) => member.status === 'active' && !participantIds.includes(member.id));
   const activeCount = participants.length;
+  const isChamber = conversation?.type === 'chamber';
+  const showHallParticipants = showParticipants && !isChamber;
   const canManageHall = conversation?.type === 'hall';
 
   return (
@@ -39,13 +40,13 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
         </Button>
         <div>
           <p className="font-display text-lg leading-none tracking-tight">{title}</p>
-          {subtitle || (showParticipants && activeCount > 0) ? (
+          {subtitle || (showHallParticipants && activeCount > 0) ? (
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground md:mt-1">
               {subtitle ? <span>{subtitle}</span> : null}
-              {subtitle && showParticipants && activeCount > 0 ? (
+              {subtitle && showHallParticipants && activeCount > 0 ? (
                 <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
               ) : null}
-              {showParticipants && activeCount > 0 ? (
+              {showHallParticipants && activeCount > 0 ? (
                 <CouncilMembersMenu
                   trigger={
                     <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-card px-2 py-0.5 text-[10px] font-medium sm:hidden">
@@ -65,7 +66,13 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
       </div>
 
       <div className="flex items-center gap-2">
-        {showParticipants && activeCount > 0 ? (
+        {isChamber ? (
+          <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-muted-foreground">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            Online
+          </span>
+        ) : null}
+        {showHallParticipants && activeCount > 0 ? (
           <CouncilMembersMenu
             trigger={
               <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-2 py-1 sm:flex">
@@ -74,7 +81,9 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
                     <AvatarFallback>{member.emoji}</AvatarFallback>
                   </Avatar>
                 ))}
-                <Badge variant="secondary">{activeCount} active</Badge>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground/80">
+                  {activeCount} active
+                </span>
               </div>
             }
             activeMembers={participants}

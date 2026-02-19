@@ -120,6 +120,9 @@ function SessionGroup({
         <div className="grid gap-1">
           {sessions.map((session) => {
             const href = session.type === 'hall' ? `/hall/${session.id}` : `/chamber/${session.id}`;
+            const primaryMemberId = session.memberId ?? session.memberIds[0];
+            const primaryMember = primaryMemberId ? membersById.get(primaryMemberId) : undefined;
+            const chamberTitle = session.title.replace(/^chamber\s*[·-]\s*/i, '').trim();
             return (
               <NavLink
                 key={session.id}
@@ -132,19 +135,28 @@ function SessionGroup({
                   )
                 }
               >
-                <p className="truncate text-sm font-medium">{session.title}</p>
-                <p className="truncate text-xs text-muted-foreground">{formatSessionTime(session.updatedAt)}</p>
-                <div className="mt-2 flex items-center -space-x-1.5">
-                  {session.memberIds.slice(0, 4).map((memberId) => (
-                    <span
-                      key={memberId}
-                      className="grid h-5 w-5 place-items-center rounded-full border border-border bg-background text-[10px]"
-                      title={membersById.get(memberId)?.name}
-                    >
-                      {membersById.get(memberId)?.emoji ?? '•'}
+                <div className="flex items-center gap-2">
+                  {session.type === 'chamber' && primaryMember ? (
+                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-border bg-background text-[10px]">
+                      {primaryMember.emoji}
                     </span>
-                  ))}
+                  ) : null}
+                  <p className="truncate text-sm font-medium">{session.type === 'chamber' ? chamberTitle : session.title}</p>
                 </div>
+                <p className="truncate text-xs text-muted-foreground">{formatSessionTime(session.updatedAt)}</p>
+                {session.type === 'hall' ? (
+                  <div className="mt-2 flex items-center -space-x-1.5">
+                    {session.memberIds.slice(0, 4).map((memberId) => (
+                      <span
+                        key={memberId}
+                        className="grid h-5 w-5 place-items-center rounded-full border border-border bg-background text-[10px]"
+                        title={membersById.get(memberId)?.name}
+                      >
+                        {membersById.get(memberId)?.emoji ?? '•'}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </NavLink>
             );
           })}

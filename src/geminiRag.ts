@@ -7,6 +7,11 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface ContextMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface Citation {
   title: string;
   uri?: string;
@@ -19,6 +24,37 @@ export interface ChatResponse {
   retrievalModel: string;
   grounded: boolean;
   usedKnowledgeBase?: boolean;
+  debug?: {
+    traceId: string;
+    mode: 'with-kb' | 'prompt-only';
+    reason?: string;
+    kbCheck?: {
+      requestedStoreName: string | null;
+      docsCount: number;
+      listError?: string;
+      fileSearchInvoked: boolean;
+      gateDecision?: {
+        mode: 'heuristic' | 'llm-gate';
+        useKnowledgeBase: boolean;
+        reason: string;
+      };
+    };
+    fileSearchStart?: {
+      storeName: string;
+      retrievalModel: string;
+      query: string;
+      metadataFilter?: string;
+    };
+    fileSearchResponse?: {
+      grounded: boolean;
+      citationsCount: number;
+      snippetsCount: number;
+      retrievalText: string;
+      citations: Citation[];
+      snippets: string[];
+    };
+    answerPrompt: string;
+  };
 }
 
 export interface UploadConfig {
@@ -32,6 +68,7 @@ export class GeminiRAGChatbot {
   private ai: GoogleGenAI;
   private fileSearchStoreName: string | null = null;
   private conversationHistory: ChatMessage[] = [];
+  private debugLogsEnabled: boolean;
 
   constructor(apiKey?: string) {
     const key = apiKey ?? process.env.GEMINI_API_KEY;
@@ -39,6 +76,7 @@ export class GeminiRAGChatbot {
       throw new Error('GEMINI_API_KEY not found in environment');
     }
     this.ai = new GoogleGenAI({ apiKey: key });
+    this.debugLogsEnabled = process.env.GEMINI_DEBUG_LOGS === '1';
   }
 
   async createKnowledgeBase(storeName = 'web-rag-store'): Promise<string> {
@@ -104,7 +142,8 @@ export class GeminiRAGChatbot {
     }
 
     const displayName = config.displayName ?? path.basename(filePath);
-    const mimeType = config.mimeType ?? this.inferMimeType(displayName, filePath);
+    // Browser-provided MIME types are inconsistent across clients; infer server-side for stability.
+    const mimeType = this.inferMimeType(displayName, filePath);
 
     let operation = await this.ai.fileSearchStores.uploadToFileSearchStore({
       file: filePath,
@@ -148,6 +187,19 @@ export class GeminiRAGChatbot {
       docs.push({ name: doc.name, displayName: doc.displayName });
     }
     return docs;
+  }
+
+  async deleteDocumentByName(documentName: string, force = true): Promise<void> {
+    const aiAny = this.ai as any;
+    const documentsApi = aiAny.documents ?? aiAny.fileSearchStores?.documents;
+    if (!documentsApi?.delete) {
+      throw new Error('Documents delete API is not available in current SDK runtime.');
+    }
+
+    await documentsApi.delete({
+      name: documentName,
+      config: { force },
+    });
   }
 
   async routeMembersLite(options: {
@@ -220,8 +272,14 @@ export class GeminiRAGChatbot {
       temperature: options.temperature,
       metadataFilter: options.metadataFilter,
       personaPrompt: options.personaPrompt,
-      useHistory: true,
+      contextMessages: this.conversationHistory.map((message) => ({
+        role: message.role === 'user' ? 'user' : 'assistant',
+        content: message.content,
+      })),
     });
+
+    this.conversationHistory.push({ role: 'user', content: query });
+    this.conversationHistory.push({ role: 'model', content: result.answer });
 
     return result;
   }
@@ -234,25 +292,94 @@ export class GeminiRAGChatbot {
     temperature?: number;
     metadataFilter?: string;
     personaPrompt?: string;
-    useHistory?: boolean;
+    contextMessages?: ContextMessage[];
   }): Promise<ChatResponse> {
+    const traceId = crypto.randomUUID().slice(0, 8);
     const responseModel = options.responseModel ?? 'gemini-3-flash-preview';
     const retrievalModel = options.retrievalModel ?? 'gemini-2.5-flash-lite';
 
-    const docs = options.storeName ? await this.safeListDocuments(options.storeName) : [];
+    const storeProbe = options.storeName
+      ? await this.safeListDocuments(options.storeName)
+      : { docs: [], error: undefined as string | undefined };
+    const docs = storeProbe.docs;
     if (!options.storeName || docs.length === 0) {
       const promptOnly = await this.chatPromptOnly({
         query: options.query,
         responseModel,
         temperature: options.temperature,
         personaPrompt: options.personaPrompt,
-        useHistory: options.useHistory ?? false,
+        contextMessages: options.contextMessages ?? [],
+        traceId,
+        reason: options.storeName ? 'no-documents-in-store' : 'no-store-provided',
       });
 
       return {
         ...promptOnly,
         retrievalModel,
         usedKnowledgeBase: false,
+        debug: {
+          ...(promptOnly.debug ?? {
+            traceId,
+            mode: 'prompt-only' as const,
+            answerPrompt: '',
+          }),
+          kbCheck: {
+            requestedStoreName: options.storeName ?? null,
+            docsCount: docs.length,
+            listError: storeProbe.error,
+            fileSearchInvoked: false,
+            gateDecision: {
+              mode: 'heuristic',
+              useKnowledgeBase: false,
+              reason: options.storeName ? 'no-documents-in-store' : 'no-store-provided',
+            },
+          },
+        },
+      };
+    }
+
+    const gateHeuristic = this.heuristicKnowledgeGate(options.query);
+    let gateDecision = gateHeuristic;
+    if (gateHeuristic.mode === 'ambiguous') {
+      gateDecision = await this.llmKnowledgeGate({
+        query: options.query,
+        candidatesHint: docs.slice(0, 5).map((doc) => doc.displayName || doc.name || 'document'),
+      });
+    }
+
+    if (!gateDecision.useKnowledgeBase) {
+      const promptOnly = await this.chatPromptOnly({
+        query: options.query,
+        responseModel,
+        temperature: options.temperature,
+        personaPrompt: options.personaPrompt,
+        contextMessages: options.contextMessages ?? [],
+        traceId,
+        reason: gateDecision.reason,
+      });
+
+      return {
+        ...promptOnly,
+        retrievalModel,
+        usedKnowledgeBase: false,
+        debug: {
+          ...(promptOnly.debug ?? {
+            traceId,
+            mode: 'prompt-only' as const,
+            answerPrompt: '',
+          }),
+          kbCheck: {
+            requestedStoreName: options.storeName ?? null,
+            docsCount: docs.length,
+            listError: storeProbe.error,
+            fileSearchInvoked: false,
+            gateDecision: {
+              mode: gateDecision.mode === 'ambiguous' ? 'llm-gate' : 'heuristic',
+              useKnowledgeBase: false,
+              reason: gateDecision.reason,
+            },
+          },
+        },
       };
     }
 
@@ -264,12 +391,31 @@ export class GeminiRAGChatbot {
       temperature: options.temperature,
       metadataFilter: options.metadataFilter,
       personaPrompt: options.personaPrompt,
-      useHistory: options.useHistory ?? false,
+      contextMessages: options.contextMessages ?? [],
+      traceId,
     });
 
     return {
       ...grounded,
       usedKnowledgeBase: true,
+      debug: {
+        ...(grounded.debug ?? {
+          traceId,
+          mode: 'with-kb' as const,
+          answerPrompt: '',
+        }),
+        kbCheck: {
+          requestedStoreName: options.storeName ?? null,
+          docsCount: docs.length,
+          listError: storeProbe.error,
+          fileSearchInvoked: true,
+          gateDecision: {
+            mode: gateDecision.mode === 'ambiguous' ? 'llm-gate' : 'heuristic',
+            useKnowledgeBase: true,
+            reason: gateDecision.reason,
+          },
+        },
+      },
     };
   }
 
@@ -277,11 +423,15 @@ export class GeminiRAGChatbot {
     this.conversationHistory = [];
   }
 
-  private async safeListDocuments(storeName: string): Promise<Array<{ name?: string; displayName?: string }>> {
+  private async safeListDocuments(
+    storeName: string
+  ): Promise<{ docs: Array<{ name?: string; displayName?: string }>; error?: string }> {
     try {
-      return await this.listDocumentsFromStore(storeName);
-    } catch {
-      return [];
+      const docs = await this.listDocumentsFromStore(storeName);
+      return { docs };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown listDocuments error';
+      return { docs: [], error: message };
     }
   }
 
@@ -290,18 +440,19 @@ export class GeminiRAGChatbot {
     responseModel: string;
     temperature?: number;
     personaPrompt?: string;
-    useHistory: boolean;
+    contextMessages: ContextMessage[];
+    traceId?: string;
+    reason?: string;
   }): Promise<ChatResponse> {
+    const traceId = options.traceId ?? crypto.randomUUID().slice(0, 8);
     const personaPrompt =
       options.personaPrompt ??
       'You are a strategic advisor. Give concise, practical recommendations and be explicit about tradeoffs.';
 
-    const recentHistory = options.useHistory
-      ? this.conversationHistory
-          .slice(-8)
-          .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-          .join('\n')
-      : '';
+    const recentHistory = options.contextMessages
+      .slice(-10)
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
 
     const prompt = [
       personaPrompt,
@@ -324,17 +475,18 @@ export class GeminiRAGChatbot {
 
     const answer = (response.text ?? '').trim() || 'I could not generate a response.';
 
-    if (options.useHistory) {
-      this.conversationHistory.push({ role: 'user', content: options.query });
-      this.conversationHistory.push({ role: 'model', content: answer });
-    }
-
     return {
       answer,
       citations: [],
       model: options.responseModel,
       retrievalModel: 'gemini-2.5-flash-lite',
       grounded: false,
+      debug: {
+        traceId,
+        mode: 'prompt-only',
+        reason: options.reason,
+        answerPrompt: prompt,
+      },
     };
   }
 
@@ -346,8 +498,10 @@ export class GeminiRAGChatbot {
     temperature?: number;
     metadataFilter?: string;
     personaPrompt?: string;
-    useHistory: boolean;
+    contextMessages: ContextMessage[];
+    traceId?: string;
   }): Promise<ChatResponse> {
+    const traceId = options.traceId ?? crypto.randomUUID().slice(0, 8);
     const fileSearchConfig: { fileSearchStoreNames: string[]; metadataFilter?: string } = {
       fileSearchStoreNames: [options.storeName],
     };
@@ -355,6 +509,14 @@ export class GeminiRAGChatbot {
     if (options.metadataFilter) {
       fileSearchConfig.metadataFilter = options.metadataFilter;
     }
+
+    this.logDebug('file-search:start', {
+      traceId,
+      storeName: options.storeName,
+      retrievalModel: options.retrievalModel,
+      query: options.query,
+      metadataFilter: options.metadataFilter ?? null,
+    });
 
     const retrievalResponse = await this.ai.models.generateContent({
       model: options.retrievalModel,
@@ -386,13 +548,25 @@ export class GeminiRAGChatbot {
     const { citations, snippets } = this.extractGroundedEvidence(groundingMetadata);
     const grounded = citations.length > 0;
 
+    this.logDebug('file-search:response', {
+      traceId,
+      grounded,
+      citationsCount: citations.length,
+      snippetsCount: snippets.length,
+      retrievalText,
+      citations,
+      snippets,
+    });
+
     if (!grounded) {
       return this.chatPromptOnly({
         query: options.query,
         responseModel: options.responseModel,
         temperature: options.temperature,
         personaPrompt: options.personaPrompt,
-        useHistory: options.useHistory,
+        contextMessages: options.contextMessages,
+        traceId,
+        reason: 'no-grounded-evidence',
       });
     }
 
@@ -409,7 +583,9 @@ export class GeminiRAGChatbot {
         responseModel: options.responseModel,
         temperature: options.temperature,
         personaPrompt: options.personaPrompt,
-        useHistory: options.useHistory,
+        contextMessages: options.contextMessages,
+        traceId,
+        reason: 'empty-evidence-blocks',
       });
     }
 
@@ -422,12 +598,10 @@ export class GeminiRAGChatbot {
         'Do not add outside facts.',
       ].join(' ');
 
-    const recentHistory = options.useHistory
-      ? this.conversationHistory
-          .slice(-8)
-          .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-          .join('\n')
-      : '';
+    const recentHistory = options.contextMessages
+      .slice(-10)
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
 
     const answerPrompt = [
       personaPrompt,
@@ -443,6 +617,12 @@ export class GeminiRAGChatbot {
       'Now provide the final answer. Keep it concise and grounded in the evidence.',
     ].join('\n');
 
+    this.logDebug('chat-model:prompt', {
+      traceId,
+      responseModel: options.responseModel,
+      prompt: answerPrompt,
+    });
+
     const answerResponse = await this.ai.models.generateContent({
       model: options.responseModel,
       contents: [{ role: 'user', parts: [{ text: answerPrompt }] }],
@@ -451,17 +631,31 @@ export class GeminiRAGChatbot {
 
     const answer = (answerResponse.text ?? '').trim() || 'I could not generate a grounded answer.';
 
-    if (options.useHistory) {
-      this.conversationHistory.push({ role: 'user', content: options.query });
-      this.conversationHistory.push({ role: 'model', content: answer });
-    }
-
     return {
       answer,
       citations,
       model: options.responseModel,
       retrievalModel: options.retrievalModel,
       grounded: true,
+      debug: {
+        traceId,
+        mode: 'with-kb',
+        fileSearchStart: {
+          storeName: options.storeName,
+          retrievalModel: options.retrievalModel,
+          query: options.query,
+          metadataFilter: options.metadataFilter,
+        },
+        fileSearchResponse: {
+          grounded,
+          citationsCount: citations.length,
+          snippetsCount: snippets.length,
+          retrievalText,
+          citations,
+          snippets,
+        },
+        answerPrompt,
+      },
     };
   }
 
@@ -517,8 +711,8 @@ export class GeminiRAGChatbot {
     const mimeMap: Record<string, string> = {
       '.pdf': 'application/pdf',
       '.txt': 'text/plain',
-      '.md': 'text/markdown',
-      '.markdown': 'text/markdown',
+      '.md': 'text/plain',
+      '.markdown': 'text/plain',
       '.csv': 'text/csv',
       '.json': 'application/json',
       '.html': 'text/html',
@@ -536,5 +730,90 @@ export class GeminiRAGChatbot {
     };
 
     return mimeMap[extension] ?? 'text/plain';
+  }
+  private logDebug(event: string, payload: unknown): void {
+    if (!this.debugLogsEnabled) {
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [GeminiRAG] ${event}`, payload);
+  }
+
+  private heuristicKnowledgeGate(query: string): {
+    mode: 'heuristic' | 'ambiguous';
+    useKnowledgeBase: boolean;
+    reason: string;
+  } {
+    const text = query.trim().toLowerCase();
+    const tokenCount = text.split(/\s+/).filter(Boolean).length;
+
+    const smallTalkPattern =
+      /^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|great|good morning|good evening)[!.?]*$/i;
+    if (smallTalkPattern.test(text)) {
+      return { mode: 'heuristic', useKnowledgeBase: false, reason: 'small-talk' };
+    }
+
+    if (tokenCount <= 3) {
+      return { mode: 'heuristic', useKnowledgeBase: false, reason: 'very-short-query' };
+    }
+
+    const groundingSignals = [
+      'according to',
+      'from the document',
+      'cite',
+      'source',
+      'numbers',
+      'exactly',
+      'policy',
+      'contract',
+      'spec',
+      'in the file',
+      'what does it say',
+    ];
+    if (groundingSignals.some((signal) => text.includes(signal))) {
+      return { mode: 'heuristic', useKnowledgeBase: true, reason: 'explicit-grounding-signal' };
+    }
+
+    const hasQuestionMark = text.includes('?');
+    if (tokenCount >= 18 || hasQuestionMark) {
+      return { mode: 'ambiguous', useKnowledgeBase: false, reason: 'needs-llm-gate' };
+    }
+
+    return { mode: 'heuristic', useKnowledgeBase: false, reason: 'quick-conversational-turn' };
+  }
+
+  private async llmKnowledgeGate(input: {
+    query: string;
+    candidatesHint: string[];
+  }): Promise<{ mode: 'ambiguous'; useKnowledgeBase: boolean; reason: string }> {
+    const model = process.env.GEMINI_KB_GATE_MODEL ?? 'gemma-3-12b-it';
+    const prompt = [
+      'Decide if this user message needs retrieval grounding from a knowledge base.',
+      'Return JSON only: {"useKnowledgeBase":true|false,"reason":"short-reason"}',
+      'Use true only when grounding/citation/document lookup is likely necessary.',
+      '',
+      `User message: ${input.query}`,
+      `Available docs (sample): ${input.candidatesHint.join(', ') || 'none'}`,
+    ].join('\n');
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { temperature: 0 },
+      });
+      const parsed = this.parseStructuredJson<{ useKnowledgeBase?: boolean; reason?: string }>((response.text ?? '').trim());
+      return {
+        mode: 'ambiguous',
+        useKnowledgeBase: Boolean(parsed.useKnowledgeBase),
+        reason: parsed.reason?.trim() || 'llm-gate-decision',
+      };
+    } catch {
+      return {
+        mode: 'ambiguous',
+        useKnowledgeBase: false,
+        reason: 'llm-gate-fallback-no-kb',
+      };
+    }
   }
 }

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Archive, FileUp, MessageSquarePlus, Pencil, Plus, Save } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Archive, MessageSquarePlus, Pencil, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { useAppStore } from '../store/appStore';
@@ -29,15 +29,29 @@ export function MembersPage() {
   const createChamberForMember = useAppStore((state) => state.createChamberForMember);
   const uploadDocsForMember = useAppStore((state) => state.uploadDocsForMember);
   const fetchDocsForMember = useAppStore((state) => state.fetchDocsForMember);
+  const deleteDocForMember = useAppStore((state) => state.deleteDocForMember);
   const docsByMember = useAppStore((state) => state.memberDocuments);
 
   const [isCreating, setIsCreating] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [form, setForm] = useState<MemberFormState>(emptyForm);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const [deletingDocumentName, setDeletingDocumentName] = useState<string | null>(null);
 
   const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
   const archivedMembers = useMemo(() => members.filter((member) => member.status === 'archived'), [members]);
+  const editingMember = useMemo(() => members.find((item) => item.id === editingMemberId), [members, editingMemberId]);
+  const editingDocs = editingMemberId ? docsByMember[editingMemberId] ?? [] : [];
+  const isFormActive = isCreating || Boolean(editingMemberId);
+  const showKbPanel = isCreating || Boolean(editingMemberId);
+
+  useEffect(() => {
+    if (!editingMemberId) {
+      return;
+    }
+    setBusyMemberId(editingMemberId);
+    void fetchDocsForMember(editingMemberId).finally(() => setBusyMemberId(null));
+  }, [editingMemberId, fetchDocsForMember]);
 
   const startCreate = () => {
     setEditingMemberId(null);
@@ -64,6 +78,7 @@ export function MembersPage() {
     setIsCreating(false);
     setEditingMemberId(null);
     setForm(emptyForm);
+    setDeletingDocumentName(null);
   };
 
   const save = async () => {
@@ -87,35 +102,52 @@ export function MembersPage() {
     if (editingMemberId) {
       await updateMember(editingMemberId, payload);
     } else {
-      await createMember(payload);
+      const created = await createMember(payload);
+      setEditingMemberId(created.id);
+      setIsCreating(false);
+      setForm({
+        name: created.name,
+        emoji: created.emoji,
+        role: created.role,
+        specialties: created.specialties.join(', '),
+        systemPrompt: created.systemPrompt,
+      });
+      return;
     }
     resetForm();
   };
 
-  const onUpload = async (memberId: string, files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setBusyMemberId(memberId);
+  const onUploadForEditingMember = async (files: FileList | null) => {
+    if (!editingMemberId || !files || files.length === 0) {
+      return;
+    }
+
+    setBusyMemberId(editingMemberId);
     try {
-      await uploadDocsForMember(memberId, Array.from(files));
-      await fetchDocsForMember(memberId);
+      await uploadDocsForMember(editingMemberId, Array.from(files));
+      await fetchDocsForMember(editingMemberId);
     } finally {
       setBusyMemberId(null);
     }
   };
 
-  const viewDocs = async (memberId: string) => {
-    setBusyMemberId(memberId);
+  const deleteDocument = async (documentName: string) => {
+    if (!editingMemberId) {
+      return;
+    }
+
+    setDeletingDocumentName(documentName);
     try {
-      await fetchDocsForMember(memberId);
+      await deleteDocForMember(editingMemberId, documentName);
     } finally {
-      setBusyMemberId(null);
+      setDeletingDocumentName(null);
     }
   };
 
   return (
     <div className="h-full overflow-y-auto px-4 py-5 md:px-8 md:py-8">
       <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1.2fr_1fr]">
-        <section className="space-y-4">
+        <section className={`space-y-4 ${isFormActive ? 'order-2 lg:order-1' : 'order-1'}`}>
           <div className="flex items-center justify-between">
             <h1 className="font-display text-2xl">Members</h1>
             <Button variant="outline" className="gap-2" onClick={startCreate}>
@@ -128,7 +160,6 @@ export function MembersPage() {
             title="Active"
             members={activeMembers}
             docsByMember={docsByMember}
-            busyMemberId={busyMemberId}
             onEdit={startEdit}
             onArchive={(memberId) => {
               void archiveMember(memberId);
@@ -137,8 +168,6 @@ export function MembersPage() {
               const created = await createChamberForMember(memberId);
               navigate(`/chamber/${created.id}`);
             }}
-            onUpload={onUpload}
-            onViewDocs={viewDocs}
           />
 
           {archivedMembers.length > 0 ? (
@@ -146,21 +175,18 @@ export function MembersPage() {
               title="Archived"
               members={archivedMembers}
               docsByMember={docsByMember}
-              busyMemberId={busyMemberId}
               onEdit={() => {}}
               onArchive={() => {}}
               onCreateChamber={() => Promise.resolve()}
-              onUpload={() => Promise.resolve()}
-              onViewDocs={viewDocs}
               archived
             />
           ) : null}
         </section>
 
-        <section className="rounded-2xl border border-border bg-card p-4 md:p-5">
+        <section className={`rounded-2xl border border-border bg-card p-4 md:p-5 ${isFormActive ? 'order-1 lg:order-2' : 'order-2'}`}>
           <h2 className="font-display text-xl">{editingMemberId ? 'Edit member' : isCreating ? 'Create member' : 'Member details'}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Set each member's identity and system prompt. Knowledge base is optional and can be uploaded anytime.
+            Set each member's identity and system prompt. Manage knowledge-base files from here.
           </p>
 
           {isCreating || editingMemberId ? (
@@ -225,6 +251,76 @@ export function MembersPage() {
                   Cancel
                 </Button>
               </div>
+
+              {showKbPanel ? (
+                <section className="mt-2 rounded-xl border border-border/80 bg-background p-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">Knowledge base documents</p>
+                      <p className="text-xs text-muted-foreground">
+                        {editingMember?.kbStoreName ? `Store: ${editingMember.kbStoreName.split('/').pop()}` : 'No KB store yet'}
+                      </p>
+                    </div>
+                    <label
+                      className={`inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs ${
+                        editingMemberId ? 'cursor-pointer hover:bg-muted/40' : 'cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      Upload
+                      <input
+                        type="file"
+                        multiple
+                        className="hidden"
+                        disabled={!editingMemberId}
+                        onChange={(event) => {
+                          void onUploadForEditingMember(event.target.files);
+                          event.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {!editingMemberId ? (
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Save this member first, then upload and manage KB documents.
+                    </p>
+                  ) : null}
+
+                  {editingMemberId && busyMemberId === editingMemberId ? (
+                    <p className="text-xs text-muted-foreground">Loading documents...</p>
+                  ) : null}
+
+                  {editingMemberId && editingDocs.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {editingDocs.map((doc, index) => {
+                        const key = doc.name ?? doc.displayName ?? `doc-${index}`;
+                        return (
+                          <div key={key} className="flex items-center justify-between rounded-md border border-border/70 px-2 py-1.5">
+                            <span className="truncate pr-3 text-xs text-foreground/90">{doc.displayName ?? doc.name ?? 'Untitled document'}</span>
+                            {doc.name ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                disabled={deletingDocumentName === doc.name}
+                                onClick={() => void deleteDocument(doc.name as string)}
+                                title="Delete document"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {editingMemberId ? 'No documents yet. Upload files to add knowledge.' : 'Document upload becomes available after first save.'}
+                    </p>
+                  )}
+                </section>
+              ) : null}
             </div>
           ) : (
             <div className="mt-4 rounded-xl border border-dashed border-border/80 p-5 text-sm text-muted-foreground">
@@ -241,23 +337,17 @@ function MemberList({
   title,
   members,
   docsByMember,
-  busyMemberId,
   onEdit,
   onArchive,
   onCreateChamber,
-  onUpload,
-  onViewDocs,
   archived = false,
 }: {
   title: string;
   members: ReturnType<typeof useAppStore.getState>['members'];
   docsByMember: ReturnType<typeof useAppStore.getState>['memberDocuments'];
-  busyMemberId: string | null;
   onEdit: (memberId: string) => void;
   onArchive: (memberId: string) => void;
   onCreateChamber: (memberId: string) => Promise<void>;
-  onUpload: (memberId: string, files: FileList | null) => Promise<void>;
-  onViewDocs: (memberId: string) => Promise<void>;
   archived?: boolean;
 }) {
   return (
@@ -273,7 +363,6 @@ function MemberList({
                 {member.specialties.length > 0 ? (
                   <p className="mt-1 text-xs text-muted-foreground">{member.specialties.join(' · ')}</p>
                 ) : null}
-                <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{member.systemPrompt}</p>
               </div>
 
               {!archived ? (
@@ -296,31 +385,7 @@ function MemberList({
                 </Button>
               ) : null}
 
-              {!archived ? (
-                <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-muted/40">
-                  <FileUp className="h-3.5 w-3.5" />
-                  Upload docs
-                  <input
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(event) => {
-                      void onUpload(member.id, event.target.files);
-                      event.currentTarget.value = '';
-                    }}
-                  />
-                </label>
-              ) : null}
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs"
-                disabled={busyMemberId === member.id}
-                onClick={() => void onViewDocs(member.id)}
-              >
-                {busyMemberId === member.id ? 'Loading...' : `Docs (${docsByMember[member.id]?.length ?? 0})`}
-              </Button>
+              <span className="text-xs text-muted-foreground">Docs ({docsByMember[member.id]?.length ?? 0})</span>
 
               {member.kbStoreName ? (
                 <span className="text-[11px] text-muted-foreground">Store: {member.kbStoreName.split('/').pop()}</span>

@@ -1,12 +1,16 @@
-import { MessageCircle, Reply } from 'lucide-react';
+import { Check, Copy, MessageCircle, Reply } from 'lucide-react';
+import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import type { Message } from '../../types/domain';
 import { Avatar, AvatarFallback } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { RoutePill } from './RoutePill';
+import { MarkdownMessage } from './MarkdownMessage';
 
 export function MessageBubble({ message }: { message: Message }) {
+  const [copied, setCopied] = useState(false);
   const members = useAppStore((state) => state.members);
+  const conversations = useAppStore((state) => state.conversations);
 
   if (message.senderType === 'system') {
     return <RoutePill memberIds={message.routeMemberIds ?? []} />;
@@ -16,6 +20,18 @@ export function MessageBubble({ message }: { message: Message }) {
   const member = message.memberId ? members.find((item) => item.id === message.memberId) : null;
   const avatar = member?.emoji ?? '🧠';
   const label = member?.name ?? 'Council Member';
+  const conversation = conversations.find((item) => item.id === message.conversationId);
+  const isChamber = conversation?.type === 'chamber';
+
+  const copyContent = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <div className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
@@ -32,22 +48,61 @@ export function MessageBubble({ message }: { message: Message }) {
             isUser ? 'rounded-br-md border-primary/20 bg-primary/15' : 'rounded-bl-md border-border bg-card'
           } ${message.status === 'error' ? 'border-destructive/50' : ''}`}
         >
-          {message.content}
+          <MarkdownMessage content={message.content} />
 
           {!isUser ? (
             <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-2">
+              {isChamber ? (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground"
+                    onClick={() => void copyContent()}
+                    title={copied ? 'Copied' : 'Copy'}
+                    aria-label={copied ? 'Copied' : 'Copy message'}
+                  >
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                    <Reply className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                    <MessageCircle className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground"
+                    onClick={() => void copyContent()}
+                    title={copied ? 'Copied' : 'Copy'}
+                    aria-label={copied ? 'Copied' : 'Copy message'}
+                  >
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              )}
+              <span className="text-[11px] text-muted-foreground">{message.timestamp}</span>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-2">
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-                  <Reply className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-                  <MessageCircle className="h-4 w-4" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground"
+                  onClick={() => void copyContent()}
+                  title={copied ? 'Copied' : 'Copy'}
+                  aria-label={copied ? 'Copied' : 'Copy message'}
+                >
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
               <span className="text-[11px] text-muted-foreground">{message.timestamp}</span>
             </div>
-          ) : (
-            <div className="mt-2 text-right text-[11px] text-muted-foreground">{message.timestamp}</div>
           )}
         </div>
       </div>

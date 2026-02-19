@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Conversation, ConversationType, Member, Message, ThemeMode } from '../types/domain';
 import { councilRepository } from '../repository/IndexedDbCouncilRepository';
 import { formatClock, nowIso } from '../lib/time';
-import { chatWithMember, routeHallMembers, uploadMemberDocuments, listMemberDocuments } from '../lib/geminiClient';
+import { chatWithMember, routeHallMembers, uploadMemberDocuments, listMemberDocuments, deleteMemberDocument } from '../lib/geminiClient';
 import { routeToMembers } from '../lib/mockRouting';
 
 interface CreateMemberPayload {
@@ -36,6 +36,8 @@ interface AppState {
   archiveMember: (memberId: string) => Promise<void>;
   uploadDocsForMember: (memberId: string, files: File[]) => Promise<void>;
   fetchDocsForMember: (memberId: string) => Promise<void>;
+  hydrateMemberDocuments: () => Promise<void>;
+  deleteDocForMember: (memberId: string, documentName: string) => Promise<void>;
 }
 
 function buildMessage(message: Omit<Message, 'id' | 'timestamp' | 'createdAt'>): Message {
@@ -51,6 +53,32 @@ function buildMessage(message: Omit<Message, 'id' | 'timestamp' | 'createdAt'>):
 function updateConversationStamp(conversations: Conversation[], conversationId: string): Conversation[] {
   const updatedAt = nowIso();
   return conversations.map((item) => (item.id === conversationId ? { ...item, updatedAt } : item));
+}
+
+function buildMemberContextWindow(
+  messages: Message[],
+  conversationId: string,
+  memberId: string,
+  conversationType: Conversation['type']
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return messages
+    .filter((message) => {
+      if (message.conversationId !== conversationId) return false;
+      if (message.senderType === 'system') return false;
+      if (message.senderType === 'user') return true;
+      if (message.senderType === 'member') {
+        if (conversationType === 'chamber') {
+          return true;
+        }
+        return message.memberId === memberId;
+      }
+      return false;
+    })
+    .slice(-12)
+    .map((message) => ({
+      role: message.senderType === 'user' ? 'user' : 'assistant',
+      content: message.content,
+    }));
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -77,6 +105,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       messages: snapshot.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
       selectedConversationId: firstHall?.id ?? snapshot.conversations[0]?.id ?? '',
     });
+
+    // Fire-and-forget preload so KB doc counts survive page refresh.
+    void get().hydrateMemberDocuments();
   },
 
   selectConversation: (conversationId) => {
@@ -241,6 +272,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             member,
             conversationId,
             storeName: member.kbStoreName,
+            contextMessages: buildMemberContextWindow(get().messages, conversationId, member.id, conversation.type),
           });
 
           return buildMessage({
@@ -378,6 +410,50 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const docs = await listMemberDocuments(member.kbStoreName);
+    set((state) => ({
+      memberDocuments: {
+        ...state.memberDocuments,
+        [memberId]: docs,
+      },
+    }));
+  },
+
+  hydrateMemberDocuments: async () => {
+    const membersWithStore = get().members.filter((member) => member.status !== 'archived' && member.kbStoreName);
+    if (membersWithStore.length === 0) {
+      return;
+    }
+
+    const results = await Promise.all(
+      membersWithStore.map(async (member) => {
+        try {
+          const docs = await listMemberDocuments(member.kbStoreName as string);
+          return { memberId: member.id, docs };
+        } catch {
+          return { memberId: member.id, docs: [] as Array<{ name?: string; displayName?: string }> };
+        }
+      })
+    );
+
+    set((state) => ({
+      memberDocuments: {
+        ...state.memberDocuments,
+        ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
+      },
+    }));
+  },
+
+  deleteDocForMember: async (memberId, documentName) => {
+    const member = get().members.find((item) => item.id === memberId);
+    if (!member?.kbStoreName || !documentName) {
+      return;
+    }
+
+    const docs = await deleteMemberDocument({
+      storeName: member.kbStoreName,
+      documentName,
+    });
+
     set((state) => ({
       memberDocuments: {
         ...state.memberDocuments,

@@ -1,26 +1,42 @@
 # Dependencies
 node_modules/
 
-# Environment and secrets
-.env
-.env.local
-.env.*.local
-
-# Runtime state
-.state/
-
 # Build outputs
 dist/
 frontend-dist/
 dev-dist/
+coverage/
+
+# TypeScript / tooling caches
+*.tsbuildinfo
+.vite/
+.cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
 
 # Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
 
-# OS / editor
+# macOS
 .DS_Store
+
+# Editors
 .vscode/
 .idea/
+
+# Runtime / temp
+*.pid
+*.seed
+*.pid.lock
+.tmp/
+tmp/
+
+# Project local state
+.state/

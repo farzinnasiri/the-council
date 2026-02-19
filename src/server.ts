@@ -307,15 +307,27 @@ app.post('/api/member-kb/upload', upload.array('documents'), async (req, res) =>
       displayName: `council-${sanitizeLabel(memberName)}-${memberId.slice(0, 6)}`,
     });
 
+    const existing = await bot.listDocumentsFromStore(ensured.storeName);
+    const existingNames = new Set(
+      existing
+        .map((doc) => (doc.displayName ?? '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+
     await Promise.all(
-      files.map((file) =>
-        bot.uploadDocumentToStore(ensured.storeName, file.path, {
+      files.map(async (file) => {
+        const normalizedName = file.originalname.trim().toLowerCase();
+        if (normalizedName && existingNames.has(normalizedName)) {
+          return;
+        }
+
+        await bot.uploadDocumentToStore(ensured.storeName, file.path, {
           displayName: file.originalname,
           mimeType: file.mimetype || undefined,
           maxTokensPerChunk: 500,
           maxOverlapTokens: 50,
-        })
-      )
+        });
+      })
     );
 
     const documents = await bot.listDocumentsFromStore(ensured.storeName);
@@ -348,6 +360,29 @@ app.get('/api/member-kb/documents', async (req, res) => {
   }
 });
 
+app.post('/api/member-kb/document/delete', async (req, res) => {
+  const documentName = typeof req.body?.documentName === 'string' ? req.body.documentName.trim() : '';
+  const storeName = typeof req.body?.storeName === 'string' ? req.body.storeName.trim() : '';
+
+  if (!documentName) {
+    res.status(400).json({ error: 'documentName is required' });
+    return;
+  }
+
+  try {
+    await bot.deleteDocumentByName(documentName, true);
+    if (storeName) {
+      const documents = await bot.listDocumentsFromStore(storeName);
+      res.json({ ok: true, documents });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Delete failed';
+    res.status(500).json({ error: message });
+  }
+});
+
 app.post('/api/member-chat', async (req, res) => {
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
   const memberId = typeof req.body?.memberId === 'string' ? req.body.memberId : '';
@@ -356,6 +391,18 @@ app.post('/api/member-chat', async (req, res) => {
   const storeName = typeof req.body?.storeName === 'string' && req.body.storeName.trim() ? req.body.storeName : null;
   const chatModel = typeof req.body?.chatModel === 'string' ? req.body.chatModel : undefined;
   const retrievalModel = typeof req.body?.retrievalModel === 'string' ? req.body.retrievalModel : undefined;
+  const contextMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  if (Array.isArray(req.body?.contextMessages)) {
+    for (const entry of req.body.contextMessages as unknown[]) {
+      const item = (entry ?? {}) as Record<string, unknown>;
+      const role = item.role === 'user' || item.role === 'assistant' ? item.role : null;
+      const content = typeof item.content === 'string' ? item.content.trim() : '';
+      if (role && content) {
+        contextMessages.push({ role, content });
+      }
+    }
+  }
+  const boundedContextMessages = contextMessages.slice(-12);
 
   if (!message || !memberId || !memberName || !memberSystemPrompt.trim()) {
     res.status(400).json({ error: 'message, memberId, memberName, and memberSystemPrompt are required' });
@@ -370,7 +417,7 @@ app.post('/api/member-chat', async (req, res) => {
       retrievalModel: retrievalModel ?? process.env.GEMINI_RETRIEVAL_MODEL ?? 'gemini-2.5-flash-lite',
       temperature: 0.35,
       personaPrompt: memberSystemPrompt,
-      useHistory: false,
+      contextMessages: boundedContextMessages,
     });
 
     res.json(response);

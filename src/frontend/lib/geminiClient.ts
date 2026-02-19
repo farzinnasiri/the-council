@@ -20,6 +20,37 @@ interface MemberChatResult {
   model: string;
   retrievalModel: string;
   usedKnowledgeBase: boolean;
+  debug?: {
+    traceId: string;
+    mode: 'with-kb' | 'prompt-only';
+    reason?: string;
+    kbCheck?: {
+      requestedStoreName: string | null;
+      docsCount: number;
+      listError?: string;
+      fileSearchInvoked: boolean;
+      gateDecision?: {
+        mode: 'heuristic' | 'llm-gate';
+        useKnowledgeBase: boolean;
+        reason: string;
+      };
+    };
+    fileSearchStart?: {
+      storeName: string;
+      retrievalModel: string;
+      query: string;
+      metadataFilter?: string;
+    };
+    fileSearchResponse?: {
+      grounded: boolean;
+      citationsCount: number;
+      snippetsCount: number;
+      retrievalText: string;
+      citations: Array<{ title: string; uri?: string }>;
+      snippets: string[];
+    };
+    answerPrompt: string;
+  };
 }
 
 const baseHeaders = { 'Content-Type': 'application/json' };
@@ -93,11 +124,25 @@ export async function listMemberDocuments(storeName: string): Promise<Array<{ na
   return body.documents;
 }
 
+export async function deleteMemberDocument(input: {
+  storeName: string;
+  documentName: string;
+}): Promise<Array<{ name?: string; displayName?: string }>> {
+  const response = await fetch('/api/member-kb/document/delete', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify(input),
+  });
+  const body = await parseJson<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }>(response);
+  return body.documents ?? [];
+}
+
 export async function chatWithMember(input: {
   message: string;
   member: Member;
   conversationId: string;
   storeName?: string | null;
+  contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }): Promise<MemberChatResult> {
   const response = await fetch('/api/member-chat', {
     method: 'POST',
@@ -109,8 +154,33 @@ export async function chatWithMember(input: {
       memberName: input.member.name,
       memberSystemPrompt: input.member.systemPrompt,
       storeName: input.storeName ?? null,
+      contextMessages: input.contextMessages ?? [],
     }),
   });
 
-  return parseJson<MemberChatResult>(response);
+  const result = await parseJson<MemberChatResult>(response);
+
+  if (result.debug) {
+    const trace = result.debug.traceId;
+    console.groupCollapsed(`[Council Debug][${trace}] ${input.member.name} (${result.debug.mode})`);
+    if (result.debug.kbCheck) {
+      console.log('KB Check', result.debug.kbCheck);
+      if (result.debug.kbCheck.gateDecision) {
+        console.log('KB Gate Decision', result.debug.kbCheck.gateDecision);
+      }
+    }
+    if (result.debug.fileSearchStart) {
+      console.log('File Search Request', result.debug.fileSearchStart);
+    }
+    if (result.debug.fileSearchResponse) {
+      console.log('File Search Response', result.debug.fileSearchResponse);
+    }
+    console.log('Chat Model Prompt', result.debug.answerPrompt);
+    if (result.debug.reason) {
+      console.log('Fallback Reason', result.debug.reason);
+    }
+    console.groupEnd();
+  }
+
+  return result;
 }
