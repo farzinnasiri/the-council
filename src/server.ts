@@ -1,4 +1,7 @@
 import 'dotenv/config';
+// Also load .env.local (Vite convention) so VITE_CONVEX_URL is available server-side
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local', override: false });
 import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
@@ -7,6 +10,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { GeminiRAGChatbot } from './geminiRag.js';
+import { ConvexHttpClient } from 'convex/browser';
+
+const CONVEX_URL = process.env.VITE_CONVEX_URL ?? process.env.CONVEX_URL ?? '';
+function getConvexClient(): ConvexHttpClient {
+  if (!CONVEX_URL) throw new Error('VITE_CONVEX_URL / CONVEX_URL env var not set');
+  return new ConvexHttpClient(CONVEX_URL);
+}
 
 const app = express();
 const port = Number(process.env.PORT ?? 43111);
@@ -383,12 +393,55 @@ app.post('/api/member-kb/document/delete', async (req, res) => {
   }
 });
 
+// ── Compaction endpoint ────────────────────────────────────────────────────────
+
+app.post('/api/compact', async (req, res) => {
+  const conversationId = typeof req.body?.conversationId === 'string' ? req.body.conversationId.trim() : '';
+  const previousSummary = typeof req.body?.previousSummary === 'string' ? req.body.previousSummary.trim() : undefined;
+  const messageIdsRaw: unknown[] = Array.isArray(req.body?.messageIds) ? req.body.messageIds : [];
+  const messageIds = messageIdsRaw.filter((id): id is string => typeof id === 'string');
+
+  const contextMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  if (Array.isArray(req.body?.messages)) {
+    for (const entry of req.body.messages as unknown[]) {
+      const item = (entry ?? {}) as Record<string, unknown>;
+      const role = item.role === 'user' || item.role === 'assistant' ? item.role : null;
+      const content = typeof item.content === 'string' ? item.content.trim() : '';
+      if (role && content) contextMessages.push({ role, content });
+    }
+  }
+
+  if (!conversationId || contextMessages.length === 0 || messageIds.length === 0) {
+    res.status(400).json({ error: 'conversationId, messages, and messageIds are required' });
+    return;
+  }
+
+  try {
+    const summary = await bot.summarizeMessages({ messages: contextMessages, previousSummary });
+
+    const convex = getConvexClient();
+    // Use string-based mutation path to avoid importing the generated API module
+    // (which uses Bundler module resolution incompatible with this tsconfig's NodeNext).
+    await (convex as any).mutation('conversations:applyCompaction', {
+      conversationId,
+      summary,
+      compactedMessageIds: messageIds,
+    });
+
+    res.json({ summary });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Compaction failed';
+    res.status(500).json({ error: message });
+  }
+});
+
 app.post('/api/member-chat', async (req, res) => {
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
   const memberId = typeof req.body?.memberId === 'string' ? req.body.memberId : '';
   const memberName = typeof req.body?.memberName === 'string' ? req.body.memberName : '';
   const memberSystemPrompt = typeof req.body?.memberSystemPrompt === 'string' ? req.body.memberSystemPrompt : '';
   const storeName = typeof req.body?.storeName === 'string' && req.body.storeName.trim() ? req.body.storeName : null;
+  const previousSummary = typeof req.body?.previousSummary === 'string' && req.body.previousSummary.trim() ? req.body.previousSummary : null;
   const chatModel = typeof req.body?.chatModel === 'string' ? req.body.chatModel : undefined;
   const retrievalModel = typeof req.body?.retrievalModel === 'string' ? req.body.retrievalModel : undefined;
   const contextMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -404,6 +457,12 @@ app.post('/api/member-chat', async (req, res) => {
   }
   const boundedContextMessages = contextMessages.slice(-12);
 
+  // Prepend system prompt; if there's a rolling summary, inject it after the persona
+  const summaryBlock = previousSummary
+    ? `\n\n---\nConversation summary so far:\n${previousSummary}\n---`
+    : '';
+  const effectiveSystemPrompt = memberSystemPrompt + summaryBlock;
+
   if (!message || !memberId || !memberName || !memberSystemPrompt.trim()) {
     res.status(400).json({ error: 'message, memberId, memberName, and memberSystemPrompt are required' });
     return;
@@ -416,7 +475,7 @@ app.post('/api/member-chat', async (req, res) => {
       responseModel: chatModel ?? process.env.GEMINI_CHAT_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-3-flash-preview',
       retrievalModel: retrievalModel ?? process.env.GEMINI_RETRIEVAL_MODEL ?? 'gemini-2.5-flash-lite',
       temperature: 0.35,
-      personaPrompt: memberSystemPrompt,
+      personaPrompt: effectiveSystemPrompt,
       contextMessages: boundedContextMessages,
     });
 

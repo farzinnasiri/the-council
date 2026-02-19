@@ -10,5 +10,12 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src/server.ts", "src/geminiRag.ts"]
+  "include": [
+    "src/server.ts",
+    "src/geminiRag.ts"
+  ],
+  "exclude": [
+    "convex",
+    "node_modules"
+  ]
 }

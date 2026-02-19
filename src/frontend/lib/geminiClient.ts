@@ -137,11 +137,26 @@ export async function deleteMemberDocument(input: {
   return body.documents ?? [];
 }
 
+export async function compactConversation(input: {
+  conversationId: string;
+  previousSummary?: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  messageIds: string[];
+}): Promise<{ summary: string }> {
+  const response = await fetch('/api/compact', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify(input),
+  });
+  return parseJson<{ summary: string }>(response);
+}
+
 export async function chatWithMember(input: {
   message: string;
   member: Member;
   conversationId: string;
   storeName?: string | null;
+  previousSummary?: string;
   contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }): Promise<MemberChatResult> {
   const response = await fetch('/api/member-chat', {
@@ -154,6 +169,7 @@ export async function chatWithMember(input: {
       memberName: input.member.name,
       memberSystemPrompt: input.member.systemPrompt,
       storeName: input.storeName ?? null,
+      previousSummary: input.previousSummary ?? null,
       contextMessages: input.contextMessages ?? [],
     }),
   });

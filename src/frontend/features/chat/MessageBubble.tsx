@@ -7,21 +7,27 @@ import { Button } from '../../components/ui/button';
 import { RoutePill } from './RoutePill';
 import { MarkdownMessage } from './MarkdownMessage';
 
+/** Format epoch ms → "HH:MM" */
+function formatClock(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const members = useAppStore((state) => state.members);
   const conversations = useAppStore((state) => state.conversations);
 
-  if (message.senderType === 'system') {
-    return <RoutePill memberIds={message.routeMemberIds ?? []} />;
+  if (message.role === 'system') {
+    return <RoutePill memberIds={message.routing?.memberIds ?? []} />;
   }
 
-  const isUser = message.senderType === 'user';
+  const isUser = message.role === 'user';
   const member = message.memberId ? members.find((item) => item.id === message.memberId) : null;
   const avatar = member?.emoji ?? '🧠';
   const label = member?.name ?? 'Council Member';
   const conversation = conversations.find((item) => item.id === message.conversationId);
   const isChamber = conversation?.type === 'chamber';
+  const timeLabel = formatClock(message.createdAt);
 
   const copyContent = async () => {
     try {
@@ -44,9 +50,8 @@ export function MessageBubble({ message }: { message: Message }) {
       <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
         {!isUser ? <p className="px-1 pb-1.5 text-xs font-semibold text-muted-foreground">{label}</p> : null}
         <div
-          className={`rounded-3xl border px-4 py-3 text-sm leading-relaxed shadow-sm ${
-            isUser ? 'rounded-br-md border-primary/20 bg-primary/15' : 'rounded-bl-md border-border bg-card'
-          } ${message.status === 'error' ? 'border-destructive/50' : ''}`}
+          className={`rounded-3xl border px-4 py-3 text-sm leading-relaxed shadow-sm ${isUser ? 'rounded-br-md border-primary/20 bg-primary/15' : 'rounded-bl-md border-border bg-card'
+            } ${message.status === 'error' ? 'border-destructive/50' : ''}`}
         >
           <MarkdownMessage content={message.content} />
 
@@ -85,7 +90,7 @@ export function MessageBubble({ message }: { message: Message }) {
                   </Button>
                 </div>
               )}
-              <span className="text-[11px] text-muted-foreground">{message.timestamp}</span>
+              <span className="text-[11px] text-muted-foreground">{timeLabel}</span>
             </div>
           ) : (
             <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-2">
@@ -101,7 +106,7 @@ export function MessageBubble({ message }: { message: Message }) {
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
-              <span className="text-[11px] text-muted-foreground">{message.timestamp}</span>
+              <span className="text-[11px] text-muted-foreground">{timeLabel}</span>
             </div>
           )}
         </div>

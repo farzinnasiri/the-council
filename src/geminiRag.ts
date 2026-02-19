@@ -250,6 +250,42 @@ export class GeminiRAGChatbot {
     };
   }
 
+  /** Rolling summarisation for the SummaryBuffer compaction pattern.
+   *  Combines previous summary + new message batch → one compact summary. */
+  async summarizeMessages(options: {
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    previousSummary?: string;
+    model?: string;
+  }): Promise<string> {
+    const model = options.model ?? process.env.GEMINI_ROUTER_MODEL ?? 'gemini-2.5-flash-lite';
+
+    const historyBlock = options.messages
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
+
+    const previousBlock = options.previousSummary
+      ? `Previous summary:\n${options.previousSummary}\n\n`
+      : '';
+
+    const prompt = [
+      'You are a conversation summariser. Your job is to produce a concise, dense summary of the conversation below.',
+      'The summary will be passed as context to an AI on future turns — keep all key facts, decisions and conclusions.',
+      'Write in third person. Be factual, not conversational.',
+      '',
+      previousBlock + `Recent messages:\n${historyBlock}`,
+      '',
+      'Write the updated summary now:',
+    ].join('\n');
+
+    const response = await this.ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { temperature: 0.1 },
+    });
+
+    return ((response.text ?? '').trim() || options.previousSummary) ?? '';
+  }
+
   async chat(
     query: string,
     options: {
@@ -338,7 +374,7 @@ export class GeminiRAGChatbot {
       };
     }
 
-    const gateHeuristic = this.heuristicKnowledgeGate(options.query);
+    const gateHeuristic = this.heuristicKnowledgeGate(options.query, { hasDocs: docs.length > 0 });
     let gateDecision = gateHeuristic;
     if (gateHeuristic.mode === 'ambiguous') {
       gateDecision = await this.llmKnowledgeGate({
@@ -383,6 +419,7 @@ export class GeminiRAGChatbot {
       };
     }
 
+
     const grounded = await this.chatWithStore({
       query: options.query,
       storeName: options.storeName,
@@ -410,7 +447,7 @@ export class GeminiRAGChatbot {
           listError: storeProbe.error,
           fileSearchInvoked: true,
           gateDecision: {
-            mode: gateDecision.mode === 'ambiguous' ? 'llm-gate' : 'heuristic',
+            mode: 'heuristic',
             useKnowledgeBase: true,
             reason: gateDecision.reason,
           },
@@ -559,7 +596,9 @@ export class GeminiRAGChatbot {
     });
 
     if (!grounded) {
-      return this.chatPromptOnly({
+      // No grounding chunks returned — fall back to prompt-only but preserve
+      // fileSearch debug fields so we can diagnose what the retrieval returned.
+      const promptOnly = await this.chatPromptOnly({
         query: options.query,
         responseModel: options.responseModel,
         temperature: options.temperature,
@@ -568,6 +607,26 @@ export class GeminiRAGChatbot {
         traceId,
         reason: 'no-grounded-evidence',
       });
+      return {
+        ...promptOnly,
+        debug: {
+          ...promptOnly.debug!,
+          fileSearchStart: {
+            storeName: options.storeName,
+            retrievalModel: options.retrievalModel,
+            query: options.query,
+            metadataFilter: options.metadataFilter,
+          },
+          fileSearchResponse: {
+            grounded: false,
+            citationsCount: 0,
+            snippetsCount: 0,
+            retrievalText,
+            citations: [],
+            snippets: [],
+          },
+        },
+      };
     }
 
     const evidenceBlocks: string[] = [];
@@ -739,7 +798,10 @@ export class GeminiRAGChatbot {
     console.log(`[${timestamp}] [GeminiRAG] ${event}`, payload);
   }
 
-  private heuristicKnowledgeGate(query: string): {
+  private heuristicKnowledgeGate(
+    query: string,
+    { hasDocs = false }: { hasDocs?: boolean } = {}
+  ): {
     mode: 'heuristic' | 'ambiguous';
     useKnowledgeBase: boolean;
     reason: string;
@@ -747,16 +809,19 @@ export class GeminiRAGChatbot {
     const text = query.trim().toLowerCase();
     const tokenCount = text.split(/\s+/).filter(Boolean).length;
 
+    // Always skip KB for pure small-talk regardless of docs
     const smallTalkPattern =
       /^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|great|good morning|good evening)[!.?]*$/i;
     if (smallTalkPattern.test(text)) {
       return { mode: 'heuristic', useKnowledgeBase: false, reason: 'small-talk' };
     }
 
+    // Very short pings (≤3 tokens) skip KB
     if (tokenCount <= 3) {
       return { mode: 'heuristic', useKnowledgeBase: false, reason: 'very-short-query' };
     }
 
+    // Explicit grounding signals always use KB
     const groundingSignals = [
       'according to',
       'from the document',
@@ -774,6 +839,13 @@ export class GeminiRAGChatbot {
       return { mode: 'heuristic', useKnowledgeBase: true, reason: 'explicit-grounding-signal' };
     }
 
+    // When this member has uploaded documents, prefer KB for any substantive
+    // question (4+ tokens). Users upload docs specifically to have them consulted.
+    if (hasDocs && tokenCount >= 4) {
+      return { mode: 'heuristic', useKnowledgeBase: true, reason: 'member-has-docs-substantive-query' };
+    }
+
+    // Without docs: send longer/question queries to LLM gate
     const hasQuestionMark = text.includes('?');
     if (tokenCount >= 18 || hasQuestionMark) {
       return { mode: 'ambiguous', useKnowledgeBase: false, reason: 'needs-llm-gate' };

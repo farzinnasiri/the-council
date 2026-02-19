@@ -1,9 +1,25 @@
 import { create } from 'zustand';
-import type { Conversation, ConversationType, Member, Message, ThemeMode } from '../types/domain';
-import { councilRepository } from '../repository/IndexedDbCouncilRepository';
-import { formatClock, nowIso } from '../lib/time';
-import { chatWithMember, routeHallMembers, uploadMemberDocuments, listMemberDocuments, deleteMemberDocument } from '../lib/geminiClient';
+import type {
+  Conversation,
+  ConversationType,
+  Member,
+  Message,
+  MessageRole,
+  MessageRouting,
+  ThemeMode,
+} from '../types/domain';
+import { convexRepository as councilRepository } from '../repository/ConvexCouncilRepository';
+import {
+  chatWithMember,
+  compactConversation,
+  routeHallMembers,
+  uploadMemberDocuments,
+  listMemberDocuments,
+  deleteMemberDocument,
+} from '../lib/geminiClient';
 import { routeToMembers } from '../lib/mockRouting';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface CreateMemberPayload {
   name: string;
@@ -23,8 +39,10 @@ interface AppState {
   selectedConversationId: string;
   pendingReplyCount: Record<string, number>;
   memberDocuments: Record<string, Array<{ name?: string; displayName?: string }>>;
+
   initializeApp: () => Promise<void>;
   selectConversation: (conversationId: string) => void;
+  loadMessages: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
   createChamberForMember: (memberId: string) => Promise<Conversation>;
   sendUserMessage: (conversationId: string, text: string) => Promise<void>;
@@ -40,21 +58,38 @@ interface AppState {
   deleteDocForMember: (memberId: string, documentName: string) => Promise<void>;
 }
 
-function buildMessage(message: Omit<Message, 'id' | 'timestamp' | 'createdAt'>): Message {
-  const createdAt = nowIso();
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+
+function buildMessage(input: BuildMessageInput): Message {
   return {
-    ...message,
+    ...input,
     id: `${Date.now()}-${crypto.randomUUID().slice(0, 6)}`,
-    createdAt,
-    timestamp: formatClock(createdAt),
+    compacted: false,
+    createdAt: Date.now(),
   };
 }
 
-function updateConversationStamp(conversations: Conversation[], conversationId: string): Conversation[] {
-  const updatedAt = nowIso();
-  return conversations.map((item) => (item.id === conversationId ? { ...item, updatedAt } : item));
+/** Get the display name for a member from the members map */
+function getMemberName(membersMap: Map<string, Member>, memberId: string): string {
+  return membersMap.get(memberId)?.name ?? memberId;
 }
 
+function updateConversationStamp(
+  conversations: Conversation[],
+  conversationId: string
+): Conversation[] {
+  const now = Date.now();
+  return conversations.map((item) =>
+    item.id === conversationId ? { ...item, updatedAt: now } : item
+  );
+}
+
+/** Build the context window for one member's LLM call.
+ * - Excludes compacted messages (they're represented by the rolling summary).
+ * - Returns at most 12 messages (6 rounds of back-and-forth per member).
+ */
 function buildMemberContextWindow(
   messages: Message[],
   conversationId: string,
@@ -62,24 +97,57 @@ function buildMemberContextWindow(
   conversationType: Conversation['type']
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
   return messages
-    .filter((message) => {
-      if (message.conversationId !== conversationId) return false;
-      if (message.senderType === 'system') return false;
-      if (message.senderType === 'user') return true;
-      if (message.senderType === 'member') {
-        if (conversationType === 'chamber') {
-          return true;
-        }
-        return message.memberId === memberId;
+    .filter((msg) => {
+      if (msg.conversationId !== conversationId) return false;
+      if (msg.compacted) return false;           // ← skip compacted rows
+      if (msg.role === 'system') return false;
+      if (msg.role === 'user') return true;
+      if (msg.role === 'member') {
+        if (conversationType === 'chamber') return true;
+        return msg.memberId === memberId;
       }
       return false;
     })
     .slice(-12)
-    .map((message) => ({
-      role: message.senderType === 'user' ? 'user' : 'assistant',
-      content: message.content,
+    .map((msg) => ({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content,
     }));
 }
+
+const COMPACTION_THRESHOLD = 20; // active messages before triggering compaction
+
+/** Fire-and-forget compaction: summarise oldest active messages, store result in Convex. */
+async function maybeCompact(
+  conversationId: string,
+  messages: Message[],
+  conversation: Conversation
+): Promise<void> {
+  const active = messages.filter(
+    (m) => m.conversationId === conversationId && !m.compacted && m.role !== 'system'
+  );
+  if (active.length < COMPACTION_THRESHOLD) return;
+
+  // Compact the oldest half of active messages
+  const toCompact = active.slice(0, Math.floor(active.length / 2));
+  const contextMsgs = toCompact.map((m) => ({
+    role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+    content: m.content,
+  }));
+
+  try {
+    await compactConversation({
+      conversationId,
+      previousSummary: conversation.summary,
+      messages: contextMsgs,
+      messageIds: toCompact.map((m) => m.id),
+    });
+  } catch (err) {
+    console.warn('[compaction] failed, will retry next round:', err);
+  }
+}
+
+// ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useAppStore = create<AppState>((set, get) => ({
   hydrated: false,
@@ -95,36 +163,58 @@ export const useAppStore = create<AppState>((set, get) => ({
   initializeApp: async () => {
     await councilRepository.init();
     const snapshot = await councilRepository.getSnapshot();
-    const firstHall = snapshot.conversations.find((item) => item.type === 'hall');
+
+    // Sort conversations newest-first
+    const conversations = snapshot.conversations.sort((a, b) => b.updatedAt - a.updatedAt);
+    const firstHall = conversations.find((item) => item.type === 'hall');
 
     set({
       hydrated: true,
       themeMode: snapshot.themeMode,
       members: snapshot.members,
-      conversations: snapshot.conversations,
-      messages: snapshot.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-      selectedConversationId: firstHall?.id ?? snapshot.conversations[0]?.id ?? '',
+      conversations,
+      selectedConversationId: firstHall?.id ?? conversations[0]?.id ?? '',
     });
 
-    // Fire-and-forget preload so KB doc counts survive page refresh.
+    // Load messages for the initially-selected conversation
+    const initialId = firstHall?.id ?? conversations[0]?.id;
+    if (initialId) {
+      await get().loadMessages(initialId);
+    }
+
+    // Fire-and-forget preload so KB doc counts survive page refresh
     void get().hydrateMemberDocuments();
   },
 
   selectConversation: (conversationId) => {
     set({ selectedConversationId: conversationId });
+    // Load messages for the newly selected conversation if not yet loaded
+    const already = get().messages.some((m) => m.conversationId === conversationId);
+    if (!already) {
+      void get().loadMessages(conversationId);
+    }
+  },
+
+  loadMessages: async (conversationId) => {
+    const msgs = await councilRepository.listMessages(conversationId);
+    set((state) => ({
+      messages: [
+        ...state.messages.filter((m) => m.conversationId !== conversationId),
+        ...msgs.sort((a, b) => a.createdAt - b.createdAt),
+      ],
+    }));
   },
 
   createConversation: async (type) => {
     const state = get();
-    const activeMembers = state.members.filter((member) => member.status === 'active');
-    const seedMembers = activeMembers.slice(0, type === 'hall' ? 2 : 1).map((member) => member.id);
+    const activeMembers = state.members.filter((m) => m.status === 'active');
+    const seedMemberIds = activeMembers.slice(0, type === 'hall' ? 2 : 1).map((m) => m.id);
     const title = type === 'hall' ? 'New Hall' : 'New Chamber';
 
     const created = await councilRepository.createConversation({
       type,
       title,
-      memberIds: seedMembers,
-      memberId: type === 'chamber' ? seedMembers[0] : undefined,
+      memberIds: seedMemberIds,
     });
 
     set((current) => ({
@@ -137,15 +227,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createChamberForMember: async (memberId) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member) {
-      throw new Error('Member not found');
-    }
+    if (!member) throw new Error('Member not found');
 
     const created = await councilRepository.createConversation({
       type: 'chamber',
       title: `Chamber · ${member.name}`,
       memberIds: [member.id],
-      memberId: member.id,
     });
 
     set((current) => ({
@@ -159,7 +246,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sendUserMessage: async (conversationId, text) => {
     const message = buildMessage({
       conversationId,
-      senderType: 'user',
+      role: 'user',
       content: text,
       status: 'sent',
     });
@@ -169,30 +256,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       conversations: updateConversationStamp(state.conversations, conversationId),
     }));
 
-    await Promise.all([
-      councilRepository.appendMessages(conversationId, [message]),
-      councilRepository.updateConversation(conversationId, { updatedAt: nowIso() }),
-    ]);
+    await councilRepository.appendMessages({
+      conversationId,
+      messages: [message],
+    });
   },
 
   generateDeterministicReplies: async (conversationId, text) => {
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
-    if (!conversation) {
-      return;
-    }
+    if (!conversation) return;
 
-    const membersMap = new Map(state.members.map((member) => [member.id, member]));
+    const membersMap = new Map(state.members.map((m) => [m.id, m]));
 
     let memberIds: string[] = [];
-    let routingSource: Message['routingSource'] = 'chamber-fixed';
+    let routingSource: MessageRouting['source'] = 'chamber-fixed';
 
     if (conversation.type === 'chamber') {
-      memberIds = conversation.memberId ? [conversation.memberId] : conversation.memberIds.slice(0, 1);
+      // Chamber: always reply from the first member
+      memberIds = conversation.memberIds.slice(0, 1);
     } else {
+      // Hall: route to relevant members
       const candidates = conversation.memberIds
         .map((id) => membersMap.get(id))
-        .filter((member): member is Member => Boolean(member) && member.status === 'active');
+        .filter((m): m is Member => Boolean(m) && m.status === 'active');
 
       if (candidates.length > 0) {
         set({ isRouting: true });
@@ -200,18 +287,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           const routed = await routeHallMembers({
             message: text,
             conversationId,
-            candidates: candidates.map((candidate) => ({
-              id: candidate.id,
-              name: candidate.name,
-              specialties: candidate.specialties,
-              systemPrompt: candidate.systemPrompt,
+            candidates: candidates.map((c) => ({
+              id: c.id,
+              name: c.name,
+              specialties: c.specialties,
+              systemPrompt: c.systemPrompt,
             })),
             maxSelections: 3,
           });
           memberIds = routed.chosenMemberIds;
           routingSource = routed.source;
         } catch {
-          memberIds = routeToMembers(text, conversation).filter((id) => candidates.some((item) => item.id === id));
+          memberIds = routeToMembers(text, conversation).filter((id) =>
+            candidates.some((c) => c.id === id)
+          );
           routingSource = 'fallback';
         } finally {
           set({ isRouting: false });
@@ -223,32 +312,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         routingSource = 'fallback';
       }
 
+      // Post a system routing message
       const routeMessage = buildMessage({
         conversationId,
-        senderType: 'system',
-        content: `Routed to ${memberIds
-          .map((id) => membersMap.get(id)?.name ?? id)
-          .join(', ')}`,
-        routeMemberIds: memberIds,
-        routingSource,
+        role: 'system',
+        content: `Routed to ${memberIds.map((id) => getMemberName(membersMap, id)).join(', ')}`,
         status: 'sent',
+        routing: { memberIds, source: routingSource },
       });
 
-      set((current) => ({
-        messages: [...current.messages, routeMessage],
-      }));
-      await councilRepository.appendMessages(conversationId, [routeMessage]);
+      set((current) => ({ messages: [...current.messages, routeMessage] }));
+      await councilRepository.appendMessages({ conversationId, messages: [routeMessage] });
     }
 
-    if (memberIds.length === 0) {
-      return;
-    }
+    if (memberIds.length === 0) return;
 
     set((current) => ({
-      pendingReplyCount: {
-        ...current.pendingReplyCount,
-        [conversationId]: memberIds.length,
-      },
+      pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: memberIds.length },
     }));
 
     const replies = await Promise.all(
@@ -257,12 +337,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (!member) {
           return buildMessage({
             conversationId,
-            senderType: 'member',
+            role: 'member',
             memberId,
             content: 'Member unavailable.',
             status: 'error',
-            error: 'Member unavailable',
-            meta: { canReply: true, canDM: true },
+            error: 'Member not found',
           });
         }
 
@@ -272,29 +351,30 @@ export const useAppStore = create<AppState>((set, get) => ({
             member,
             conversationId,
             storeName: member.kbStoreName,
-            contextMessages: buildMemberContextWindow(get().messages, conversationId, member.id, conversation.type),
+            previousSummary: conversation.summary,
+            contextMessages: buildMemberContextWindow(
+              get().messages,
+              conversationId,
+              member.id,
+              conversation.type
+            ),
           });
 
           return buildMessage({
             conversationId,
-            senderType: 'member',
+            role: 'member',
             memberId,
-            senderName: member.name,
             content: result.answer,
             status: 'sent',
-            meta: { canReply: true, canDM: true },
           });
         } catch (error) {
-          const errorText = error instanceof Error ? error.message : 'Request failed';
           return buildMessage({
             conversationId,
-            senderType: 'member',
+            role: 'member',
             memberId,
-            senderName: member.name,
             content: 'Could not generate a response right now.',
             status: 'error',
-            error: errorText,
-            meta: { canReply: true, canDM: true },
+            error: error instanceof Error ? error.message : 'Request failed',
           });
         }
       })
@@ -303,31 +383,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((current) => ({
       messages: [...current.messages, ...replies],
       conversations: updateConversationStamp(current.conversations, conversationId),
-      pendingReplyCount: {
-        ...current.pendingReplyCount,
-        [conversationId]: 0,
-      },
+      pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
     }));
 
-    await Promise.all([
-      councilRepository.appendMessages(conversationId, replies),
-      councilRepository.updateConversation(conversationId, { updatedAt: nowIso() }),
-    ]);
+    await councilRepository.appendMessages({ conversationId, messages: replies });
+
+    // Fire-and-forget compaction — runs after the round is fully persisted
+    void maybeCompact(conversationId, get().messages, conversation);
   },
 
   addMemberToConversation: async (conversationId, memberId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.memberIds.includes(memberId)) {
-      return;
-    }
+    if (!conversation || conversation.memberIds.includes(memberId)) return;
 
     const updated = await councilRepository.updateConversation(conversationId, {
       memberIds: [...conversation.memberIds, memberId],
-      updatedAt: nowIso(),
     });
 
     set((state) => ({
-      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      conversations: state.conversations.map((item) =>
+        item.id === conversationId ? updated : item
+      ),
     }));
   },
 
@@ -345,7 +421,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateMember: async (memberId, patch) => {
     const updated = await councilRepository.updateMember(memberId, patch);
     set((state) => ({
-      members: state.members.map((member) => (member.id === memberId ? updated : member)),
+      members: state.members.map((m) => (m.id === memberId ? updated : m)),
     }));
     return updated;
   },
@@ -353,23 +429,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   archiveMember: async (memberId) => {
     await councilRepository.archiveMember(memberId);
     set((state) => ({
-      members: state.members.map((member) =>
-        member.id === memberId
-          ? {
-              ...member,
-              status: 'archived',
-              updatedAt: nowIso(),
-            }
-          : member
+      members: state.members.map((m) =>
+        m.id === memberId ? { ...m, status: 'archived', updatedAt: Date.now() } : m
       ),
     }));
   },
 
   uploadDocsForMember: async (memberId, files) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member || files.length === 0) {
-      return;
-    }
+    if (!member || files.length === 0) return;
 
     const response = await uploadMemberDocuments({
       memberId: member.id,
@@ -383,51 +451,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       members: state.members.map((item) =>
         item.id === memberId
-          ? {
-              ...item,
-              kbStoreName: response.storeName,
-              updatedAt: nowIso(),
-            }
+          ? { ...item, kbStoreName: response.storeName, updatedAt: Date.now() }
           : item
       ),
-      memberDocuments: {
-        ...state.memberDocuments,
-        [memberId]: response.documents,
-      },
+      memberDocuments: { ...state.memberDocuments, [memberId]: response.documents },
     }));
   },
 
   fetchDocsForMember: async (memberId) => {
     const member = get().members.find((item) => item.id === memberId);
     if (!member?.kbStoreName) {
-      set((state) => ({
-        memberDocuments: {
-          ...state.memberDocuments,
-          [memberId]: [],
-        },
-      }));
+      set((state) => ({ memberDocuments: { ...state.memberDocuments, [memberId]: [] } }));
       return;
     }
-
     const docs = await listMemberDocuments(member.kbStoreName);
-    set((state) => ({
-      memberDocuments: {
-        ...state.memberDocuments,
-        [memberId]: docs,
-      },
-    }));
+    set((state) => ({ memberDocuments: { ...state.memberDocuments, [memberId]: docs } }));
   },
 
   hydrateMemberDocuments: async () => {
-    const membersWithStore = get().members.filter((member) => member.status !== 'archived' && member.kbStoreName);
-    if (membersWithStore.length === 0) {
-      return;
-    }
+    const membersWithStore = get().members.filter(
+      (m) => m.status !== 'archived' && m.kbStoreName
+    );
+    if (membersWithStore.length === 0) return;
 
     const results = await Promise.all(
       membersWithStore.map(async (member) => {
         try {
-          const docs = await listMemberDocuments(member.kbStoreName as string);
+          const docs = await listMemberDocuments(member.kbStoreName!);
           return { memberId: member.id, docs };
         } catch {
           return { memberId: member.id, docs: [] as Array<{ name?: string; displayName?: string }> };
@@ -438,27 +488,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       memberDocuments: {
         ...state.memberDocuments,
-        ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
+        ...Object.fromEntries(results.map((r) => [r.memberId, r.docs])),
       },
     }));
   },
 
   deleteDocForMember: async (memberId, documentName) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member?.kbStoreName || !documentName) {
-      return;
-    }
+    if (!member?.kbStoreName || !documentName) return;
 
-    const docs = await deleteMemberDocument({
-      storeName: member.kbStoreName,
-      documentName,
-    });
-
+    const docs = await deleteMemberDocument({ storeName: member.kbStoreName, documentName });
     set((state) => ({
-      memberDocuments: {
-        ...state.memberDocuments,
-        [memberId]: docs,
-      },
+      memberDocuments: { ...state.memberDocuments, [memberId]: docs },
     }));
   },
 }));

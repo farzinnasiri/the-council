@@ -40,3 +40,5 @@ tmp/
 
 # Project local state
 .state/
+
+.env
