@@ -1,38 +1,53 @@
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type ConversationType = 'hall' | 'chamber';
+export type ConversationKind = 'hall' | 'chamber';
+export type ConversationType = ConversationKind;
 export type MessageRole = 'user' | 'member' | 'system';
-export type MessageStatus = 'pending' | 'sent' | 'error';
-export type MemberStatus = 'active' | 'archived';
-export type ConversationStatus = 'active' | 'archived';
+export type MessageStatus = 'sent' | 'error';
 export type RoutingSource = 'llm' | 'fallback' | 'chamber-fixed';
+
+export interface User {
+  id: string;
+  name?: string;
+  email?: string;
+  image?: string;
+  themeMode?: ThemeMode;
+}
 
 export interface Member {
   id: string;
   name: string;
-  emoji: string;
-  role: string;
+  avatarUrl?: string | null;
   specialties: string[];
   systemPrompt: string;
-  kbStoreName?: string;          // undefined = no KB store
-  status: MemberStatus;
-  createdAt: number;             // epoch ms (_creationTime)
-  updatedAt: number;             // epoch ms
+  kbStoreName?: string;
+  deletedAt?: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface Conversation {
   id: string;
-  type: ConversationType;
+  kind: ConversationKind;
   title: string;
-  memberIds: string[];           // Member.id references
-  status: ConversationStatus;
-  summary?: string;              // SummaryBuffer: rolling compaction summary
-  messageCount: number;
-  createdAt: number;             // epoch ms (_creationTime)
-  updatedAt: number;             // epoch ms
+  chamberMemberId?: string;
+  deletedAt?: number;
+  summary?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConversationParticipant {
+  id: string;
+  conversationId: string;
+  memberId: string;
+  status: 'active' | 'removed';
+  joinedAt: number;
+  leftAt?: number;
+  createdAt: number;
 }
 
 export interface MessageRouting {
-  memberIds: string[];           // Member.id references
+  memberIds: string[];
   source: RoutingSource;
 }
 
@@ -40,13 +55,16 @@ export interface Message {
   id: string;
   conversationId: string;
   role: MessageRole;
-  memberId?: string;             // set for role=member messages
+  authorMemberId?: string;
   content: string;
   status: MessageStatus;
   compacted: boolean;
-  routing?: MessageRouting;     // set for system routing messages
+  routing?: MessageRouting;
+  inReplyToMessageId?: string;
+  originConversationId?: string;
+  originMessageId?: string;
   error?: string;
-  createdAt: number;             // epoch ms (_creationTime)
+  createdAt: number;
 }
 
 export interface KnowledgeDocument {

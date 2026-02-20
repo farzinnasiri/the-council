@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import fs from 'node:fs';
 import path from 'node:path';
+import { hallTitleModelCandidates, MODEL_IDS, resolveModel } from './modelConfig.js';
 
 export interface ChatMessage {
   role: 'user' | 'model';
@@ -208,13 +209,17 @@ export class GeminiRAGChatbot {
     maxSelections?: number;
     model?: string;
   }): Promise<{ chosenMemberIds: string[]; model: string }> {
-    const model = options.model ?? process.env.GEMINI_ROUTER_MODEL ?? 'gemini-2.5-flash-lite';
+    const model = resolveModel('router', options.model);
     const maxSelections = Math.max(1, Math.min(options.maxSelections ?? 3, options.candidates.length));
 
     const candidateLines = options.candidates
       .map((candidate, index) => {
         const specialties = candidate.specialties?.length ? candidate.specialties.join(', ') : 'general';
-        return `${index + 1}. id=${candidate.id}; name=${candidate.name}; specialties=${specialties}`;
+        const profile = (candidate.systemPrompt ?? '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 140);
+        return `${index + 1}. id=${candidate.id}; name=${candidate.name}; specialties=${specialties}; profile=${profile || 'n/a'}`;
       })
       .join('\n');
 
@@ -222,6 +227,8 @@ export class GeminiRAGChatbot {
       'Choose the most relevant council members for the user message.',
       `Return JSON only: {"chosenMemberIds":["id1","id2"]}.`,
       `Rules: choose between 1 and ${maxSelections} IDs.`,
+      'Select all and only members who are materially relevant to the request.',
+      'Do not include members with weak or generic relevance.',
       'IDs must come from the candidate list only. No extra keys, no markdown.',
       '',
       `User message: ${options.message}`,
@@ -235,11 +242,22 @@ export class GeminiRAGChatbot {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         temperature: Number(process.env.GEMINI_ROUTER_TEMPERATURE ?? 0),
-      },
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'object',
+          required: ['chosenMemberIds'],
+          properties: {
+            chosenMemberIds: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+        },
+      } as any,
     });
 
     const text = (response.text ?? '').trim();
-    const parsed = this.parseStructuredJson<{ chosenMemberIds?: string[] }>(text);
+    const parsed = this.tryParseStructuredJson<{ chosenMemberIds?: string[] }>(text) ?? { chosenMemberIds: [] };
 
     const candidateIds = new Set(options.candidates.map((candidate) => candidate.id));
     const picked = (parsed.chosenMemberIds ?? []).filter((id, index, list) => candidateIds.has(id) && list.indexOf(id) === index);
@@ -250,6 +268,118 @@ export class GeminiRAGChatbot {
     };
   }
 
+  async suggestHallTitle(options: {
+    message: string;
+    model?: string;
+  }): Promise<{ title: string; model: string }> {
+    const fallbackTitle = this.fallbackHallTitle(options.message);
+    const candidateModels = hallTitleModelCandidates(options.model);
+
+    const prompt = [
+      'Generate a concise title for this conversation.',
+      'Requirements:',
+      '- 2 to 6 words',
+      '- Title Case',
+      '- No quotes',
+      '- No punctuation at the end',
+      '- Reflect the user intent',
+      '',
+      `User message: ${options.message}`,
+      '',
+      'Return only the title text.',
+    ].join('\n');
+
+    for (const model of candidateModels) {
+      try {
+        const response = await this.ai.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: { temperature: 0.2 },
+        });
+
+        const raw = (response.text ?? '').trim();
+        const cleaned = raw
+          .replace(/^["'`]+|["'`]+$/g, '')
+          .replace(/[.!?]+$/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (cleaned.length >= 3) {
+          return { title: cleaned.slice(0, 72), model };
+        }
+      } catch {
+        // try next candidate model
+      }
+    }
+
+    return {
+      title: fallbackTitle,
+      model: candidateModels[0] ?? 'heuristic',
+    };
+  }
+
+  async suggestMemberSpecialties(options: {
+    name: string;
+    systemPrompt: string;
+    model?: string;
+  }): Promise<{ specialties: string[]; model: string }> {
+    const fallback = this.fallbackSpecialties(options.systemPrompt);
+    const model = resolveModel('specialties', options.model);
+
+    const prompt = [
+      'Infer routing specialties from the member profile.',
+      'Return broad umbrella domains, not micro-skills.',
+      'Prefer distinct, non-overlapping specialties.',
+      'Avoid near-duplicates, synonyms, and narrow variations of the same idea.',
+      'Use concise labels (1-4 words each).',
+      'Return 5 to 7 specialties.',
+      '',
+      `Member name: ${options.name}`,
+      `Member profile: ${options.systemPrompt}`,
+      '',
+      'Output JSON only: {"specialties":["item1","item2"]}',
+    ].join('\n');
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.15,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'object',
+            required: ['specialties'],
+            properties: {
+              specialties: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        } as any,
+      });
+
+      const parsed = this.tryParseStructuredJson<{ specialties?: string[] }>((response.text ?? '').trim());
+      const cleaned = (parsed?.specialties ?? [])
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+        .map((item) => item.slice(0, 42))
+        .filter((item, index, list) => list.indexOf(item) === index)
+        .slice(0, 8);
+
+      return {
+        specialties: cleaned.length > 0 ? cleaned : fallback,
+        model,
+      };
+    } catch {
+      return {
+        specialties: fallback,
+        model,
+      };
+    }
+  }
+
   /** Rolling summarisation for the SummaryBuffer compaction pattern.
    *  Combines previous summary + new message batch → one compact summary. */
   async summarizeMessages(options: {
@@ -257,7 +387,7 @@ export class GeminiRAGChatbot {
     previousSummary?: string;
     model?: string;
   }): Promise<string> {
-    const model = options.model ?? process.env.GEMINI_ROUTER_MODEL ?? 'gemini-2.5-flash-lite';
+    const model = resolveModel('summary', options.model);
 
     const historyBlock = options.messages
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
@@ -331,8 +461,8 @@ export class GeminiRAGChatbot {
     contextMessages?: ContextMessage[];
   }): Promise<ChatResponse> {
     const traceId = crypto.randomUUID().slice(0, 8);
-    const responseModel = options.responseModel ?? 'gemini-3-flash-preview';
-    const retrievalModel = options.retrievalModel ?? 'gemini-2.5-flash-lite';
+    const responseModel = resolveModel('chatResponse', options.responseModel);
+    const retrievalModel = resolveModel('retrieval', options.retrievalModel);
 
     const storeProbe = options.storeName
       ? await this.safeListDocuments(options.storeName)
@@ -516,7 +646,7 @@ export class GeminiRAGChatbot {
       answer,
       citations: [],
       model: options.responseModel,
-      retrievalModel: 'gemini-2.5-flash-lite',
+      retrievalModel: MODEL_IDS.retrieval,
       grounded: false,
       debug: {
         traceId,
@@ -723,6 +853,54 @@ export class GeminiRAGChatbot {
     return JSON.parse(cleaned) as T;
   }
 
+  private tryParseStructuredJson<T>(raw: string): T | null {
+    try {
+      return this.parseStructuredJson<T>(raw);
+    } catch {
+      try {
+        const match = raw.match(/\{[\s\S]*\}/);
+        return match ? this.parseStructuredJson<T>(match[0]) : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  private fallbackSpecialties(systemPrompt: string): string[] {
+    const lower = systemPrompt.toLowerCase();
+    const seed = [
+      ['music', 'music production'],
+      ['startup', 'startups'],
+      ['founder', 'founder strategy'],
+      ['marketing', 'marketing'],
+      ['sales', 'sales'],
+      ['engineering', 'engineering'],
+      ['product', 'product strategy'],
+      ['finance', 'finance'],
+      ['investment', 'investing'],
+      ['fitness', 'fitness'],
+      ['leadership', 'leadership'],
+    ]
+      .filter(([keyword]) => lower.includes(keyword))
+      .map(([, specialty]) => specialty);
+
+    return (seed.length > 0 ? seed : ['strategy', 'execution', 'decision making']).slice(0, 6);
+  }
+
+  private fallbackHallTitle(message: string): string {
+    const normalized = message
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[^\p{L}\p{N}\s-]/gu, '');
+
+    if (!normalized) return 'New Hall';
+    const words = normalized.split(' ').filter(Boolean).slice(0, 6);
+    const title = words
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+    return title || 'New Hall';
+  }
+
   private extractGroundedEvidence(groundingMetadata: any): { citations: Citation[]; snippets: string[] } {
     if (!groundingMetadata?.groundingChunks) {
       return { citations: [], snippets: [] };
@@ -858,7 +1036,7 @@ export class GeminiRAGChatbot {
     query: string;
     candidatesHint: string[];
   }): Promise<{ mode: 'ambiguous'; useKnowledgeBase: boolean; reason: string }> {
-    const model = process.env.GEMINI_KB_GATE_MODEL ?? 'gemma-3-12b-it';
+    const model = MODEL_IDS.kbGate;
     const prompt = [
       'Decide if this user message needs retrieval grounding from a knowledge base.',
       'Return JSON only: {"useKnowledgeBase":true|false,"reason":"short-reason"}',

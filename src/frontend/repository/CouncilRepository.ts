@@ -1,82 +1,75 @@
 import type {
   Conversation,
+  ConversationParticipant,
   Member,
   Message,
   ThemeMode,
 } from '../types/domain';
 
-// ── Input types ───────────────────────────────────────────────────────────────
-
 export interface CreateMemberInput {
   name: string;
   systemPrompt: string;
-  emoji?: string;
-  role?: string;
   specialties?: string[];
 }
 
 export interface UpdateMemberPatch {
   name?: string;
   systemPrompt?: string;
-  emoji?: string;
-  role?: string;
   specialties?: string[];
-  kbStoreName?: string | null;    // null = clear the KB store
-  status?: Member['status'];
+  kbStoreName?: string | null;
+  deletedAt?: number;
 }
 
-export interface CreateConversationInput {
-  type: Conversation['type'];
+export interface CreateHallInput {
   title: string;
   memberIds: string[];
 }
 
-export interface UpdateConversationPatch {
-  title?: string;
-  memberIds?: string[];
-  status?: Conversation['status'];
-}
-
 export interface AppendMessagesInput {
   conversationId: string;
-  messages: Omit<Message, 'id' | 'createdAt'>[];
+  messages: Omit<Message, 'id' | 'createdAt' | 'compacted'>[];
 }
-
-// ── Snapshot loaded at startup ─────────────────────────────────────────────────
 
 export interface CouncilSnapshot {
   themeMode: ThemeMode;
   members: Member[];
   conversations: Conversation[];
-  // Messages are loaded per-conversation, not all at once
+  chamberMap: Record<string, Conversation>;
 }
 
-// ── Repository interface ──────────────────────────────────────────────────────
-
 export interface CouncilRepository {
-  /** One-time initialization (marks DB as ready) */
   init(): Promise<void>;
-  /** Bulk load for startup */
   getSnapshot(): Promise<CouncilSnapshot>;
 
-  // Settings
   getThemeMode(): Promise<ThemeMode>;
   setThemeMode(mode: ThemeMode): Promise<void>;
 
-  // Members
   listMembers(includeArchived?: boolean): Promise<Member[]>;
   createMember(input: CreateMemberInput): Promise<Member>;
   updateMember(memberId: string, patch: UpdateMemberPatch): Promise<Member>;
   archiveMember(memberId: string): Promise<void>;
   setMemberStoreName(memberId: string, storeName: string): Promise<void>;
 
-  // Conversations
-  listConversations(): Promise<Conversation[]>;
-  createConversation(input: CreateConversationInput): Promise<Conversation>;
-  updateConversation(conversationId: string, patch: UpdateConversationPatch): Promise<Conversation>;
+  listConversations(includeArchived?: boolean): Promise<Conversation[]>;
+  listHalls(includeArchived?: boolean): Promise<Conversation[]>;
+  listChambers(includeArchived?: boolean): Promise<Conversation[]>;
+  createHall(input: CreateHallInput): Promise<Conversation>;
+  renameHall(conversationId: string, title: string): Promise<Conversation>;
+  archiveHall(conversationId: string): Promise<void>;
+  getOrCreateChamber(memberId: string): Promise<Conversation>;
+  getChamberByMember(memberId: string): Promise<Conversation | null>;
+  listChamberMap(): Promise<Record<string, Conversation>>;
 
-  // Messages
+  listParticipants(conversationId: string, includeRemoved?: boolean): Promise<ConversationParticipant[]>;
+  addHallParticipant(conversationId: string, memberId: string): Promise<void>;
+  removeHallParticipant(conversationId: string, memberId: string): Promise<void>;
+
   listMessages(conversationId: string): Promise<Message[]>;
   appendMessages(input: AppendMessagesInput): Promise<void>;
   clearMessages(conversationId: string): Promise<void>;
+  applyCompaction(conversationId: string, summary: string, compactedMessageIds: string[]): Promise<void>;
+
+  setToken(token: string | null): void;
+  generateUploadUrl(): Promise<string>;
+  setMemberAvatar(memberId: string, storageId: string): Promise<Member>;
 }

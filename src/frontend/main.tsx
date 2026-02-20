@@ -1,16 +1,16 @@
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { ConvexProvider, ConvexReactClient } from 'convex/react';
+import { ConvexAuthProvider } from '@convex-dev/auth/react';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import './styles/globals.css';
 import { ThemeProvider } from './components/theme/ThemeProvider';
+import { AuthGate } from './components/auth/AuthGate';
 import { useAppStore } from './store/appStore';
+import { convex } from './lib/convexClient';
 
 registerSW({ immediate: true });
-
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
 function Bootstrap() {
   const initializeApp = useAppStore((state) => state.initializeApp);
@@ -24,13 +24,14 @@ function Bootstrap() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConvexProvider client={convex}>
+    <ConvexAuthProvider client={convex}>
       <BrowserRouter>
         <ThemeProvider>
-          <Bootstrap />
+          <AuthGate>
+            <Bootstrap />
+          </AuthGate>
         </ThemeProvider>
       </BrowserRouter>
-    </ConvexProvider>
+    </ConvexAuthProvider>
   </React.StrictMode>
 );
-

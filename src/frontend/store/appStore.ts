@@ -4,7 +4,6 @@ import type {
   ConversationType,
   Member,
   Message,
-  MessageRole,
   MessageRouting,
   ThemeMode,
 } from '../types/domain';
@@ -13,41 +12,49 @@ import {
   chatWithMember,
   compactConversation,
   routeHallMembers,
+  suggestHallTitle,
   uploadMemberDocuments,
   listMemberDocuments,
   deleteMemberDocument,
 } from '../lib/geminiClient';
 import { routeToMembers } from '../lib/mockRouting';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 interface CreateMemberPayload {
   name: string;
   systemPrompt: string;
-  emoji?: string;
-  role?: string;
   specialties?: string[];
 }
 
 interface AppState {
   hydrated: boolean;
   isRouting: boolean;
+  routingConversationId?: string;
   themeMode: ThemeMode;
   members: Member[];
   conversations: Conversation[];
   messages: Message[];
   selectedConversationId: string;
   pendingReplyCount: Record<string, number>;
+  pendingReplyMemberIds: Record<string, string[]>;
   memberDocuments: Record<string, Array<{ name?: string; displayName?: string }>>;
+  chamberByMemberId: Record<string, Conversation>;
+  hallParticipantsByConversation: Record<string, string[]>;
 
   initializeApp: () => Promise<void>;
   selectConversation: (conversationId: string) => void;
   loadMessages: (conversationId: string) => Promise<void>;
+  refreshHallParticipants: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
+  renameHallConversation: (conversationId: string, title: string) => Promise<void>;
+  archiveHallConversation: (conversationId: string) => Promise<void>;
   createChamberForMember: (memberId: string) => Promise<Conversation>;
+  getChamberForMember: (memberId: string) => Conversation | undefined;
+  sendHallDraftMessage: (text: string) => Promise<Conversation>;
+  sendMessageToChamberMember: (memberId: string, text: string) => Promise<Conversation>;
   sendUserMessage: (conversationId: string, text: string) => Promise<void>;
   generateDeterministicReplies: (conversationId: string, text: string) => Promise<void>;
   addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
+  removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
@@ -57,8 +64,6 @@ interface AppState {
   hydrateMemberDocuments: () => Promise<void>;
   deleteDocForMember: (memberId: string, documentName: string) => Promise<void>;
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
 
@@ -71,124 +76,167 @@ function buildMessage(input: BuildMessageInput): Message {
   };
 }
 
-/** Get the display name for a member from the members map */
-function getMemberName(membersMap: Map<string, Member>, memberId: string): string {
-  return membersMap.get(memberId)?.name ?? memberId;
-}
-
-function updateConversationStamp(
-  conversations: Conversation[],
-  conversationId: string
-): Conversation[] {
+function updateConversationStamp(conversations: Conversation[], conversationId: string): Conversation[] {
   const now = Date.now();
   return conversations.map((item) =>
     item.id === conversationId ? { ...item, updatedAt: now } : item
   );
 }
 
-/** Build the context window for one member's LLM call.
- * - Excludes compacted messages (they're represented by the rolling summary).
- * - Returns at most 12 messages (6 rounds of back-and-forth per member).
- */
 function buildMemberContextWindow(
   messages: Message[],
   conversationId: string,
   memberId: string,
-  conversationType: Conversation['type']
+  conversationKind: Conversation['kind'],
+  membersById: Map<string, Member>
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
   return messages
     .filter((msg) => {
       if (msg.conversationId !== conversationId) return false;
-      if (msg.compacted) return false;           // ← skip compacted rows
+      if (msg.compacted) return false;
       if (msg.role === 'system') return false;
       if (msg.role === 'user') return true;
       if (msg.role === 'member') {
-        if (conversationType === 'chamber') return true;
-        return msg.memberId === memberId;
+        return true;
       }
       return false;
     })
     .slice(-12)
-    .map((msg) => ({
-      role: msg.role === 'user' ? 'user' : 'assistant',
-      content: msg.content,
-    }));
+    .map((msg) => {
+      if (msg.role === 'user') {
+        return {
+          role: 'user' as const,
+          content: msg.content,
+        };
+      }
+      if (conversationKind === 'hall') {
+        const authorName = msg.authorMemberId
+          ? (membersById.get(msg.authorMemberId)?.name ?? 'Member')
+          : 'Member';
+        const selfTag = msg.authorMemberId === memberId ? ' (you)' : '';
+        return {
+          role: 'assistant' as const,
+          content: `${authorName}${selfTag}: ${msg.content}`,
+        };
+      }
+      return {
+        role: 'assistant' as const,
+        content: msg.content,
+      };
+    });
 }
 
-const COMPACTION_THRESHOLD = 20; // active messages before triggering compaction
+function buildHallSystemContext(
+  member: Member,
+  activeParticipants: Member[],
+  messages: Message[],
+  conversationId: string
+): string {
+  const presentMemberNames = activeParticipants.map((m) => m.name);
+  const otherNames = activeParticipants.filter((m) => m.id !== member.id).map((m) => m.name);
 
-/** Fire-and-forget compaction: summarise oldest active messages, store result in Convex. */
+  const recentOtherOpinions = messages
+    .filter(
+      (msg) =>
+        msg.conversationId === conversationId &&
+        !msg.compacted &&
+        msg.role === 'member' &&
+        msg.authorMemberId &&
+        msg.authorMemberId !== member.id
+    )
+    .slice(-6)
+    .map((msg) => {
+      const author = activeParticipants.find((m) => m.id === msg.authorMemberId)?.name ?? 'Member';
+      return `${author}: ${msg.content}`;
+    });
+
+  return [
+    `Hall context: You are ${member.name}, one council member in a live hall conversation.`,
+    `Present members: ${presentMemberNames.join(', ') || member.name}.`,
+    `Other members currently present: ${otherNames.join(', ') || 'none'}.`,
+    'You can reference, build on, or challenge other members respectfully.',
+    recentOtherOpinions.length > 0
+      ? `Recent member opinions:\n- ${recentOtherOpinions.join('\n- ')}`
+      : 'Recent member opinions: none yet.',
+  ].join('\n');
+}
+
+const COMPACTION_THRESHOLD = 20;
+
 async function maybeCompact(
   conversationId: string,
   messages: Message[],
   conversation: Conversation
-): Promise<void> {
+): Promise<{ summary: string; compactedIds: string[] } | null> {
   const active = messages.filter(
     (m) => m.conversationId === conversationId && !m.compacted && m.role !== 'system'
   );
-  if (active.length < COMPACTION_THRESHOLD) return;
+  if (active.length < COMPACTION_THRESHOLD) return null;
 
-  // Compact the oldest half of active messages
   const toCompact = active.slice(0, Math.floor(active.length / 2));
   const contextMsgs = toCompact.map((m) => ({
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.content,
   }));
 
-  try {
-    await compactConversation({
-      conversationId,
-      previousSummary: conversation.summary,
-      messages: contextMsgs,
-      messageIds: toCompact.map((m) => m.id),
-    });
-  } catch (err) {
-    console.warn('[compaction] failed, will retry next round:', err);
-  }
-}
+  const result = await compactConversation({
+    conversationId,
+    previousSummary: conversation.summary,
+    messages: contextMsgs,
+    messageIds: toCompact.map((m) => m.id),
+  });
 
-// ── Store ─────────────────────────────────────────────────────────────────────
+  await councilRepository.applyCompaction(conversationId, result.summary, toCompact.map((m) => m.id));
+
+  return { summary: result.summary, compactedIds: toCompact.map((m) => m.id) };
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   hydrated: false,
   isRouting: false,
+  routingConversationId: undefined,
   themeMode: 'system',
   members: [],
   conversations: [],
   messages: [],
   selectedConversationId: '',
   pendingReplyCount: {},
+  pendingReplyMemberIds: {},
   memberDocuments: {},
+  chamberByMemberId: {},
+  hallParticipantsByConversation: {},
 
   initializeApp: async () => {
     await councilRepository.init();
     const snapshot = await councilRepository.getSnapshot();
 
-    // Sort conversations newest-first
-    const conversations = snapshot.conversations.sort((a, b) => b.updatedAt - a.updatedAt);
-    const firstHall = conversations.find((item) => item.type === 'hall');
+    const conversations = snapshot.conversations
+      .filter((item) => !item.deletedAt)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    const firstHall = conversations.find((item) => item.kind === 'hall');
 
     set({
       hydrated: true,
       themeMode: snapshot.themeMode,
       members: snapshot.members,
       conversations,
-      selectedConversationId: firstHall?.id ?? conversations[0]?.id ?? '',
+      chamberByMemberId: snapshot.chamberMap,
+      selectedConversationId: firstHall?.id ?? '',
     });
 
-    // Load messages for the initially-selected conversation
-    const initialId = firstHall?.id ?? conversations[0]?.id;
-    if (initialId) {
-      await get().loadMessages(initialId);
+    const hallIds = conversations.filter((item) => item.kind === 'hall').map((item) => item.id);
+    await Promise.all(hallIds.map((conversationId) => get().refreshHallParticipants(conversationId)));
+
+    if (firstHall) {
+      await get().loadMessages(firstHall.id);
     }
 
-    // Fire-and-forget preload so KB doc counts survive page refresh
     void get().hydrateMemberDocuments();
   },
 
   selectConversation: (conversationId) => {
     set({ selectedConversationId: conversationId });
-    // Load messages for the newly selected conversation if not yet loaded
     const already = get().messages.some((m) => m.conversationId === conversationId);
     if (!already) {
       void get().loadMessages(conversationId);
@@ -205,42 +253,140 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
-  createConversation: async (type) => {
-    const state = get();
-    const activeMembers = state.members.filter((m) => m.status === 'active');
-    const seedMemberIds = activeMembers.slice(0, type === 'hall' ? 2 : 1).map((m) => m.id);
-    const title = type === 'hall' ? 'New Hall' : 'New Chamber';
+  refreshHallParticipants: async (conversationId) => {
+    const participants = await councilRepository.listParticipants(conversationId);
+    set((state) => ({
+      hallParticipantsByConversation: {
+        ...state.hallParticipantsByConversation,
+        [conversationId]: participants.map((participant) => participant.memberId),
+      },
+    }));
+  },
 
-    const created = await councilRepository.createConversation({
-      type,
-      title,
-      memberIds: seedMemberIds,
+  createConversation: async (type) => {
+    if (type !== 'hall') {
+      throw new Error('Use createChamberForMember for chamber conversations');
+    }
+
+    const created = await councilRepository.createHall({
+      title: 'New Hall',
+      memberIds: [],
     });
 
-    set((current) => ({
-      conversations: [created, ...current.conversations],
+    set((state) => ({
+      conversations: [created, ...state.conversations],
       selectedConversationId: created.id,
+      hallParticipantsByConversation: {
+        ...state.hallParticipantsByConversation,
+        [created.id]: [],
+      },
     }));
 
     return created;
   },
 
-  createChamberForMember: async (memberId) => {
-    const member = get().members.find((item) => item.id === memberId);
-    if (!member) throw new Error('Member not found');
+  renameHallConversation: async (conversationId, title) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const updated = await councilRepository.renameHall(conversationId, trimmed);
+    set((state) => ({
+      conversations: state.conversations.map((item) =>
+        item.id === conversationId ? updated : item
+      ),
+    }));
+  },
 
-    const created = await councilRepository.createConversation({
-      type: 'chamber',
-      title: `Chamber · ${member.name}`,
-      memberIds: [member.id],
+  archiveHallConversation: async (conversationId) => {
+    await councilRepository.archiveHall(conversationId);
+    set((state) => {
+      const nextConversations = state.conversations.filter((item) => item.id !== conversationId);
+      const { [conversationId]: _removed, ...nextParticipants } = state.hallParticipantsByConversation;
+      return {
+        conversations: nextConversations,
+        hallParticipantsByConversation: nextParticipants,
+        selectedConversationId:
+          state.selectedConversationId === conversationId
+            ? (nextConversations[0]?.id ?? '')
+            : state.selectedConversationId,
+      };
+    });
+  },
+
+  createChamberForMember: async (memberId) => {
+    const created = await councilRepository.getOrCreateChamber(memberId);
+
+    set((state) => {
+      const exists = state.conversations.some((item) => item.id === created.id);
+      return {
+        conversations: exists
+          ? state.conversations.map((item) => (item.id === created.id ? created : item))
+          : [created, ...state.conversations],
+        chamberByMemberId: {
+          ...state.chamberByMemberId,
+          [memberId]: created,
+        },
+        selectedConversationId: created.id,
+      };
     });
 
-    set((current) => ({
-      conversations: [created, ...current.conversations],
+    return created;
+  },
+
+  getChamberForMember: (memberId) => get().chamberByMemberId[memberId],
+
+  sendHallDraftMessage: async (text) => {
+    const created = await councilRepository.createHall({
+      title: 'New Hall',
+      memberIds: [],
+    });
+
+    set((state) => ({
+      conversations: [created, ...state.conversations],
       selectedConversationId: created.id,
+      hallParticipantsByConversation: {
+        ...state.hallParticipantsByConversation,
+        [created.id]: [],
+      },
     }));
 
+    await get().sendUserMessage(created.id, text);
+    // Generate member replies in background so navigation + first bubble feel immediate.
+    void get().generateDeterministicReplies(created.id, text);
+    // Generate a smarter hall title from the first user message without blocking UX.
+    void suggestHallTitle({ message: text })
+      .then((result) => {
+        const nextTitle = result.title?.trim();
+        if (!nextTitle || nextTitle.toLowerCase() === 'new hall') return;
+        return get().renameHallConversation(created.id, nextTitle);
+      })
+      .catch(() => undefined);
+
     return created;
+  },
+
+  sendMessageToChamberMember: async (memberId, text) => {
+    let conversation = get().chamberByMemberId[memberId];
+    if (!conversation) {
+      conversation = await councilRepository.getOrCreateChamber(memberId);
+      set((state) => {
+        const exists = state.conversations.some((item) => item.id === conversation!.id);
+        return {
+          conversations: exists
+            ? state.conversations.map((item) => (item.id === conversation!.id ? conversation! : item))
+            : [conversation!, ...state.conversations],
+          chamberByMemberId: {
+            ...state.chamberByMemberId,
+            [memberId]: conversation!,
+          },
+          selectedConversationId: conversation!.id,
+        };
+      });
+    }
+
+    await get().sendUserMessage(conversation.id, text);
+    await get().generateDeterministicReplies(conversation.id, text);
+
+    return conversation;
   },
 
   sendUserMessage: async (conversationId, text) => {
@@ -272,79 +418,115 @@ export const useAppStore = create<AppState>((set, get) => ({
     let memberIds: string[] = [];
     let routingSource: MessageRouting['source'] = 'chamber-fixed';
 
-    if (conversation.type === 'chamber') {
-      // Chamber: always reply from the first member
-      memberIds = conversation.memberIds.slice(0, 1);
+    if (conversation.kind === 'chamber') {
+      memberIds = conversation.chamberMemberId ? [conversation.chamberMemberId] : [];
     } else {
-      // Hall: route to relevant members
-      const candidates = conversation.memberIds
-        .map((id) => membersMap.get(id))
-        .filter((m): m is Member => Boolean(m) && m.status === 'active');
+      const participantIds = state.hallParticipantsByConversation[conversationId] ?? [];
+      const hasRoutedOnce = state.messages.some(
+        (message) =>
+          message.conversationId === conversationId &&
+          message.role === 'system' &&
+          Boolean(message.routing)
+      );
 
-      if (candidates.length > 0) {
-        set({ isRouting: true });
+      if (!hasRoutedOnce) {
+        const candidates = state.members.filter((member) => !member.deletedAt);
+        set({ isRouting: true, routingConversationId: conversationId });
         try {
+          const dynamicMaxSelections = Math.max(
+            1,
+            Math.min(8, Math.ceil(candidates.length * 0.5))
+          );
           const routed = await routeHallMembers({
             message: text,
             conversationId,
             candidates: candidates.map((c) => ({
               id: c.id,
               name: c.name,
-              specialties: c.specialties,
+              specialties: c.specialties.filter((item) => item.trim().length > 0),
               systemPrompt: c.systemPrompt,
             })),
-            maxSelections: 3,
+            maxSelections: dynamicMaxSelections,
           });
           memberIds = routed.chosenMemberIds;
           routingSource = routed.source;
         } catch {
-          memberIds = routeToMembers(text, conversation).filter((id) =>
-            candidates.some((c) => c.id === id)
-          );
+          memberIds = routeToMembers(text, candidates.map((c) => c.id), conversationId);
           routingSource = 'fallback';
         } finally {
-          set({ isRouting: false });
+          set({ isRouting: false, routingConversationId: undefined });
         }
+
+        if (memberIds.length === 0) {
+          memberIds = routeToMembers(text, state.members.filter((m) => !m.deletedAt).map((m) => m.id), conversationId);
+          routingSource = 'fallback';
+        }
+
+        const chosenSet = new Set(memberIds);
+        const toAdd = memberIds.filter((memberId) => !participantIds.includes(memberId));
+        const toRemove = participantIds.filter((memberId) => !chosenSet.has(memberId));
+        await Promise.all([
+          ...toAdd.map((memberId) => councilRepository.addHallParticipant(conversationId, memberId)),
+          ...toRemove.map((memberId) => councilRepository.removeHallParticipant(conversationId, memberId)),
+        ]);
+
+        set((current) => ({
+          hallParticipantsByConversation: {
+            ...current.hallParticipantsByConversation,
+            [conversationId]: memberIds,
+          },
+        }));
+
+        const routeMessage = buildMessage({
+          conversationId,
+          role: 'system',
+          content: `Routed to ${memberIds.map((id) => membersMap.get(id)?.name ?? id).join(', ')}`,
+          status: 'sent',
+          routing: { memberIds, source: routingSource },
+        });
+
+        set((current) => ({ messages: [...current.messages, routeMessage] }));
+        await councilRepository.appendMessages({ conversationId, messages: [routeMessage] });
+      } else {
+        memberIds = participantIds.filter((memberId) => {
+          const member = membersMap.get(memberId);
+          return Boolean(member && !member.deletedAt);
+        });
       }
-
-      if (memberIds.length === 0) {
-        memberIds = routeToMembers(text, conversation).filter((id) => membersMap.has(id));
-        routingSource = 'fallback';
-      }
-
-      // Post a system routing message
-      const routeMessage = buildMessage({
-        conversationId,
-        role: 'system',
-        content: `Routed to ${memberIds.map((id) => getMemberName(membersMap, id)).join(', ')}`,
-        status: 'sent',
-        routing: { memberIds, source: routingSource },
-      });
-
-      set((current) => ({ messages: [...current.messages, routeMessage] }));
-      await councilRepository.appendMessages({ conversationId, messages: [routeMessage] });
     }
 
-    if (memberIds.length === 0) return;
+    if (memberIds.length === 0) {
+      set((current) => ({
+        pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
+        pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: [] },
+      }));
+      return;
+    }
 
     set((current) => ({
       pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: memberIds.length },
+      pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: memberIds },
     }));
+    const hallParticipants = conversation.kind === 'hall'
+      ? (state.hallParticipantsByConversation[conversationId] ?? [])
+          .map((id) => membersMap.get(id))
+          .filter((member): member is Member => Boolean(member && !member.deletedAt))
+      : [];
 
-    const replies = await Promise.all(
-      memberIds.map(async (memberId) => {
-        const member = membersMap.get(memberId);
-        if (!member) {
-          return buildMessage({
-            conversationId,
-            role: 'member',
-            memberId,
-            content: 'Member unavailable.',
-            status: 'error',
-            error: 'Member not found',
-          });
-        }
+    const replyTasks = memberIds.map(async (memberId) => {
+      const member = membersMap.get(memberId);
+      let reply: Message;
 
+      if (!member) {
+        reply = buildMessage({
+          conversationId,
+          role: 'member',
+          authorMemberId: memberId,
+          content: 'Member unavailable.',
+          status: 'error',
+          error: 'Member not found',
+        });
+      } else {
         try {
           const result = await chatWithMember({
             message: text,
@@ -356,54 +538,92 @@ export const useAppStore = create<AppState>((set, get) => ({
               get().messages,
               conversationId,
               member.id,
-              conversation.type
+              conversation.kind,
+              membersMap
             ),
+            hallContext:
+              conversation.kind === 'hall'
+                ? buildHallSystemContext(member, hallParticipants, get().messages, conversationId)
+                : undefined,
           });
 
-          return buildMessage({
+          reply = buildMessage({
             conversationId,
             role: 'member',
-            memberId,
+            authorMemberId: memberId,
             content: result.answer,
             status: 'sent',
           });
         } catch (error) {
-          return buildMessage({
+          reply = buildMessage({
             conversationId,
             role: 'member',
-            memberId,
+            authorMemberId: memberId,
             content: 'Could not generate a response right now.',
             status: 'error',
             error: error instanceof Error ? error.message : 'Request failed',
           });
         }
-      })
-    );
+      }
 
-    set((current) => ({
-      messages: [...current.messages, ...replies],
-      conversations: updateConversationStamp(current.conversations, conversationId),
-      pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
-    }));
+      set((current) => ({
+        messages: [...current.messages, reply],
+        conversations: updateConversationStamp(current.conversations, conversationId),
+        pendingReplyCount: {
+          ...current.pendingReplyCount,
+          [conversationId]: Math.max(0, (current.pendingReplyCount[conversationId] ?? 1) - 1),
+        },
+        pendingReplyMemberIds: {
+          ...current.pendingReplyMemberIds,
+          [conversationId]: (current.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId),
+        },
+      }));
 
-    await councilRepository.appendMessages({ conversationId, messages: replies });
+      await councilRepository.appendMessages({ conversationId, messages: [reply] });
+    });
 
-    // Fire-and-forget compaction — runs after the round is fully persisted
-    void maybeCompact(conversationId, get().messages, conversation);
+    await Promise.all(replyTasks);
+
+    try {
+      const compacted = await maybeCompact(conversationId, get().messages, conversation);
+      if (compacted) {
+        set((current) => ({
+          conversations: current.conversations.map((item) =>
+            item.id === conversationId ? { ...item, summary: compacted.summary, updatedAt: Date.now() } : item
+          ),
+          messages: current.messages.map((item) =>
+            compacted.compactedIds.includes(item.id) ? { ...item, compacted: true } : item
+          ),
+        }));
+      }
+    } catch (error) {
+      console.warn('[compaction] failed, will retry next round:', error);
+    }
   },
 
   addMemberToConversation: async (conversationId, memberId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.memberIds.includes(memberId)) return;
+    if (!conversation || conversation.kind !== 'hall') return;
 
-    const updated = await councilRepository.updateConversation(conversationId, {
-      memberIds: [...conversation.memberIds, memberId],
-    });
+    await councilRepository.addHallParticipant(conversationId, memberId);
+    await get().refreshHallParticipants(conversationId);
 
     set((state) => ({
-      conversations: state.conversations.map((item) =>
-        item.id === conversationId ? updated : item
-      ),
+      conversations: updateConversationStamp(state.conversations, conversationId),
+    }));
+  },
+
+  removeMemberFromConversation: async (conversationId, memberId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'hall') return;
+    const currentParticipants = get().hallParticipantsByConversation[conversationId] ?? [];
+    if (currentParticipants.length <= 1) return;
+
+    await councilRepository.removeHallParticipant(conversationId, memberId);
+    await get().refreshHallParticipants(conversationId);
+
+    set((state) => ({
+      conversations: updateConversationStamp(state.conversations, conversationId),
     }));
   },
 
@@ -430,7 +650,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await councilRepository.archiveMember(memberId);
     set((state) => ({
       members: state.members.map((m) =>
-        m.id === memberId ? { ...m, status: 'archived', updatedAt: Date.now() } : m
+        m.id === memberId ? { ...m, deletedAt: Date.now(), updatedAt: Date.now() } : m
       ),
     }));
   },
@@ -469,9 +689,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   hydrateMemberDocuments: async () => {
-    const membersWithStore = get().members.filter(
-      (m) => m.status !== 'archived' && m.kbStoreName
-    );
+    const membersWithStore = get().members.filter((m) => !m.deletedAt && m.kbStoreName);
     if (membersWithStore.length === 0) return;
 
     const results = await Promise.all(
@@ -488,7 +706,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       memberDocuments: {
         ...state.memberDocuments,
-        ...Object.fromEntries(results.map((r) => [r.memberId, r.docs])),
+        ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
       },
     }));
   },

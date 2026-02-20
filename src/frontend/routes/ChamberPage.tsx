@@ -1,18 +1,17 @@
-import { useParams } from 'react-router-dom';
-import { ChatScreen } from '../features/chat/ChatScreen';
+import { Navigate, useParams } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 
 export function ChamberPage() {
   const { conversationId } = useParams();
   const conversation = useAppStore((state) =>
-    state.conversations.find((item) => item.type === 'chamber' && item.id === conversationId)
+    state.conversations.find((item) => item.kind === 'chamber' && item.id === conversationId)
   );
 
-  if (!conversation) {
+  if (!conversation?.chamberMemberId) {
     return <Placeholder title="Chamber not found" />;
   }
 
-  return <ChatScreen conversation={conversation} />;
+  return <Navigate to={`/chamber/member/${conversation.chamberMemberId}`} replace />;
 }
 
 function Placeholder({ title }: { title: string }) {

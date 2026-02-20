@@ -1,18 +1,15 @@
 /**
- * seed.ts
- *
- * The V2 schema starts empty — no default members, conversations, or messages.
- * Users create their own council members from scratch.
- *
- * This module only provides a lightweight "seeded" flag check so we can run
- * any one-time initialization logic in the future without duplicating it.
+ * seed.ts — one-time initialization sentinel.
+ * V2 schema starts empty; users create their own members and conversations after signing in.
+ * The SEED_KEY simply marks that the app has been initialized at least once.
  */
+import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 
 const SEED_KEY = 'schema-v2-initialized';
 
-/** Returns true if the V2 schema has been initialized */
+/** Returns true if the schema has been initialized */
 export const isInitialized = query({
     args: {},
     returns: v.boolean(),
@@ -26,8 +23,8 @@ export const isInitialized = query({
 });
 
 /**
- * Called from the frontend once on first load.
- * In V2 there is nothing to seed — just marks the DB as initialized.
+ * Called once per app session after auth is confirmed.
+ * Marks the DB as initialized (idempotent).
  */
 export const initializeIfNeeded = mutation({
     args: {},
@@ -38,7 +35,6 @@ export const initializeIfNeeded = mutation({
             .withIndex('by_key', (q) => q.eq('key', SEED_KEY))
             .unique();
         if (existing) return null;
-
         await ctx.db.insert('appConfig', {
             key: SEED_KEY,
             value: new Date().toISOString(),

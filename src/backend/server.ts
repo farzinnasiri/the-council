@@ -10,13 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { GeminiRAGChatbot } from './geminiRag.js';
-import { ConvexHttpClient } from 'convex/browser';
-
-const CONVEX_URL = process.env.VITE_CONVEX_URL ?? process.env.CONVEX_URL ?? '';
-function getConvexClient(): ConvexHttpClient {
-  if (!CONVEX_URL) throw new Error('VITE_CONVEX_URL / CONVEX_URL env var not set');
-  return new ConvexHttpClient(CONVEX_URL);
-}
+import { MODEL_IDS, resolveModel } from './modelConfig.js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 43111);
@@ -196,8 +190,8 @@ app.post('/api/chat', async (req, res) => {
   try {
     await ensureKnowledgeBase();
     const result = await bot.chat(message, {
-      responseModel: chatModel ?? process.env.GEMINI_CHAT_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-3-flash-preview',
-      retrievalModel: retrievalModel ?? process.env.GEMINI_RETRIEVAL_MODEL ?? 'gemini-2.5-flash-lite',
+      responseModel: resolveModel('chatResponse', chatModel),
+      retrievalModel: resolveModel('retrieval', retrievalModel),
       temperature: 0.35,
       personaPrompt: personaPrompt ?? process.env.GEMINI_PERSONA_PROMPT,
     });
@@ -228,10 +222,19 @@ app.post('/api/hall/route', async (req, res) => {
 
   for (const rawCandidate of candidates as unknown[]) {
     const input = (rawCandidate ?? {}) as Record<string, unknown>;
+    const specialties =
+      typeof input.specialties === 'string'
+        ? input.specialties.split(',').map((item) => item.trim()).filter(Boolean)
+        : Array.isArray(input.specialties)
+          ? input.specialties
+              .filter((item: unknown) => typeof item === 'string')
+              .map((item: string) => item.trim())
+              .filter(Boolean)
+          : [];
     const candidate = {
       id: typeof input.id === 'string' ? input.id : '',
       name: typeof input.name === 'string' ? input.name : '',
-      specialties: Array.isArray(input.specialties) ? input.specialties.filter((item: unknown) => typeof item === 'string') : [],
+      specialties,
       systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : undefined,
     };
 
@@ -253,7 +256,7 @@ app.post('/api/hall/route', async (req, res) => {
         message,
         candidates: normalizedCandidates,
         maxSelections,
-        model: process.env.GEMINI_ROUTER_MODEL ?? 'gemini-2.5-flash-lite',
+        model: resolveModel('router'),
       }),
       timeoutMs
     );
@@ -265,10 +268,47 @@ app.post('/api/hall/route', async (req, res) => {
       return;
     }
 
-    res.json({ chosenMemberIds: chosen, model: routed.model, source: 'llm' });
+    res.json({ chosenMemberIds: chosen.slice(0, Math.max(1, maxSelections)), model: routed.model, source: 'llm' });
   } catch {
     const fallback = fallbackRouteMemberIds(message, normalizedCandidates, maxSelections);
-    res.json({ chosenMemberIds: fallback, model: process.env.GEMINI_ROUTER_MODEL ?? 'gemini-2.5-flash-lite', source: 'fallback' });
+    res.json({ chosenMemberIds: fallback, model: MODEL_IDS.router, source: 'fallback' });
+  }
+});
+
+app.post('/api/member/specialties/suggest', async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const systemPrompt = typeof req.body?.systemPrompt === 'string' ? req.body.systemPrompt.trim() : '';
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : undefined;
+
+  if (!name || !systemPrompt) {
+    res.status(400).json({ error: 'name and systemPrompt are required' });
+    return;
+  }
+
+  try {
+    const result = await bot.suggestMemberSpecialties({ name, systemPrompt, model });
+    res.json(result);
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : 'Specialties suggestion failed';
+    res.status(500).json({ error: messageText });
+  }
+});
+
+app.post('/api/hall/title', async (req, res) => {
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : undefined;
+
+  if (!message) {
+    res.status(400).json({ error: 'message is required' });
+    return;
+  }
+
+  try {
+    const result = await bot.suggestHallTitle({ message, model });
+    res.json(result);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Hall title generation failed';
+    res.status(500).json({ error: errorMessage });
   }
 });
 
@@ -419,15 +459,6 @@ app.post('/api/compact', async (req, res) => {
   try {
     const summary = await bot.summarizeMessages({ messages: contextMessages, previousSummary });
 
-    const convex = getConvexClient();
-    // Use string-based mutation path to avoid importing the generated API module
-    // (which uses Bundler module resolution incompatible with this tsconfig's NodeNext).
-    await (convex as any).mutation('conversations:applyCompaction', {
-      conversationId,
-      summary,
-      compactedMessageIds: messageIds,
-    });
-
     res.json({ summary });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Compaction failed';
@@ -442,6 +473,7 @@ app.post('/api/member-chat', async (req, res) => {
   const memberSystemPrompt = typeof req.body?.memberSystemPrompt === 'string' ? req.body.memberSystemPrompt : '';
   const storeName = typeof req.body?.storeName === 'string' && req.body.storeName.trim() ? req.body.storeName : null;
   const previousSummary = typeof req.body?.previousSummary === 'string' && req.body.previousSummary.trim() ? req.body.previousSummary : null;
+  const hallContext = typeof req.body?.hallContext === 'string' && req.body.hallContext.trim() ? req.body.hallContext : null;
   const chatModel = typeof req.body?.chatModel === 'string' ? req.body.chatModel : undefined;
   const retrievalModel = typeof req.body?.retrievalModel === 'string' ? req.body.retrievalModel : undefined;
   const contextMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -457,11 +489,12 @@ app.post('/api/member-chat', async (req, res) => {
   }
   const boundedContextMessages = contextMessages.slice(-12);
 
-  // Prepend system prompt; if there's a rolling summary, inject it after the persona
+  // Prepend hall context + member prompt; if there's a rolling summary, inject it after the persona.
   const summaryBlock = previousSummary
     ? `\n\n---\nConversation summary so far:\n${previousSummary}\n---`
     : '';
-  const effectiveSystemPrompt = memberSystemPrompt + summaryBlock;
+  const hallBlock = hallContext ? `${hallContext}\n\n` : '';
+  const effectiveSystemPrompt = hallBlock + memberSystemPrompt + summaryBlock;
 
   if (!message || !memberId || !memberName || !memberSystemPrompt.trim()) {
     res.status(400).json({ error: 'message, memberId, memberName, and memberSystemPrompt are required' });
@@ -472,8 +505,8 @@ app.post('/api/member-chat', async (req, res) => {
     const response = await bot.chatWithOptionalKnowledgeBase({
       query: message,
       storeName,
-      responseModel: chatModel ?? process.env.GEMINI_CHAT_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini-3-flash-preview',
-      retrievalModel: retrievalModel ?? process.env.GEMINI_RETRIEVAL_MODEL ?? 'gemini-2.5-flash-lite',
+      responseModel: resolveModel('chatResponse', chatModel),
+      retrievalModel: resolveModel('retrieval', retrievalModel),
       temperature: 0.35,
       personaPrompt: effectiveSystemPrompt,
       contextMessages: boundedContextMessages,

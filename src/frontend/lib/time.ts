@@ -2,16 +2,16 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-export function formatClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export function formatClock(dateSource: number | string): string {
+  return new Date(dateSource).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function formatSessionTime(iso: string): string {
-  const date = new Date(iso);
+export function formatSessionTime(dateSource: number | string): string {
+  const date = new Date(dateSource);
   const now = new Date();
   const sameDay = date.toDateString() === now.toDateString();
   if (sameDay) {
-    return `Today · ${formatClock(iso)}`;
+    return `Today · ${formatClock(dateSource)}`;
   }
 
   const yesterday = new Date(now);

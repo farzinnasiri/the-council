@@ -12,13 +12,22 @@ export function AppShell() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const location = useLocation();
   const conversations = useAppStore((state) => state.conversations);
+  const members = useAppStore((state) => state.members);
+  const chamberByMemberId = useAppStore((state) => state.chamberByMemberId);
 
   const activeConversation = useMemo(() => {
     const parts = location.pathname.split('/');
-    const conversationId = parts[2];
-    if (!conversationId) return undefined;
-    return conversations.find((item) => item.id === conversationId);
-  }, [conversations, location.pathname]);
+    if (parts[1] === 'hall' && parts[2] && parts[2] !== 'new') {
+      return conversations.find((item) => item.id === parts[2]);
+    }
+    if (parts[1] === 'chamber' && parts[2] === 'member' && parts[3]) {
+      return chamberByMemberId[parts[3]];
+    }
+    if (parts[1] === 'chamber' && parts[2]) {
+      return conversations.find((item) => item.id === parts[2]);
+    }
+    return undefined;
+  }, [chamberByMemberId, conversations, location.pathname]);
 
   const headerMeta = useMemo(() => {
     if (activeConversation) {
@@ -53,12 +62,30 @@ export function AppShell() {
       };
     }
 
+    if (location.pathname.startsWith('/hall/new')) {
+      return {
+        title: 'New Hall',
+        subtitle: '',
+        showParticipants: false,
+      };
+    }
+
+    if (location.pathname.startsWith('/chamber/member/')) {
+      const memberId = location.pathname.split('/')[3];
+      const member = members.find((item) => item.id === memberId);
+      return {
+        title: member ? `Chamber · ${member.name}` : 'Chamber',
+        subtitle: '',
+        showParticipants: false,
+      };
+    }
+
     return {
       title: 'The Council',
       subtitle: '',
       showParticipants: false,
     };
-  }, [activeConversation, location.pathname]);
+  }, [activeConversation, location.pathname, members]);
 
   useEffect(() => {
     setMobileOpen(false);

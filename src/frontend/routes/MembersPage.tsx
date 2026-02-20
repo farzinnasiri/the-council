@@ -1,21 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, MessageSquarePlus, Pencil, Plus, Save, Trash2, Upload } from 'lucide-react';
+import { Archive, MessageSquarePlus, Pencil, Plus, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { useAppStore } from '../store/appStore';
+import { AvatarUploader } from '../components/members/AvatarUploader';
+import { convexRepository } from '../repository/ConvexCouncilRepository';
+import { suggestMemberSpecialties } from '../lib/geminiClient';
 
 interface MemberFormState {
   name: string;
-  emoji: string;
-  role: string;
   specialties: string;
   systemPrompt: string;
 }
 
 const emptyForm: MemberFormState = {
   name: '',
-  emoji: '🧠',
-  role: 'Advisor',
   specialties: '',
   systemPrompt: '',
 };
@@ -26,7 +25,6 @@ export function MembersPage() {
   const createMember = useAppStore((state) => state.createMember);
   const updateMember = useAppStore((state) => state.updateMember);
   const archiveMember = useAppStore((state) => state.archiveMember);
-  const createChamberForMember = useAppStore((state) => state.createChamberForMember);
   const uploadDocsForMember = useAppStore((state) => state.uploadDocsForMember);
   const fetchDocsForMember = useAppStore((state) => state.fetchDocsForMember);
   const deleteDocForMember = useAppStore((state) => state.deleteDocForMember);
@@ -37,9 +35,11 @@ export function MembersPage() {
   const [form, setForm] = useState<MemberFormState>(emptyForm);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
   const [deletingDocumentName, setDeletingDocumentName] = useState<string | null>(null);
+  const [isSuggestingSpecialties, setIsSuggestingSpecialties] = useState(false);
+  const [pendingAvatarBlob, setPendingAvatarBlob] = useState<Blob | null>(null);
 
-  const activeMembers = useMemo(() => members.filter((member) => member.status === 'active'), [members]);
-  const archivedMembers = useMemo(() => members.filter((member) => member.status === 'archived'), [members]);
+  const activeMembers = useMemo(() => members.filter((member) => !member.deletedAt), [members]);
+  const archivedMembers = useMemo(() => members.filter((member) => Boolean(member.deletedAt)), [members]);
   const editingMember = useMemo(() => members.find((item) => item.id === editingMemberId), [members, editingMemberId]);
   const editingDocs = editingMemberId ? docsByMember[editingMemberId] ?? [] : [];
   const isFormActive = isCreating || Boolean(editingMemberId);
@@ -57,6 +57,7 @@ export function MembersPage() {
     setEditingMemberId(null);
     setForm(emptyForm);
     setIsCreating(true);
+    setPendingAvatarBlob(null);
   };
 
   const startEdit = (memberId: string) => {
@@ -66,12 +67,11 @@ export function MembersPage() {
     setEditingMemberId(memberId);
     setForm({
       name: member.name,
-      emoji: member.emoji,
-      role: member.role,
       specialties: member.specialties.join(', '),
       systemPrompt: member.systemPrompt,
     });
     setIsCreating(false);
+    setPendingAvatarBlob(null);
   };
 
   const resetForm = () => {
@@ -79,6 +79,23 @@ export function MembersPage() {
     setEditingMemberId(null);
     setForm(emptyForm);
     setDeletingDocumentName(null);
+    setPendingAvatarBlob(null);
+  };
+
+  const uploadAvatarForMember = async (memberId: string, blob: Blob) => {
+    const uploadUrl = await convexRepository.generateUploadUrl();
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type },
+      body: blob,
+    });
+    const { storageId } = await res.json() as { storageId: string };
+    const updated = await convexRepository.setMemberAvatar(memberId, storageId);
+    useAppStore.setState((state) => ({
+      members: state.members.map((m) =>
+        m.id === memberId ? { ...m, avatarUrl: updated.avatarUrl } : m
+      ),
+    }));
   };
 
   const save = async () => {
@@ -91,8 +108,6 @@ export function MembersPage() {
     const payload = {
       name,
       systemPrompt: prompt,
-      emoji: form.emoji.trim() || '🧠',
-      role: form.role.trim() || 'Advisor',
       specialties: form.specialties
         .split(',')
         .map((item) => item.trim())
@@ -103,12 +118,14 @@ export function MembersPage() {
       await updateMember(editingMemberId, payload);
     } else {
       const created = await createMember(payload);
+      if (pendingAvatarBlob) {
+        await uploadAvatarForMember(created.id, pendingAvatarBlob);
+      }
       setEditingMemberId(created.id);
       setIsCreating(false);
+      setPendingAvatarBlob(null);
       setForm({
         name: created.name,
-        emoji: created.emoji,
-        role: created.role,
         specialties: created.specialties.join(', '),
         systemPrompt: created.systemPrompt,
       });
@@ -144,9 +161,28 @@ export function MembersPage() {
     }
   };
 
+  const generateSpecialties = async () => {
+    const name = form.name.trim();
+    const systemPrompt = form.systemPrompt.trim();
+    if (!name || !systemPrompt) return;
+
+    setIsSuggestingSpecialties(true);
+    try {
+      const result = await suggestMemberSpecialties({ name, systemPrompt });
+      if (result.specialties.length > 0) {
+        setForm((current) => ({
+          ...current,
+          specialties: result.specialties.join(', '),
+        }));
+      }
+    } finally {
+      setIsSuggestingSpecialties(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto px-4 py-5 md:px-8 md:py-8">
-      <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1.2fr_1fr]">
+      <div className={`mx-auto grid w-full gap-6 ${isFormActive ? 'max-w-6xl lg:grid-cols-[1.2fr_1fr]' : 'max-w-2xl grid-cols-1'}`}>
         <section className={`space-y-4 ${isFormActive ? 'order-2 lg:order-1' : 'order-1'}`}>
           <div className="flex items-center justify-between">
             <h1 className="font-display text-2xl">Members</h1>
@@ -165,8 +201,7 @@ export function MembersPage() {
               void archiveMember(memberId);
             }}
             onCreateChamber={async (memberId) => {
-              const created = await createChamberForMember(memberId);
-              navigate(`/chamber/${created.id}`);
+              navigate(`/chamber/member/${memberId}`);
             }}
           />
 
@@ -175,55 +210,62 @@ export function MembersPage() {
               title="Archived"
               members={archivedMembers}
               docsByMember={docsByMember}
-              onEdit={() => {}}
-              onArchive={() => {}}
+              onEdit={() => { }}
+              onArchive={() => { }}
               onCreateChamber={() => Promise.resolve()}
               archived
             />
           ) : null}
         </section>
 
-        <section className={`rounded-2xl border border-border bg-card p-4 md:p-5 ${isFormActive ? 'order-1 lg:order-2' : 'order-2'}`}>
-          <h2 className="font-display text-xl">{editingMemberId ? 'Edit member' : isCreating ? 'Create member' : 'Member details'}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Set each member's identity and system prompt. Manage knowledge-base files from here.
-          </p>
+        {isFormActive && (
+          <section className="order-1 rounded-2xl border border-border bg-card p-4 md:p-5 lg:order-2">
+            <h2 className="font-display text-xl">{editingMemberId ? 'Edit member' : 'Create member'}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Set each member's identity and system prompt. Manage knowledge-base files from here.
+            </p>
 
-          {isCreating || editingMemberId ? (
             <div className="mt-4 space-y-3">
-              <label className="grid gap-1 text-sm">
-                Name
-                <input
-                  className="h-10 rounded-lg border border-border bg-background px-3"
-                  value={form.name}
-                  onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="Member name"
+              {/* Avatar + Name row */}
+              <div className="flex items-start gap-3">
+                <AvatarUploader
+                  currentAvatarUrl={editingMember?.avatarUrl}
+                  onUpload={async (blob) => {
+                    if (!editingMemberId) {
+                      setPendingAvatarBlob(blob);
+                      return;
+                    }
+                    await uploadAvatarForMember(editingMemberId, blob);
+                  }}
                 />
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="grid gap-1 text-sm">
-                  Emoji
+                <label className="grid flex-1 gap-1 text-sm">
+                  Name
                   <input
                     className="h-10 rounded-lg border border-border bg-background px-3"
-                    value={form.emoji}
-                    onChange={(event) => setForm((current) => ({ ...current, emoji: event.target.value }))}
-                    placeholder="🧠"
-                  />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  Role
-                  <input
-                    className="h-10 rounded-lg border border-border bg-background px-3"
-                    value={form.role}
-                    onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
-                    placeholder="Advisor"
+                    value={form.name}
+                    onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Member name"
                   />
                 </label>
               </div>
 
+              {/* Specialties */}
               <label className="grid gap-1 text-sm">
-                Specialties (comma-separated)
+                <span className="flex items-center justify-between gap-2">
+                  <span>Specialties (comma-separated)</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 gap-1 text-xs"
+                    disabled={!form.name.trim() || !form.systemPrompt.trim() || isSuggestingSpecialties}
+                    onClick={() => void generateSpecialties()}
+                    title="Suggest specialties with AI"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {isSuggestingSpecialties ? 'Generating…' : 'AI'}
+                  </Button>
+                </span>
                 <input
                   className="h-10 rounded-lg border border-border bg-background px-3"
                   value={form.specialties}
@@ -262,9 +304,8 @@ export function MembersPage() {
                       </p>
                     </div>
                     <label
-                      className={`inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs ${
-                        editingMemberId ? 'cursor-pointer hover:bg-muted/40' : 'cursor-not-allowed opacity-60'
-                      }`}
+                      className={`inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs ${editingMemberId ? 'cursor-pointer hover:bg-muted/40' : 'cursor-not-allowed opacity-60'
+                        }`}
                     >
                       <Upload className="h-3.5 w-3.5" />
                       Upload
@@ -322,12 +363,8 @@ export function MembersPage() {
                 </section>
               ) : null}
             </div>
-          ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-border/80 p-5 text-sm text-muted-foreground">
-              Select a member to edit, or create a new one.
-            </div>
-          )}
-        </section>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -356,10 +393,15 @@ function MemberList({
       <div className="grid gap-3">
         {members.map((member) => (
           <article key={member.id} className="rounded-xl border border-border/80 bg-background p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">{member.emoji} {member.name}</p>
-                <p className="text-xs text-muted-foreground">{member.role}</p>
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted">
+                {member.avatarUrl
+                  ? <img src={member.avatarUrl} alt={member.name} className="h-full w-full object-cover" />
+                  : <UserCircle2 className="h-6 w-6 text-muted-foreground/50" />
+                }
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold">{member.name}</p>
                 {member.specialties.length > 0 ? (
                   <p className="mt-1 text-xs text-muted-foreground">{member.specialties.join(' · ')}</p>
                 ) : null}

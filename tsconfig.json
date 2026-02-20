@@ -11,8 +11,8 @@
     "rootDir": "src"
   },
   "include": [
-    "src/server.ts",
-    "src/geminiRag.ts"
+    "src/backend/server.ts",
+    "src/backend/geminiRag.ts"
   ],
   "exclude": [
     "convex",

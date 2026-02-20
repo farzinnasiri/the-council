@@ -1,30 +1,45 @@
-import { useEffect } from 'react';
-import { useAppStore } from '../../store/appStore';
-import type { Conversation } from '../../types/domain';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
+import type { Message } from '../../types/domain';
 
-export function ChatScreen({ conversation }: { conversation: Conversation }) {
-  const selectConversation = useAppStore((state) => state.selectConversation);
-  const sendUserMessage = useAppStore((state) => state.sendUserMessage);
-  const generateReplies = useAppStore((state) => state.generateDeterministicReplies);
-  const pendingCount = useAppStore((state) => state.pendingReplyCount[conversation.id] ?? 0);
-  const isRouting = useAppStore((state) => state.isRouting);
-  const allMessages = useAppStore((state) => state.messages);
-  const messages = allMessages.filter((message) => message.conversationId === conversation.id);
+interface TypingMember {
+  id: string;
+  name: string;
+  avatarUrl?: string | null;
+}
 
-  useEffect(() => {
-    selectConversation(conversation.id);
-  }, [conversation.id, selectConversation]);
+interface ChatScreenProps {
+  messages: Message[];
+  isRouting?: boolean;
+  typingMembers?: TypingMember[];
+  placeholder: string;
+  onSend: (text: string) => void | Promise<void>;
+  emptyState?: {
+    title: string;
+    description: string;
+  };
+}
 
+export function ChatScreen({
+  messages,
+  isRouting = false,
+  typingMembers = [],
+  placeholder,
+  onSend,
+  emptyState,
+}: ChatScreenProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <MessageList messages={messages} isThinking={pendingCount > 0 || isRouting} />
+      <MessageList
+        messages={messages}
+        isRouting={isRouting}
+        typingMembers={typingMembers}
+        emptyState={emptyState}
+      />
       <Composer
-        placeholder={conversation.type === 'hall' ? 'Ask the Hall...' : 'Ask your chamber member...'}
+        placeholder={placeholder}
         onSend={(text) => {
-          void sendUserMessage(conversation.id, text);
-          void generateReplies(conversation.id, text);
+          void onSend(text);
         }}
       />
     </div>

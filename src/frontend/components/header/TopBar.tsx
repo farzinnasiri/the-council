@@ -1,4 +1,4 @@
-import { Menu, Plus } from 'lucide-react';
+import { Menu, Plus, UserCircle2, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -21,16 +21,18 @@ interface TopBarProps {
 
 export function TopBar({ conversation, title, subtitle, showParticipants, onToggleSidebar }: TopBarProps) {
   const addMemberToConversation = useAppStore((state) => state.addMemberToConversation);
+  const removeMemberFromConversation = useAppStore((state) => state.removeMemberFromConversation);
   const members = useAppStore((state) => state.members);
-  const participantIds = conversation?.memberIds ?? [];
+  const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
+  const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
   const participants = participantIds
-    .map((id) => members.find((member) => member.id === id && member.status === 'active'))
-    .filter(Boolean);
-  const inactiveMembers = members.filter((member) => member.status === 'active' && !participantIds.includes(member.id));
+    .map((id) => members.find((member) => member.id === id && !member.deletedAt))
+    .filter((m): m is NonNullable<typeof m> => Boolean(m));
+  const inactiveMembers = members.filter((member) => !member.deletedAt && !participantIds.includes(member.id));
   const activeCount = participants.length;
-  const isChamber = conversation?.type === 'chamber';
+  const isChamber = conversation?.kind === 'chamber';
   const showHallParticipants = showParticipants && !isChamber;
-  const canManageHall = conversation?.type === 'hall';
+  const canManageHall = conversation?.kind === 'hall';
 
   return (
     <header className="flex h-[74px] items-center justify-between border-b border-border/80 bg-background/80 px-4 backdrop-blur md:h-16 md:px-6">
@@ -40,24 +42,32 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
         </Button>
         <div>
           <p className="font-display text-lg leading-none tracking-tight">{title}</p>
-          {subtitle || (showHallParticipants && activeCount > 0) ? (
+          {subtitle || showHallParticipants ? (
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground md:mt-1">
               {subtitle ? <span>{subtitle}</span> : null}
-              {subtitle && showHallParticipants && activeCount > 0 ? (
+              {subtitle && showHallParticipants ? (
                 <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
               ) : null}
-              {showHallParticipants && activeCount > 0 ? (
+              {showHallParticipants ? (
                 <CouncilMembersMenu
                   trigger={
-                    <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-card px-2 py-0.5 text-[10px] font-medium sm:hidden">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      {activeCount} active
-                    </span>
+                    activeCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-card px-2 py-0.5 text-[10px] font-medium sm:hidden">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        {activeCount} active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-card px-2 py-0.5 text-[10px] font-medium sm:hidden">
+                        <Plus className="h-3 w-3" />
+                        Manage
+                      </span>
+                    )
                   }
                   activeMembers={participants}
                   inactiveMembers={inactiveMembers}
                   canManageHall={canManageHall}
                   onAdd={(memberId) => conversation && void addMemberToConversation(conversation.id, memberId)}
+                  onRemove={(memberId) => conversation && void removeMemberFromConversation(conversation.id, memberId)}
                 />
               ) : null}
             </div>
@@ -72,24 +82,44 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
             Online
           </span>
         ) : null}
-        {showHallParticipants && activeCount > 0 ? (
+        {showHallParticipants ? (
           <CouncilMembersMenu
             trigger={
-              <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-2 py-1 sm:flex">
-                {participants.slice(0, 4).map((member) => (
-                  <Avatar key={member.id} className="h-7 w-7 border border-border">
-                    <AvatarFallback>{member.emoji}</AvatarFallback>
-                  </Avatar>
-                ))}
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground/80">
-                  {activeCount} active
+              activeCount > 0 ? (
+                <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-2 py-1 sm:flex">
+                  <div className="flex -space-x-2">
+                    {participants.slice(0, 4).map((member) => (
+                      <Avatar key={member.id} className="h-7 w-7 border border-border bg-background">
+                        {member.avatarUrl ? (
+                          <img
+                            src={member.avatarUrl}
+                            alt={member.name}
+                            className="h-full w-full rounded-full object-cover"
+                          />
+                        ) : (
+                          <AvatarFallback>
+                            <UserCircle2 className="h-4 w-4 text-muted-foreground/60" />
+                          </AvatarFallback>
+                        )}
+                      </Avatar>
+                    ))}
+                  </div>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground/80">
+                    {activeCount} active
+                  </span>
+                </div>
+              ) : (
+                <span className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-3 py-1 text-xs font-medium text-foreground/80 sm:inline-flex">
+                  <Plus className="h-3.5 w-3.5" />
+                  Manage members
                 </span>
-              </div>
+              )
             }
             activeMembers={participants}
             inactiveMembers={inactiveMembers}
             canManageHall={canManageHall}
             onAdd={(memberId) => conversation && void addMemberToConversation(conversation.id, memberId)}
+            onRemove={(memberId) => conversation && void removeMemberFromConversation(conversation.id, memberId)}
           />
         ) : null}
       </div>
@@ -103,13 +133,17 @@ function CouncilMembersMenu({
   inactiveMembers,
   canManageHall,
   onAdd,
+  onRemove,
 }: {
   trigger: ReactNode;
   activeMembers: Array<ReturnType<typeof useAppStore.getState>['members'][number]>;
   inactiveMembers: Array<ReturnType<typeof useAppStore.getState>['members'][number]>;
   canManageHall: boolean;
   onAdd: (memberId: string) => void;
+  onRemove: (memberId: string) => void;
 }) {
+  const canRemoveMembers = canManageHall && activeMembers.length > 1;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -123,27 +157,55 @@ function CouncilMembersMenu({
           {activeMembers.map((member) => (
             <div key={member.id} className="flex items-center justify-between rounded-md px-2 py-1.5">
               <div className="flex items-center gap-2">
-                <span className="grid h-7 w-7 place-items-center rounded-full border border-border bg-background text-xs">{member.emoji}</span>
-                <div>
-                  <p className="text-sm font-medium leading-none">{member.name}</p>
-                  <p className="text-[11px] text-muted-foreground">{member.role}</p>
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background text-xs">
+                  {member.avatarUrl
+                    ? <img src={member.avatarUrl} alt={member.name} className="h-full w-full object-cover" />
+                    : <UserCircle2 className="h-5 w-5 text-muted-foreground/60" />
+                  }
                 </div>
+                <p className="text-sm font-medium leading-none">{member.name}</p>
               </div>
-              <span className="text-[11px] text-emerald-500">Active</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-emerald-500">Active</span>
+                {canManageHall ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                    onClick={() => onRemove(member.id)}
+                    disabled={!canRemoveMembers}
+                    aria-label={`Remove ${member.name}`}
+                    title={
+                      canRemoveMembers
+                        ? `Remove ${member.name}`
+                        : 'At least one member must remain in the hall'
+                    }
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>
+        {canManageHall && !canRemoveMembers ? (
+          <p className="mb-2 px-2 text-[11px] text-muted-foreground">
+            At least one active member must remain in the hall.
+          </p>
+        ) : null}
 
         <DropdownMenuLabel>Available members</DropdownMenuLabel>
         <div className="space-y-1">
           {inactiveMembers.map((member) => (
             <div key={member.id} className="flex items-center justify-between rounded-md px-2 py-1.5">
               <div className="flex items-center gap-2">
-                <span className="grid h-7 w-7 place-items-center rounded-full border border-border bg-background text-xs">{member.emoji}</span>
-                <div>
-                  <p className="text-sm font-medium leading-none">{member.name}</p>
-                  <p className="text-[11px] text-muted-foreground">{member.role}</p>
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background text-xs">
+                  {member.avatarUrl
+                    ? <img src={member.avatarUrl} alt={member.name} className="h-full w-full object-cover" />
+                    : <UserCircle2 className="h-5 w-5 text-muted-foreground/60" />
+                  }
                 </div>
+                <p className="text-sm font-medium leading-none">{member.name}</p>
               </div>
               {canManageHall ? (
                 <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => onAdd(member.id)}>

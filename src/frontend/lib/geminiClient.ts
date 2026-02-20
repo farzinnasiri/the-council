@@ -13,6 +13,16 @@ export interface RouteResult {
   source: 'llm' | 'fallback';
 }
 
+export interface HallTitleResult {
+  title: string;
+  model: string;
+}
+
+export interface MemberSpecialtiesResult {
+  specialties: string[];
+  model: string;
+}
+
 interface MemberChatResult {
   answer: string;
   grounded: boolean;
@@ -76,6 +86,33 @@ export async function routeHallMembers(input: {
   });
 
   return parseJson<RouteResult>(response);
+}
+
+export async function suggestHallTitle(input: {
+  message: string;
+  model?: string;
+}): Promise<HallTitleResult> {
+  const response = await fetch('/api/hall/title', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify(input),
+  });
+
+  return parseJson<HallTitleResult>(response);
+}
+
+export async function suggestMemberSpecialties(input: {
+  name: string;
+  systemPrompt: string;
+  model?: string;
+}): Promise<MemberSpecialtiesResult> {
+  const response = await fetch('/api/member/specialties/suggest', {
+    method: 'POST',
+    headers: baseHeaders,
+    body: JSON.stringify(input),
+  });
+
+  return parseJson<MemberSpecialtiesResult>(response);
 }
 
 export async function ensureMemberStore(input: {
@@ -158,6 +195,7 @@ export async function chatWithMember(input: {
   storeName?: string | null;
   previousSummary?: string;
   contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  hallContext?: string;
 }): Promise<MemberChatResult> {
   const response = await fetch('/api/member-chat', {
     method: 'POST',
@@ -171,6 +209,7 @@ export async function chatWithMember(input: {
       storeName: input.storeName ?? null,
       previousSummary: input.previousSummary ?? null,
       contextMessages: input.contextMessages ?? [],
+      hallContext: input.hallContext ?? null,
     }),
   });
 

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { ChatScreen } from '../features/chat/ChatScreen';
@@ -5,22 +6,57 @@ import { ChatScreen } from '../features/chat/ChatScreen';
 export function HallPage() {
   const { conversationId } = useParams();
   const conversation = useAppStore((state) =>
-    state.conversations.find((item) => item.type === 'hall' && item.id === conversationId)
+    state.conversations.find((item) => item.kind === 'hall' && item.id === conversationId)
   );
+  const selectConversation = useAppStore((state) => state.selectConversation);
+  const sendUserMessage = useAppStore((state) => state.sendUserMessage);
+  const generateReplies = useAppStore((state) => state.generateDeterministicReplies);
+  const isRouting = useAppStore((state) => state.isRouting);
+  const routingConversationId = useAppStore((state) => state.routingConversationId);
+  const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
+  const members = useAppStore((state) => state.members);
+  const allMessages = useAppStore((state) => state.messages);
+
+  useEffect(() => {
+    if (conversation) {
+      selectConversation(conversation.id);
+    }
+  }, [conversation, selectConversation]);
 
   if (!conversation) {
-    return <EmptyState label="Hall conversation not found" />;
+    return <Placeholder title="Hall conversation not found" description="Choose an existing hall from the sidebar." />;
   }
 
-  return <ChatScreen conversation={conversation} />;
+  const messages = allMessages.filter((message) => message.conversationId === conversation.id);
+  const typingMembers = (pendingReplyMemberIds[conversation.id] ?? [])
+    .map((memberId) => members.find((member) => member.id === memberId))
+    .filter((member): member is NonNullable<typeof member> => Boolean(member))
+    .map((member) => ({
+      id: member.id,
+      name: member.name,
+      avatarUrl: member.avatarUrl,
+    }));
+
+  return (
+    <ChatScreen
+      messages={messages}
+      isRouting={isRouting && routingConversationId === conversation.id}
+      typingMembers={typingMembers}
+      placeholder="Ask the Hall..."
+      onSend={async (text) => {
+        await sendUserMessage(conversation.id, text);
+        await generateReplies(conversation.id, text);
+      }}
+    />
+  );
 }
 
-function EmptyState({ label }: { label: string }) {
+function Placeholder({ title, description }: { title: string; description: string }) {
   return (
     <div className="grid h-full place-items-center px-4 text-center">
       <div>
-        <h2 className="font-display text-2xl">{label}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">Choose a session from the sidebar or create a new one.</p>
+        <h2 className="font-display text-2xl">{title}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
       </div>
     </div>
   );

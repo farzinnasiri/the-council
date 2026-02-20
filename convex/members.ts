@@ -1,117 +1,98 @@
-import { query, mutation } from './_generated/server';
+import { getAuthUserId } from '@convex-dev/auth/server';
+import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 
-// ── Shared return shape ───────────────────────────────────────────────────────
-
-const memberDoc = v.object({
-    _id: v.id('members'),
-    _creationTime: v.number(),
-    name: v.string(),
-    emoji: v.string(),
-    role: v.string(),
-    specialties: v.array(v.string()),
-    systemPrompt: v.string(),
-    kbStoreName: v.optional(v.string()),
-    status: v.union(v.literal('active'), v.literal('archived')),
-    updatedAt: v.number(),
-});
-
-// ── Queries ───────────────────────────────────────────────────────────────────
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error('Not authenticated');
+  return userId;
+}
 
 export const list = query({
-    args: { includeArchived: v.optional(v.boolean()) },
-    returns: v.array(memberDoc),
-    handler: async (ctx, args) => {
-        if (args.includeArchived) {
-            return await ctx.db.query('members').order('asc').collect();
-        }
-        return await ctx.db
-            .query('members')
-            .withIndex('by_status', (q) => q.eq('status', 'active'))
-            .collect();
-    },
-});
+  args: { includeArchived: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const docs = await ctx.db
+      .query('members')
+      .withIndex('by_user', (q: any) => q.eq('userId', userId))
+      .collect();
 
-export const get = query({
-    args: { memberId: v.id('members') },
-    returns: v.union(memberDoc, v.null()),
-    handler: async (ctx, args) => {
-        return await ctx.db.get(args.memberId);
-    },
-});
+    const filtered = args.includeArchived ? docs : docs.filter((doc: any) => !doc.deletedAt);
 
-// ── Mutations ─────────────────────────────────────────────────────────────────
+    return await Promise.all(
+      filtered.map(async (doc: any) => ({
+        ...doc,
+        avatarUrl: doc.avatarId ? await ctx.storage.getUrl(doc.avatarId) : null,
+      }))
+    );
+  },
+});
 
 export const create = mutation({
-    args: {
-        name: v.string(),
-        systemPrompt: v.string(),
-        emoji: v.optional(v.string()),
-        role: v.optional(v.string()),
-        specialties: v.optional(v.array(v.string())),
-    },
-    returns: memberDoc,
-    handler: async (ctx, args) => {
-        const now = Date.now();
-        const id = await ctx.db.insert('members', {
-            name: args.name,
-            emoji: args.emoji ?? '🤖',
-            role: args.role ?? 'Advisor',
-            specialties: args.specialties ?? [],
-            systemPrompt: args.systemPrompt,
-            status: 'active',
-            updatedAt: now,
-        });
-        return (await ctx.db.get(id))!;
-    },
+  args: {
+    name: v.string(),
+    specialties: v.optional(v.array(v.string())),
+    systemPrompt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const id = await ctx.db.insert('members', {
+      userId,
+      name: args.name,
+      specialties: args.specialties ?? [],
+      systemPrompt: args.systemPrompt,
+      updatedAt: Date.now(),
+    });
+    const doc = (await ctx.db.get(id))!;
+    return { ...doc, avatarUrl: null as string | null };
+  },
 });
 
 export const update = mutation({
-    args: {
-        memberId: v.id('members'),
-        name: v.optional(v.string()),
-        systemPrompt: v.optional(v.string()),
-        emoji: v.optional(v.string()),
-        role: v.optional(v.string()),
-        specialties: v.optional(v.array(v.string())),
-        kbStoreName: v.optional(v.union(v.string(), v.null())),
-        status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
-    },
-    returns: memberDoc,
-    handler: async (ctx, args) => {
-        const { memberId, kbStoreName, ...rest } = args;
-        const current = await ctx.db.get(memberId);
-        if (!current) throw new Error('Member not found');
-
-        const patch: Record<string, unknown> = { ...rest, updatedAt: Date.now() };
-        // Allow explicitly clearing kbStoreName by passing null
-        if (kbStoreName !== undefined) {
-            patch.kbStoreName = kbStoreName ?? undefined;
-        }
-        await ctx.db.patch(memberId, patch);
-        return (await ctx.db.get(memberId))!;
-    },
+  args: {
+    memberId: v.id('members'),
+    name: v.optional(v.string()),
+    specialties: v.optional(v.array(v.string())),
+    systemPrompt: v.optional(v.string()),
+    avatarId: v.optional(v.id('_storage')),
+    kbStoreName: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const current = await ctx.db.get(args.memberId);
+    if (!current || current.userId !== userId) throw new Error('Member not found');
+    const { memberId, ...patch } = args;
+    const filteredPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+    await ctx.db.patch(memberId, { ...filteredPatch, updatedAt: Date.now() });
+    const updated = (await ctx.db.get(memberId))!;
+    return {
+      ...updated,
+      avatarUrl: updated.avatarId ? await ctx.storage.getUrl(updated.avatarId) : null as string | null,
+    };
+  },
 });
 
 export const archive = mutation({
-    args: { memberId: v.id('members') },
-    returns: v.null(),
-    handler: async (ctx, args) => {
-        const current = await ctx.db.get(args.memberId);
-        if (!current) throw new Error('Member not found');
-        await ctx.db.patch(args.memberId, { status: 'archived', updatedAt: Date.now() });
-        return null;
-    },
+  args: { memberId: v.id('members') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const current = await ctx.db.get(args.memberId);
+    if (!current || current.userId !== userId) throw new Error('Member not found');
+    await ctx.db.patch(args.memberId, { deletedAt: Date.now(), updatedAt: Date.now() });
+    return null;
+  },
 });
 
 export const setStoreName = mutation({
-    args: { memberId: v.id('members'), storeName: v.string() },
-    returns: v.null(),
-    handler: async (ctx, args) => {
-        await ctx.db.patch(args.memberId, {
-            kbStoreName: args.storeName,
-            updatedAt: Date.now(),
-        });
-        return null;
-    },
+  args: { memberId: v.id('members'), storeName: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const current = await ctx.db.get(args.memberId);
+    if (!current || current.userId !== userId) throw new Error('Member not found');
+    await ctx.db.patch(args.memberId, { kbStoreName: args.storeName, updatedAt: Date.now() });
+    return null;
+  },
 });
