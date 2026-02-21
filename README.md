@@ -16,51 +16,60 @@ Hall + Chamber advisory chat app with:
 - Hall member replies are generated in parallel and rendered progressively as they arrive.
 - Member avatars support crop/upload via `react-easy-crop`; create flow stages avatar and applies it after first save.
 
-## Development
+## Make Commands
+
+`make` is the primary operational interface.
 
 ```bash
-npm install
-npm run dev
+make help           # list all commands
+make setup          # validate toolchain + bootstrap local env templates
+make install        # npm ci (fallback npm install)
+make dev            # run local app
+make build          # production build
+make check          # build + convex typecheck dry-run
+make env-doctor     # validate merged env (TARGET=dev by default)
+make env-sync       # sync required env to dev deployment
+make env-sync-prod  # sync required env to prod deployment
+make deploy         # validate + deploy to dev (convex dev --once)
+make deploy-prod    # validate + deploy to prod (convex deploy)
+make logs           # dev logs
+make logs-prod      # prod logs
 ```
 
-- Frontend (Vite): [http://localhost:43112](http://localhost:43112)
+## Environment Source Of Truth
 
-Run Convex in a separate terminal:
-
-```bash
-npx convex dev
-```
-
-## Build / Preview
-
-```bash
-npm run build
-npm start
-```
-
-- Frontend bundle output: `frontend-dist/`
-
-## Environment
-
-### Local frontend env (`.env.local`)
+### Frontend local runtime (`.env.local`)
 
 - `VITE_CONVEX_URL`
 - `VITE_CONVEX_SITE_URL`
+- `CONVEX_DEPLOYMENT` (optional, for CLI targeting)
 
-### Convex runtime env (set on deployment)
+### Convex runtime env management
+
+Merged in this order:
+1. `config/env/convex.defaults.env` (tracked defaults)
+2. `.env.convex.local` (ignored local overrides + secrets)
+
+Required keys are defined in `config/env/convex.required.keys`.
+
+Bootstrap local secret file:
 
 ```bash
-npx convex env set GEMINI_API_KEY <value>
-npx convex env set GEMINI_CHAT_MODEL <value>
-npx convex env set GEMINI_RETRIEVAL_MODEL <value>
-npx convex env set GEMINI_ROUTER_MODEL <value>
-npx convex env set GEMINI_HALL_TITLE_MODEL <value>
-npx convex env set GEMINI_SPECIALTIES_MODEL <value>
-npx convex env set GEMINI_SUMMARY_MODEL <value>
-npx convex env set GEMINI_CHAMBER_MEMORY_MODEL <value>
-npx convex env set GEMINI_KB_GATE_MODEL <value>
-npx convex env set GEMINI_ROUTER_TEMPERATURE <value>
-npx convex env set GEMINI_DEBUG_LOGS <value>
+cp .env.convex.local.example .env.convex.local
+```
+
+Validate before sync/deploy:
+
+```bash
+make env-doctor            # dev target
+make env-doctor TARGET=prod
+```
+
+Sync examples:
+
+```bash
+make env-sync
+make env-sync-prod
 ```
 
 ## Backend Surface (Convex Actions)

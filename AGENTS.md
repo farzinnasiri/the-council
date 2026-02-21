@@ -25,6 +25,7 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 6. Always run `npm run build` before finalizing changes.
 7. Never commit `.env`, `.env.local`, or secrets.
 8. Convex is the backend source of truth; do not reintroduce local IndexedDB paths.
+9. Use `make` targets for operational workflows (env sync, checks, deploy) unless explicitly debugging.
 
 ---
 
@@ -78,20 +79,43 @@ npx convex dev
 - Frontend dev: `http://localhost:43112`
 - Convex functions/schema sync through `npx convex dev`
 
+Primary operational interface (preferred):
+
+```bash
+make help
+make setup
+make install
+make dev
+make build
+make check
+make env-doctor
+make env-sync
+make env-sync-prod
+make deploy
+make deploy-prod
+```
+
 ---
 
 ## Deployment Sync Checklist
 
-Use this checklist whenever backend actions change:
+Use this checklist whenever backend actions or env values change:
 
 1. Confirm frontend target deployment in `.env.local`:
    - `VITE_CONVEX_URL`
    - `CONVEX_DEPLOYMENT`
-2. Push functions to the same target deployment:
-   - `npx convex dev --once` (dev) or `npx convex deploy` (prod)
-3. Verify new actions exist on that deployment:
+2. Validate merged runtime env before syncing/deploying:
+   - `make env-doctor` (dev)
+   - `make env-doctor TARGET=prod` (prod)
+3. Sync required runtime env keys:
+   - `make env-sync` (dev)
+   - `make env-sync-prod` (prod)
+4. Push functions to the same target deployment:
+   - `make deploy` (dev)
+   - `make deploy-prod` (prod)
+5. Verify new actions exist on that deployment:
    - `npx convex function-spec | rg "ai.js:chatWithMember|ai.js:routeHallMembers"`
-4. Verify required runtime env exists on that deployment:
+6. Verify required runtime env exists on that deployment:
    - `npx convex env list | rg "^GEMINI_API_KEY="`
 
 If the app shows `Could not find public function for 'ai:chatWithMember'`, the frontend is pointed at a deployment that does not have the latest functions yet.
@@ -157,6 +181,11 @@ KB upload flow:
 - `VITE_CONVEX_SITE_URL`
 - `CONVEX_DEPLOYMENT` (if needed by CLI)
 
+### Local Convex env overrides (`.env.convex.local`, gitignored)
+- Secrets and deployment-specific overrides for Convex runtime env sync.
+- Merged after `config/env/convex.defaults.env`.
+- May use target-specific suffixes: `KEY__DEV`, `KEY__PROD`.
+
 ### Convex runtime env
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
@@ -175,12 +204,12 @@ KB upload flow:
 
 Set via:
 ```bash
-npx convex env set <KEY> <VALUE>
+make env-sync
 ```
 
 For production deployment env:
 ```bash
-npx convex env set --prod <KEY> <VALUE>
+make env-sync-prod
 ```
 
 ---
