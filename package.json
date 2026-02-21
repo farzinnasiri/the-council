@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:client": "vite",
+    "ops:help": "make help",
     "check:convex": "convex codegen --typecheck enable --dry-run",
     "build": "npm run build:client",
     "build:client": "vite build",

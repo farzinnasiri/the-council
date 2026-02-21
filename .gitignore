@@ -16,6 +16,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+.env.convex.local
 
 # Logs
 npm-debug.log*
@@ -40,8 +41,3 @@ tmp/
 
 # Project local state
 .state/
-
-# Environment files
-.env
-.env.local
-.env.*.local
