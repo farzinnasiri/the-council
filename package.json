@@ -4,13 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "NODE_ENV=development tsx watch src/backend/server.ts",
+    "dev": "vite",
     "dev:client": "vite",
-    "build": "npm run build:client && npm run build:server",
+    "check:convex": "convex codegen --typecheck enable --dry-run",
+    "build": "npm run build:client",
     "build:client": "vite build",
-    "build:server": "tsc -p tsconfig.json",
-    "start": "NODE_ENV=production node dist/server.js",
+    "start": "vite preview",
     "preview": "vite preview"
   },
   "dependencies": {

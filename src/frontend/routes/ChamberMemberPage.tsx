@@ -13,15 +13,20 @@ export function ChamberMemberPage() {
   const chamberByMemberId = useAppStore((state) => state.chamberByMemberId);
   const selectConversation = useAppStore((state) => state.selectConversation);
   const sendMessageToChamberMember = useAppStore((state) => state.sendMessageToChamberMember);
+  const loadOlderMessages = useAppStore((state) => state.loadOlderMessages);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
+  const pendingReplyCount = useAppStore((state) => state.pendingReplyCount);
   const allMessages = useAppStore((state) => state.messages);
-
   const chamber = memberId ? chamberByMemberId[memberId] : undefined;
+  const pagination = useAppStore((state) =>
+    chamber ? state.messagePaginationByConversation[chamber.id] : undefined
+  );
 
   const messages = useMemo(() => {
     if (!chamber) return [];
     return allMessages.filter((message) => message.conversationId === chamber.id);
   }, [allMessages, chamber]);
+  const hasMessages = Boolean(chamber?.lastMessageAt) || messages.length > 0;
 
   useEffect(() => {
     if (chamber) {
@@ -43,14 +48,20 @@ export function ChamberMemberPage() {
         .filter((entry): entry is { id: string; name: string; avatarUrl?: string | null } => Boolean(entry))
     : [];
 
+  const isSending = chamber ? (pendingReplyCount[chamber.id] ?? 0) > 0 : false;
+
   return (
     <ChatScreen
       messages={messages}
       isRouting={false}
       typingMembers={typingMembers}
+      isSending={isSending}
+      hasOlderMessages={pagination?.hasOlder ?? false}
+      loadingOlderMessages={pagination?.isLoadingOlder ?? false}
       placeholder="Ask your chamber member..."
+      onLoadOlder={() => (chamber ? loadOlderMessages(chamber.id) : undefined)}
       emptyState={
-        chamber
+        hasMessages
           ? undefined
           : {
             title: 'No messages yet',

@@ -12,7 +12,7 @@ const conversationDoc = v.object({
   // Legacy compatibility while old rows still include status.
   status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
   deletedAt: v.optional(v.number()),
-  summary: v.optional(v.string()),
+  lastMessageAt: v.optional(v.number()),
   updatedAt: v.number(),
 });
 
@@ -178,7 +178,8 @@ export const getOrCreateChamber = mutation({
     const conversationId = await ctx.db.insert('conversations', {
       userId,
       kind: 'chamber',
-      title: `Chamber · ${member.name}`,
+      // Chamber title is derived at read time from member data.
+      title: 'Chamber',
       chamberMemberId: args.memberId,
       updatedAt: now,
     });
@@ -332,6 +333,7 @@ export const applyCompaction = mutation({
     conversationId: v.id('conversations'),
     summary: v.string(),
     compactedMessageIds: v.array(v.id('messages')),
+    recentRawTail: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -347,10 +349,7 @@ export const applyCompaction = mutation({
       }
     }
 
-    await ctx.db.patch(args.conversationId, {
-      summary: args.summary,
-      updatedAt: Date.now(),
-    });
+    await ctx.db.patch(args.conversationId, { updatedAt: Date.now() });
 
     await Promise.all(
       args.compactedMessageIds.map(async (id) => {
@@ -360,6 +359,44 @@ export const applyCompaction = mutation({
         }
       })
     );
+
+    if (conversation.kind === 'chamber') {
+      const rows = await ctx.db
+        .query('messages')
+        .withIndex('by_conversation', (q: any) => q.eq('conversationId', args.conversationId))
+        .collect();
+      const nonDeleted = rows.filter((row: any) => row.userId === userId && !row.deletedAt && row.role !== 'system');
+      const activeNonSystem = nonDeleted.filter((row: any) => !row.compacted);
+
+      await ctx.db.insert('conversationMemoryLogs', {
+        userId,
+        conversationId: args.conversationId,
+        scope: 'chamber',
+        memory: args.summary,
+        totalMessagesAtRun: nonDeleted.length,
+        activeMessagesAtRun: activeNonSystem.length,
+        compactedMessageCount: args.compactedMessageIds.length,
+        recentRawTail: args.recentRawTail ?? 0,
+      });
+    }
+
+    return null;
+  },
+});
+
+export const clearChamberSummary = mutation({
+  args: { conversationId: v.id('conversations') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber not found');
+    }
+
+    await ctx.db.patch(args.conversationId, {
+      lastMessageAt: undefined,
+    });
 
     return null;
   },

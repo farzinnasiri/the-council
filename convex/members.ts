@@ -28,6 +28,27 @@ export const list = query({
   },
 });
 
+export const getById = query({
+  args: {
+    memberId: v.id('members'),
+    includeArchived: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const doc = await ctx.db.get(args.memberId);
+    if (!doc || doc.userId !== userId) {
+      return null;
+    }
+    if (!args.includeArchived && doc.deletedAt) {
+      return null;
+    }
+    return {
+      ...doc,
+      avatarUrl: doc.avatarId ? await ctx.storage.getUrl(doc.avatarId) : null,
+    };
+  },
+});
+
 export const create = mutation({
   args: {
     name: v.string(),

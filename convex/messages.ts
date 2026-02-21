@@ -21,6 +21,7 @@ const messageDoc = v.object({
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
   compacted: v.boolean(),
+  deletedAt: v.optional(v.number()),
   routing: v.optional(routingValidator),
   inReplyToMessageId: v.optional(v.id('messages')),
   originConversationId: v.optional(v.id('conversations')),
@@ -39,6 +40,11 @@ const messageInputValidator = v.object({
   originConversationId: v.optional(v.id('conversations')),
   originMessageId: v.optional(v.id('messages')),
   error: v.optional(v.string()),
+});
+
+const conversationCounts = v.object({
+  totalNonSystem: v.number(),
+  activeNonSystem: v.number(),
 });
 
 async function requireUser(ctx: any) {
@@ -68,13 +74,52 @@ export const listActive = query({
     const userId = await requireUser(ctx);
     await getOwnedConversation(ctx, userId, args.conversationId);
 
-    return await ctx.db
+    const rows = await ctx.db
       .query('messages')
       .withIndex('by_conversation_active', (q) =>
         q.eq('conversationId', args.conversationId).eq('compacted', false)
       )
       .order('asc')
       .collect();
+    return rows.filter((row) => !row.deletedAt);
+  },
+});
+
+export const listActivePage = query({
+  args: {
+    conversationId: v.id('conversations'),
+    beforeCreatedAt: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    messages: v.array(messageDoc),
+    hasMore: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await getOwnedConversation(ctx, userId, args.conversationId);
+
+    const limit = Math.max(10, Math.min(args.limit ?? 40, 120));
+    let queryBuilder = ctx.db
+      .query('messages')
+      .withIndex('by_conversation_active', (q) =>
+        q.eq('conversationId', args.conversationId).eq('compacted', false)
+      )
+      .order('desc');
+
+    const beforeCreatedAt = args.beforeCreatedAt;
+    if (typeof beforeCreatedAt === 'number') {
+      queryBuilder = queryBuilder.filter((q) => q.lt(q.field('_creationTime'), beforeCreatedAt));
+    }
+
+    const rows = await queryBuilder.take(limit + 1);
+    const filtered = rows.filter((row) => !row.deletedAt);
+    const hasMore = rows.length > limit;
+
+    return {
+      messages: filtered.slice(0, limit).reverse(),
+      hasMore,
+    };
   },
 });
 
@@ -85,11 +130,12 @@ export const listAll = query({
     const userId = await requireUser(ctx);
     await getOwnedConversation(ctx, userId, args.conversationId);
 
-    return await ctx.db
+    const rows = await ctx.db
       .query('messages')
       .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
       .order('asc')
       .collect();
+    return rows.filter((row) => !row.deletedAt);
   },
 });
 
@@ -100,13 +146,33 @@ export const listReplies = query({
     const userId = await requireUser(ctx);
     await getOwnedConversation(ctx, userId, args.conversationId);
 
-    return await ctx.db
+    const rows = await ctx.db
       .query('messages')
       .withIndex('by_conversation_parent', (q) =>
         q.eq('conversationId', args.conversationId).eq('inReplyToMessageId', args.parentMessageId)
       )
       .order('asc')
       .collect();
+    return rows.filter((row) => !row.deletedAt);
+  },
+});
+
+export const getConversationCounts = query({
+  args: { conversationId: v.id('conversations') },
+  returns: conversationCounts,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await getOwnedConversation(ctx, userId, args.conversationId);
+
+    const rows = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
+      .collect();
+    const nonDeleted = rows.filter((row) => row.userId === userId && !row.deletedAt && row.role !== 'system');
+    return {
+      totalNonSystem: nonDeleted.length,
+      activeNonSystem: nonDeleted.filter((row) => !row.compacted).length,
+    };
   },
 });
 
@@ -119,6 +185,8 @@ export const appendMany = mutation({
 
     const conversationId = args.messages[0].conversationId;
     await getOwnedConversation(ctx, userId, conversationId);
+
+    const now = Date.now();
 
     for (const msg of args.messages) {
       if (msg.conversationId !== conversationId) {
@@ -156,7 +224,10 @@ export const appendMany = mutation({
       });
     }
 
-    await ctx.db.patch(conversationId, { updatedAt: Date.now() });
+    await ctx.db.patch(conversationId, {
+      updatedAt: now,
+      lastMessageAt: now,
+    });
     return null;
   },
 });
@@ -173,11 +244,24 @@ export const clearConversation = mutation({
       .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
       .collect();
 
-    await Promise.all(
-      rows
-        .filter((row) => row.userId === userId)
-        .map((row) => ctx.db.delete(row._id))
-    );
+    const now = Date.now();
+    await Promise.all(rows
+      .filter((row) => row.userId === userId && !row.deletedAt)
+      .map((row) => ctx.db.patch(row._id, { deletedAt: now })));
+
+    const logs = await ctx.db
+      .query('conversationMemoryLogs')
+      .withIndex('by_user_conversation', (q: any) =>
+        q.eq('userId', userId).eq('conversationId', args.conversationId)
+      )
+      .collect();
+    await Promise.all(logs
+      .filter((row: any) => !row.deletedAt)
+      .map((row: any) => ctx.db.patch(row._id, { deletedAt: now })));
+
+    await ctx.db.patch(args.conversationId, {
+      lastMessageAt: undefined,
+    });
     return null;
   },
 });

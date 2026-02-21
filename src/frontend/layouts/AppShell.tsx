@@ -31,6 +31,16 @@ export function AppShell() {
 
   const headerMeta = useMemo(() => {
     if (activeConversation) {
+      if (activeConversation.kind === 'chamber') {
+        const chamberMember = activeConversation.chamberMemberId
+          ? members.find((item) => item.id === activeConversation.chamberMemberId)
+          : undefined;
+        return {
+          title: chamberMember ? `Chamber · ${chamberMember.name}` : 'Chamber',
+          subtitle: '',
+          showParticipants: true,
+        };
+      }
       return {
         title: activeConversation.title,
         subtitle: '',

@@ -3,18 +3,29 @@ import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type {
   Conversation,
+  ConversationMemoryLog,
   ConversationParticipant,
   Member,
   Message,
   ThemeMode,
   User,
 } from '../types/domain';
+import {
+  COMPACTION_POLICY_DEFAULTS,
+  COMPACTION_POLICY_KEYS,
+  normalizePolicyNumber,
+  type CompactionPolicy,
+} from '../constants/compactionPolicy';
 import type {
   AppendMessagesInput,
   CouncilRepository,
   CouncilSnapshot,
   CreateHallInput,
   CreateMemberInput,
+  HallTitleResult,
+  MemberChatResult,
+  MemberSpecialtiesResult,
+  RouteResult,
   UpdateMemberPatch,
 } from './CouncilRepository';
 
@@ -46,7 +57,7 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
     title: doc.title,
     chamberMemberId: doc.chamberMemberId as string | undefined,
     deletedAt: doc.deletedAt,
-    summary: doc.summary,
+    lastMessageAt: doc.lastMessageAt,
     createdAt: doc._creationTime,
     updatedAt: doc.updatedAt,
   };
@@ -78,6 +89,21 @@ function toMessage(doc: ConvexMessageDoc): Message {
     originConversationId: doc.originConversationId,
     originMessageId: doc.originMessageId,
     error: doc.error,
+    createdAt: doc._creationTime,
+  };
+}
+
+function toMemoryLog(doc: ConvexMessageDoc): ConversationMemoryLog {
+  return {
+    id: doc._id,
+    conversationId: doc.conversationId,
+    scope: doc.scope,
+    memory: doc.memory,
+    totalMessagesAtRun: doc.totalMessagesAtRun,
+    activeMessagesAtRun: doc.activeMessagesAtRun,
+    compactedMessageCount: doc.compactedMessageCount,
+    recentRawTail: doc.recentRawTail,
+    deletedAt: doc.deletedAt,
     createdAt: doc._creationTime,
   };
 }
@@ -274,6 +300,46 @@ class ConvexCouncilRepository implements CouncilRepository {
     return docs.map(toMessage);
   }
 
+  async listMessagesPage(
+    conversationId: string,
+    options: { beforeCreatedAt?: number; limit?: number } = {}
+  ): Promise<{ messages: Message[]; hasMore: boolean }> {
+    const result = await this.client.query(api.messages.listActivePage, {
+      conversationId: conversationId as Id<'conversations'>,
+      beforeCreatedAt: options.beforeCreatedAt,
+      limit: options.limit,
+    });
+    return {
+      messages: result.messages.map(toMessage),
+      hasMore: result.hasMore,
+    };
+  }
+
+  async getMessageCounts(conversationId: string): Promise<{ totalNonSystem: number; activeNonSystem: number }> {
+    return await this.client.query(api.messages.getConversationCounts, {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+  }
+
+  async getLatestChamberMemoryLog(conversationId: string): Promise<ConversationMemoryLog | null> {
+    const doc = await this.clientAny.query('memoryLogs:getLatestByConversation', {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return doc ? toMemoryLog(doc) : null;
+  }
+
+  async getCompactionPolicy(): Promise<CompactionPolicy> {
+    const [thresholdRaw, recentRawTailRaw] = await Promise.all([
+      this.client.query(api.settings.get, { key: COMPACTION_POLICY_KEYS.threshold }),
+      this.client.query(api.settings.get, { key: COMPACTION_POLICY_KEYS.recentRawTail }),
+    ]);
+
+    return {
+      threshold: normalizePolicyNumber(thresholdRaw, COMPACTION_POLICY_DEFAULTS.threshold, 1),
+      recentRawTail: normalizePolicyNumber(recentRawTailRaw, COMPACTION_POLICY_DEFAULTS.recentRawTail, 1),
+    };
+  }
+
   async appendMessages(input: AppendMessagesInput): Promise<void> {
     const conversationId = input.conversationId as Id<'conversations'>;
     await this.client.mutation(api.messages.appendMany, {
@@ -303,11 +369,162 @@ class ConvexCouncilRepository implements CouncilRepository {
     });
   }
 
-  async applyCompaction(conversationId: string, summary: string, compactedMessageIds: string[]): Promise<void> {
+  async clearChamberSummary(conversationId: string): Promise<void> {
+    await this.clientAny.mutation('conversations:clearChamberSummary', {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+  }
+
+  async routeHallMembers(input: {
+    conversationId: string;
+    message: string;
+    maxSelections?: number;
+  }): Promise<RouteResult> {
+    return (await this.client.action(api.ai.routeHallMembers as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      message: input.message,
+      maxSelections: input.maxSelections,
+    })) as RouteResult;
+  }
+
+  async suggestHallTitle(input: { message: string; model?: string }): Promise<HallTitleResult> {
+    return (await this.client.action(api.ai.suggestHallTitle as any, {
+      message: input.message,
+      model: input.model,
+    })) as HallTitleResult;
+  }
+
+  async suggestMemberSpecialties(input: {
+    name: string;
+    systemPrompt: string;
+    model?: string;
+  }): Promise<MemberSpecialtiesResult> {
+    return (await this.client.action(api.ai.suggestMemberSpecialties as any, {
+      name: input.name,
+      systemPrompt: input.systemPrompt,
+      model: input.model,
+    })) as MemberSpecialtiesResult;
+  }
+
+  async chatWithMember(input: {
+    conversationId: string;
+    memberId: string;
+    message: string;
+    previousSummary?: string;
+    contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    hallContext?: string;
+  }): Promise<MemberChatResult> {
+    return (await this.client.action(api.ai.chatWithMember as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      memberId: input.memberId as Id<'members'>,
+      message: input.message,
+      previousSummary: input.previousSummary,
+      contextMessages: input.contextMessages,
+      hallContext: input.hallContext,
+    })) as MemberChatResult;
+  }
+
+  async compactConversation(input: {
+    conversationId: string;
+    previousSummary?: string;
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    messageIds: string[];
+    memoryScope?: 'chamber' | 'hall';
+    memoryContext?: {
+      conversationId: string;
+      memberName: string;
+      memberSpecialties: string[];
+    };
+  }): Promise<{ summary: string }> {
+    return (await this.client.action(api.ai.compactConversation as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      previousSummary: input.previousSummary,
+      messages: input.messages,
+      messageIds: input.messageIds as Id<'messages'>[],
+      memoryScope: input.memoryScope,
+      memoryContext: input.memoryContext,
+    })) as { summary: string };
+  }
+
+  async ensureMemberStore(input: { memberId: string }): Promise<{ storeName: string; created: boolean }> {
+    return (await this.client.action(api.ai.ensureMemberKnowledgeStore as any, {
+      memberId: input.memberId as Id<'members'>,
+    })) as { storeName: string; created: boolean };
+  }
+
+  async uploadMemberDocuments(input: {
+    memberId: string;
+    stagedFiles: Array<{
+      storageId: string;
+      displayName: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    }>;
+  }): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }> {
+    return (await this.client.action(api.ai.uploadMemberDocuments as any, {
+      memberId: input.memberId as Id<'members'>,
+      stagedFiles: input.stagedFiles.map((file) => ({
+        storageId: file.storageId as Id<'_storage'>,
+        displayName: file.displayName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+      })),
+    })) as { storeName: string; documents: Array<{ name?: string; displayName?: string }> };
+  }
+
+  async listMemberDocuments(input: { memberId: string }): Promise<Array<{ name?: string; displayName?: string }>> {
+    return (await this.client.action(api.ai.listMemberKnowledgeDocuments as any, {
+      memberId: input.memberId as Id<'members'>,
+    })) as Array<{ name?: string; displayName?: string }>;
+  }
+
+  async deleteMemberDocument(input: {
+    memberId: string;
+    documentName: string;
+  }): Promise<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }> {
+    return (await this.client.action(api.ai.deleteMemberKnowledgeDocument as any, {
+      memberId: input.memberId as Id<'members'>,
+      documentName: input.documentName,
+    })) as { ok: boolean; documents?: Array<{ name?: string; displayName?: string }> };
+  }
+
+  async rehydrateMemberStore(input: {
+    memberId: string;
+    mode?: 'missing-only' | 'all';
+  }): Promise<{
+    storeName: string;
+    rehydratedCount: number;
+    skippedCount: number;
+    documents: Array<{ name?: string; displayName?: string }>;
+  }> {
+    return (await this.client.action(api.ai.rehydrateMemberKnowledgeStore as any, {
+      memberId: input.memberId as Id<'members'>,
+      mode: input.mode,
+    })) as {
+      storeName: string;
+      rehydratedCount: number;
+      skippedCount: number;
+      documents: Array<{ name?: string; displayName?: string }>;
+    };
+  }
+
+  async purgeExpiredStagedDocuments(input: { memberId?: string }): Promise<{ purgedCount: number }> {
+    return (await this.client.action(api.ai.purgeExpiredStagedKnowledgeDocuments as any, {
+      memberId: input.memberId ? (input.memberId as Id<'members'>) : undefined,
+    })) as { purgedCount: number };
+  }
+
+  async applyCompaction(
+    conversationId: string,
+    summary: string,
+    compactedMessageIds: string[],
+    recentRawTail?: number
+  ): Promise<void> {
     await this.clientAny.mutation('conversations:applyCompaction', {
       conversationId: conversationId as Id<'conversations'>,
       summary,
       compactedMessageIds: compactedMessageIds as Id<'messages'>[],
+      recentRawTail,
     });
   }
 }

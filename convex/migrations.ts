@@ -20,3 +20,29 @@ export const removeEmojiField = mutation({
         return `Cleaned up ${count} members`;
     },
 });
+
+export const backfillConversationLastMessageAt = mutation({
+    args: {},
+    handler: async (ctx) => {
+        const conversations = await ctx.db.query('conversations').collect();
+        let patched = 0;
+
+        for (const conversation of conversations) {
+            const rows = await ctx.db
+                .query('messages')
+                .withIndex('by_conversation', (q) => q.eq('conversationId', conversation._id))
+                .order('desc')
+                .collect();
+            const latest = rows.find((row) => !row.deletedAt);
+            const nextLastMessageAt = latest?._creationTime;
+            const currentLastMessageAt = (conversation as any).lastMessageAt as number | undefined;
+
+            if (nextLastMessageAt !== currentLastMessageAt) {
+                await ctx.db.patch(conversation._id, { lastMessageAt: nextLastMessageAt });
+                patched += 1;
+            }
+        }
+
+        return `Updated ${patched} conversations`;
+    },
+});

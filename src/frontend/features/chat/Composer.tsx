@@ -5,23 +5,32 @@ import { Textarea } from '../../components/ui/textarea';
 import { cn } from '../../lib/utils';
 
 interface ComposerProps {
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | Promise<void>;
   placeholder?: string;
+  sendDisabled?: boolean;
 }
 
-export function Composer({ onSend, placeholder = 'Ask your council something...' }: ComposerProps) {
+export function Composer({ onSend, placeholder = 'Ask your council something...', sendDisabled = false }: ComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [hasText, setHasText] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isLocked = sendDisabled || isSubmitting;
 
-  const submit = () => {
+  const submit = async () => {
+    if (isLocked) return;
     const text = inputRef.current?.value?.trim() ?? '';
     if (!text) return;
-    onSend(text);
-    if (inputRef.current) {
-      inputRef.current.value = '';
-      inputRef.current.style.height = 'auto';
+    setIsSubmitting(true);
+    try {
+      await onSend(text);
+      if (inputRef.current) {
+        inputRef.current.value = '';
+        inputRef.current.style.height = 'auto';
+      }
+      setHasText(false);
+    } finally {
+      setIsSubmitting(false);
     }
-    setHasText(false);
   };
 
   return (
@@ -42,7 +51,9 @@ export function Composer({ onSend, placeholder = 'Ask your council something...'
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                submit();
+                if (!isLocked) {
+                  void submit();
+                }
               }
             }}
           />
@@ -55,12 +66,14 @@ export function Composer({ onSend, placeholder = 'Ask your council something...'
               size="icon"
               className={cn(
                 'rounded-full transition-colors',
-                hasText
+                hasText && !isLocked
                   ? 'bg-primary text-primary-foreground hover:opacity-90'
                   : 'bg-muted text-muted-foreground hover:bg-muted'
               )}
-              onClick={submit}
-              disabled={!hasText}
+              onClick={() => {
+                void submit();
+              }}
+              disabled={!hasText || isLocked}
             >
               <SendHorizontal className="h-4 w-4" />
             </Button>

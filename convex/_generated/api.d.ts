@@ -8,10 +8,18 @@
  * @module
  */
 
+import type * as ai from "../ai.js";
+import type * as ai_geminiService from "../ai/geminiService.js";
+import type * as ai_kbIngest from "../ai/kbIngest.js";
+import type * as ai_modelConfig from "../ai/modelConfig.js";
+import type * as ai_ownership from "../ai/ownership.js";
 import type * as auth from "../auth.js";
 import type * as conversations from "../conversations.js";
 import type * as http from "../http.js";
+import type * as kbDigests from "../kbDigests.js";
+import type * as kbStagedDocuments from "../kbStagedDocuments.js";
 import type * as members from "../members.js";
+import type * as memoryLogs from "../memoryLogs.js";
 import type * as messages from "../messages.js";
 import type * as migrations from "../migrations.js";
 import type * as seed from "../seed.js";
@@ -26,10 +34,18 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  ai: typeof ai;
+  "ai/geminiService": typeof ai_geminiService;
+  "ai/kbIngest": typeof ai_kbIngest;
+  "ai/modelConfig": typeof ai_modelConfig;
+  "ai/ownership": typeof ai_ownership;
   auth: typeof auth;
   conversations: typeof conversations;
   http: typeof http;
+  kbDigests: typeof kbDigests;
+  kbStagedDocuments: typeof kbStagedDocuments;
   members: typeof members;
+  memoryLogs: typeof memoryLogs;
   messages: typeof messages;
   migrations: typeof migrations;
   seed: typeof seed;

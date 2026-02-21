@@ -11,11 +11,16 @@ export function HallPage() {
   const selectConversation = useAppStore((state) => state.selectConversation);
   const sendUserMessage = useAppStore((state) => state.sendUserMessage);
   const generateReplies = useAppStore((state) => state.generateDeterministicReplies);
+  const loadOlderMessages = useAppStore((state) => state.loadOlderMessages);
   const isRouting = useAppStore((state) => state.isRouting);
   const routingConversationId = useAppStore((state) => state.routingConversationId);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
+  const pendingReplyCount = useAppStore((state) => state.pendingReplyCount);
   const members = useAppStore((state) => state.members);
   const allMessages = useAppStore((state) => state.messages);
+  const pagination = useAppStore((state) =>
+    conversationId ? state.messagePaginationByConversation[conversationId] : undefined
+  );
 
   useEffect(() => {
     if (conversation) {
@@ -37,12 +42,20 @@ export function HallPage() {
       avatarUrl: member.avatarUrl,
     }));
 
+  const isSending =
+    (isRouting && routingConversationId === conversation.id) ||
+    (pendingReplyCount[conversation.id] ?? 0) > 0;
+
   return (
     <ChatScreen
       messages={messages}
       isRouting={isRouting && routingConversationId === conversation.id}
       typingMembers={typingMembers}
+      isSending={isSending}
+      hasOlderMessages={pagination?.hasOlder ?? false}
+      loadingOlderMessages={pagination?.isLoadingOlder ?? false}
       placeholder="Ask the Hall..."
+      onLoadOlder={() => loadOlderMessages(conversation.id)}
       onSend={async (text) => {
         await sendUserMessage(conversation.id, text);
         await generateReplies(conversation.id, text);

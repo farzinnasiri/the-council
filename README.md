@@ -4,15 +4,9 @@ Hall + Chamber advisory chat app with:
 
 - React 19 + Vite + TypeScript frontend
 - Zustand state + Convex-backed repository layer
-- Express + TypeScript API (`src/backend/server.ts`)
-- Gemini RAG service (`src/backend/geminiRag.ts`) with:
-  - member chat
-  - hall routing
-  - first-message hall title generation
-  - member specialties suggestion
-  - rolling conversation compaction
-  - optional per-member File Search knowledge stores
-- centralized backend model mapping in `src/backend/modelConfig.ts`
+- Convex backend functions (queries, mutations, and Node actions)
+- Gemini + File Search orchestration in `convex/ai.ts` and `convex/ai/*`
+- centralized backend model mapping in `convex/ai/modelConfig.ts`
 
 ## Current Product Behavior
 
@@ -30,15 +24,14 @@ npm run dev
 ```
 
 - Frontend (Vite): [http://localhost:43112](http://localhost:43112)
-- Backend (Express): [http://localhost:43111](http://localhost:43111)
 
-Run Convex in a separate terminal when needed:
+Run Convex in a separate terminal:
 
 ```bash
 npx convex dev
 ```
 
-## Build / Start
+## Build / Preview
 
 ```bash
 npm run build
@@ -46,44 +39,46 @@ npm start
 ```
 
 - Frontend bundle output: `frontend-dist/`
-- Server output: `dist/server.js`
 
 ## Environment
 
-1. Copy env template:
+### Local frontend env (`.env.local`)
+
+- `VITE_CONVEX_URL`
+- `VITE_CONVEX_SITE_URL`
+
+### Convex runtime env (set on deployment)
 
 ```bash
-cp .env.example .env
+npx convex env set GEMINI_API_KEY <value>
+npx convex env set GEMINI_CHAT_MODEL <value>
+npx convex env set GEMINI_RETRIEVAL_MODEL <value>
+npx convex env set GEMINI_ROUTER_MODEL <value>
+npx convex env set GEMINI_HALL_TITLE_MODEL <value>
+npx convex env set GEMINI_SPECIALTIES_MODEL <value>
+npx convex env set GEMINI_SUMMARY_MODEL <value>
+npx convex env set GEMINI_CHAMBER_MEMORY_MODEL <value>
+npx convex env set GEMINI_KB_GATE_MODEL <value>
+npx convex env set GEMINI_ROUTER_TEMPERATURE <value>
+npx convex env set GEMINI_DEBUG_LOGS <value>
 ```
 
-2. Set at least:
-- `GEMINI_API_KEY`
-- `VITE_CONVEX_URL` in `.env.local` (written by `npx convex dev`)
+## Backend Surface (Convex Actions)
 
-## API Surface
-
-### Chat
-- `POST /api/member-chat`
-- `POST /api/hall/route`
-- `POST /api/hall/title`
-- `POST /api/compact`
-- `POST /api/member/specialties/suggest`
-
-### Member Knowledge Base
-- `POST /api/member-kb/ensure`
-- `POST /api/member-kb/upload`
-- `GET /api/member-kb/documents`
-- `POST /api/member-kb/document/delete`
-
-### Legacy / Utility
-- `GET /api/health`
-- `POST /api/upload`
-- `GET /api/documents`
-- `POST /api/chat`
-- `POST /api/history/clear`
+- `ai:routeHallMembers`
+- `ai:suggestHallTitle`
+- `ai:suggestMemberSpecialties`
+- `ai:chatWithMember`
+- `ai:compactConversation`
+- `ai:ensureMemberKnowledgeStore`
+- `ai:uploadMemberDocuments`
+- `ai:listMemberKnowledgeDocuments`
+- `ai:deleteMemberKnowledgeDocument`
+- `ai:rehydrateMemberKnowledgeStore`
+- `ai:purgeExpiredStagedKnowledgeDocuments`
 
 ## Notes
 
-- Convex is the source of truth for members, conversations, messages, and app config.
-- Model IDs per backend path are resolved from `src/backend/modelConfig.ts` (`MODEL_IDS` + `resolveModel()`).
-- Legacy IndexedDB implementation is archived under `archive/legacy-indexeddb/` and is not used at runtime.
+- Convex is the source of truth for members, conversations, messages, app config, and staged KB upload audit records.
+- AI/KB actions enforce auth and ownership checks.
+- Legacy Express backend has been removed.

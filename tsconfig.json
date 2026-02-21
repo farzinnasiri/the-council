@@ -1,21 +1,18 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "dist",
-    "rootDir": "src"
+    "noEmit": true,
+    "types": ["vite/client"]
   },
   "include": [
-    "src/backend/server.ts",
-    "src/backend/geminiRag.ts"
-  ],
-  "exclude": [
-    "convex",
-    "node_modules"
+    "src/frontend",
+    "vite.config.ts",
+    "tailwind.config.ts"
   ]
 }

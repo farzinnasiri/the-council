@@ -1,11 +1,4 @@
-import type { Member } from '../types/domain';
-
-interface RouteCandidate {
-  id: string;
-  name: string;
-  specialties: string[];
-  systemPrompt?: string;
-}
+import { convexRepository } from '../repository/ConvexCouncilRepository';
 
 export interface RouteResult {
   chosenMemberIds: string[];
@@ -45,11 +38,20 @@ interface MemberChatResult {
         reason: string;
       };
     };
+    queryPlan?: {
+      originalQuery: string;
+      standaloneQuery: string;
+      queryAlternates: string[];
+      gateUsed: boolean;
+      gateReason: string;
+      matchedDigestSignals: string[];
+    };
     fileSearchStart?: {
       storeName: string;
       retrievalModel: string;
       query: string;
       metadataFilter?: string;
+      alternateQuery?: string;
     };
     fileSearchResponse?: {
       grounded: boolean;
@@ -58,47 +60,56 @@ interface MemberChatResult {
       retrievalText: string;
       citations: Array<{ title: string; uri?: string }>;
       snippets: string[];
+      queryUsed?: string;
+      usedAlternateQuery?: boolean;
     };
     answerPrompt: string;
   };
 }
 
-const baseHeaders = { 'Content-Type': 'application/json' };
+async function uploadFileToConvexStorage(file: File): Promise<{ storageId: string; displayName: string; mimeType?: string; sizeBytes: number }> {
+  const uploadUrl = await convexRepository.generateUploadUrl();
+  const upload = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
 
-async function parseJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `Request failed: ${response.status}`);
+  if (!upload.ok) {
+    const body = await upload.text();
+    throw new Error(body || `Upload failed: ${upload.status}`);
   }
-  return response.json() as Promise<T>;
+
+  const payload = (await upload.json()) as { storageId: string };
+  if (!payload.storageId) {
+    throw new Error('Upload did not return a storageId');
+  }
+
+  return {
+    storageId: payload.storageId,
+    displayName: file.name,
+    mimeType: file.type || undefined,
+    sizeBytes: file.size,
+  };
 }
 
 export async function routeHallMembers(input: {
   message: string;
   conversationId: string;
-  candidates: RouteCandidate[];
   maxSelections?: number;
 }): Promise<RouteResult> {
-  const response = await fetch('/api/hall/route', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify(input),
+  return await convexRepository.routeHallMembers({
+    conversationId: input.conversationId,
+    message: input.message,
+    maxSelections: input.maxSelections,
   });
-
-  return parseJson<RouteResult>(response);
 }
 
 export async function suggestHallTitle(input: {
   message: string;
   model?: string;
 }): Promise<HallTitleResult> {
-  const response = await fetch('/api/hall/title', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify(input),
-  });
-
-  return parseJson<HallTitleResult>(response);
+  return await convexRepository.suggestHallTitle(input);
 }
 
 export async function suggestMemberSpecialties(input: {
@@ -106,71 +117,35 @@ export async function suggestMemberSpecialties(input: {
   systemPrompt: string;
   model?: string;
 }): Promise<MemberSpecialtiesResult> {
-  const response = await fetch('/api/member/specialties/suggest', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify(input),
-  });
-
-  return parseJson<MemberSpecialtiesResult>(response);
+  return await convexRepository.suggestMemberSpecialties(input);
 }
 
 export async function ensureMemberStore(input: {
   memberId: string;
-  memberName: string;
-  storeName?: string | null;
 }): Promise<{ storeName: string; created: boolean }> {
-  const response = await fetch('/api/member-kb/ensure', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify(input),
-  });
-
-  return parseJson<{ storeName: string; created: boolean }>(response);
+  return await convexRepository.ensureMemberStore(input);
 }
 
 export async function uploadMemberDocuments(input: {
   memberId: string;
-  memberName: string;
-  storeName?: string | null;
   files: File[];
 }): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }> {
-  const form = new FormData();
-  form.append('memberId', input.memberId);
-  form.append('memberName', input.memberName);
-  if (input.storeName) {
-    form.append('storeName', input.storeName);
-  }
-
-  for (const file of input.files) {
-    form.append('documents', file);
-  }
-
-  const response = await fetch('/api/member-kb/upload', {
-    method: 'POST',
-    body: form,
+  const stagedFiles = await Promise.all(input.files.map((file) => uploadFileToConvexStorage(file)));
+  return await convexRepository.uploadMemberDocuments({
+    memberId: input.memberId,
+    stagedFiles,
   });
-
-  return parseJson<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }>(response);
 }
 
-export async function listMemberDocuments(storeName: string): Promise<Array<{ name?: string; displayName?: string }>> {
-  const params = new URLSearchParams({ storeName });
-  const response = await fetch(`/api/member-kb/documents?${params.toString()}`);
-  const body = await parseJson<{ documents: Array<{ name?: string; displayName?: string }> }>(response);
-  return body.documents;
+export async function listMemberDocuments(memberId: string): Promise<Array<{ name?: string; displayName?: string }>> {
+  return await convexRepository.listMemberDocuments({ memberId });
 }
 
 export async function deleteMemberDocument(input: {
-  storeName: string;
+  memberId: string;
   documentName: string;
 }): Promise<Array<{ name?: string; displayName?: string }>> {
-  const response = await fetch('/api/member-kb/document/delete', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify(input),
-  });
-  const body = await parseJson<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }>(response);
+  const body = await convexRepository.deleteMemberDocument(input);
   return body.documents ?? [];
 }
 
@@ -179,50 +154,44 @@ export async function compactConversation(input: {
   previousSummary?: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   messageIds: string[];
+  memoryScope?: 'chamber' | 'hall';
+  memoryContext?: {
+    conversationId: string;
+    memberName: string;
+    memberSpecialties: string[];
+  };
 }): Promise<{ summary: string }> {
-  const response = await fetch('/api/compact', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify(input),
-  });
-  return parseJson<{ summary: string }>(response);
+  return await convexRepository.compactConversation(input);
 }
 
 export async function chatWithMember(input: {
   message: string;
-  member: Member;
+  memberId: string;
   conversationId: string;
-  storeName?: string | null;
   previousSummary?: string;
   contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   hallContext?: string;
 }): Promise<MemberChatResult> {
-  const response = await fetch('/api/member-chat', {
-    method: 'POST',
-    headers: baseHeaders,
-    body: JSON.stringify({
-      message: input.message,
-      conversationId: input.conversationId,
-      memberId: input.member.id,
-      memberName: input.member.name,
-      memberSystemPrompt: input.member.systemPrompt,
-      storeName: input.storeName ?? null,
-      previousSummary: input.previousSummary ?? null,
-      contextMessages: input.contextMessages ?? [],
-      hallContext: input.hallContext ?? null,
-    }),
+  const result = await convexRepository.chatWithMember({
+    conversationId: input.conversationId,
+    memberId: input.memberId,
+    message: input.message,
+    previousSummary: input.previousSummary,
+    contextMessages: input.contextMessages ?? [],
+    hallContext: input.hallContext ?? undefined,
   });
-
-  const result = await parseJson<MemberChatResult>(response);
 
   if (result.debug) {
     const trace = result.debug.traceId;
-    console.groupCollapsed(`[Council Debug][${trace}] ${input.member.name} (${result.debug.mode})`);
+    console.groupCollapsed(`[Council Debug][${trace}] member:${input.memberId} (${result.debug.mode})`);
     if (result.debug.kbCheck) {
       console.log('KB Check', result.debug.kbCheck);
       if (result.debug.kbCheck.gateDecision) {
         console.log('KB Gate Decision', result.debug.kbCheck.gateDecision);
       }
+    }
+    if (result.debug.queryPlan) {
+      console.log('Query Plan', result.debug.queryPlan);
     }
     if (result.debug.fileSearchStart) {
       console.log('File Search Request', result.debug.fileSearchStart);

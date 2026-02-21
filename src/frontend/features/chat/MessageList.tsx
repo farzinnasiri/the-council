@@ -18,22 +18,78 @@ export function MessageList({
   messages,
   isRouting,
   typingMembers,
+  hasOlderMessages,
+  loadingOlderMessages,
+  onLoadOlder,
   emptyState,
 }: {
   messages: Message[];
   isRouting: boolean;
   typingMembers: TypingMember[];
+  hasOlderMessages?: boolean;
+  loadingOlderMessages?: boolean;
+  onLoadOlder?: () => void | Promise<void>;
   emptyState?: EmptyState;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const prevFirstMessageIdRef = useRef<string | undefined>(undefined);
+  const prevLastMessageIdRef = useRef<string | undefined>(undefined);
+  const pendingRestoreHeightRef = useRef<number | null>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isRouting, typingMembers]);
+    const container = containerRef.current;
+    if (!container) return;
+
+    const firstId = messages[0]?.id;
+    const lastId = messages[messages.length - 1]?.id;
+    const prevFirst = prevFirstMessageIdRef.current;
+    const prevLast = prevLastMessageIdRef.current;
+
+    if (pendingRestoreHeightRef.current !== null) {
+      const previousHeight = pendingRestoreHeightRef.current;
+      pendingRestoreHeightRef.current = null;
+      const delta = container.scrollHeight - previousHeight;
+      container.scrollTop = Math.max(0, container.scrollTop + delta);
+    } else if (prevLast && lastId && prevLast !== lastId) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (!prevFirst && !prevLast) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+
+    prevFirstMessageIdRef.current = firstId;
+    prevLastMessageIdRef.current = lastId;
+  }, [messages]);
+
+  useEffect(() => {
+    if (isRouting || typingMembers.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [isRouting, typingMembers]);
+
+  const tryLoadOlder = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (!hasOlderMessages || loadingOlderMessages || !onLoadOlder) return;
+    if (container.scrollTop > 96) return;
+
+    pendingRestoreHeightRef.current = container.scrollHeight;
+    void onLoadOlder();
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6">
+    <div
+      ref={containerRef}
+      onScroll={tryLoadOlder}
+      className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6"
+    >
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+        {loadingOlderMessages ? (
+          <div className="mx-auto rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+            Loading older messages...
+          </div>
+        ) : null}
+
         {messages.length === 0 && emptyState ? (
           <div className="grid min-h-[38vh] place-items-center px-4 text-center">
             <div>

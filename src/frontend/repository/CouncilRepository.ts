@@ -1,10 +1,12 @@
 import type {
   Conversation,
+  ConversationMemoryLog,
   ConversationParticipant,
   Member,
   Message,
   ThemeMode,
 } from '../types/domain';
+import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/compactionPolicy';
 
 export interface CreateMemberInput {
   name: string;
@@ -37,6 +39,73 @@ export interface CouncilSnapshot {
   chamberMap: Record<string, Conversation>;
 }
 
+export interface RouteResult {
+  chosenMemberIds: string[];
+  model: string;
+  source: 'llm' | 'fallback';
+}
+
+export interface HallTitleResult {
+  title: string;
+  model: string;
+}
+
+export interface MemberSpecialtiesResult {
+  specialties: string[];
+  model: string;
+}
+
+export interface MemberChatResult {
+  answer: string;
+  grounded: boolean;
+  citations: Array<{ title: string; uri?: string }>;
+  model: string;
+  retrievalModel: string;
+  usedKnowledgeBase: boolean;
+  debug?: {
+    traceId: string;
+    mode: 'with-kb' | 'prompt-only';
+    reason?: string;
+    kbCheck?: {
+      requestedStoreName: string | null;
+      docsCount: number;
+      listError?: string;
+      fileSearchInvoked: boolean;
+      gateDecision?: {
+        mode: 'heuristic' | 'llm-gate';
+        useKnowledgeBase: boolean;
+        reason: string;
+      };
+    };
+    queryPlan?: {
+      originalQuery: string;
+      standaloneQuery: string;
+      queryAlternates: string[];
+      gateUsed: boolean;
+      gateReason: string;
+      matchedDigestSignals: string[];
+    };
+    fileSearchStart?: {
+      storeName: string;
+      retrievalModel: string;
+      query: string;
+      metadataFilter?: string;
+      alternateQuery?: string;
+    };
+    fileSearchResponse?: {
+      grounded: boolean;
+      citationsCount: number;
+      snippetsCount: number;
+      retrievalText: string;
+      citations: Array<{ title: string; uri?: string }>;
+      snippets: string[];
+      queryUsed?: string;
+      usedAlternateQuery?: boolean;
+    };
+    answerPrompt: string;
+  };
+}
+
 export interface CouncilRepository {
   init(): Promise<void>;
   getSnapshot(): Promise<CouncilSnapshot>;
@@ -65,11 +134,84 @@ export interface CouncilRepository {
   removeHallParticipant(conversationId: string, memberId: string): Promise<void>;
 
   listMessages(conversationId: string): Promise<Message[]>;
+  listMessagesPage(
+    conversationId: string,
+    options?: { beforeCreatedAt?: number; limit?: number }
+  ): Promise<{ messages: Message[]; hasMore: boolean }>;
+  getMessageCounts(conversationId: string): Promise<{ totalNonSystem: number; activeNonSystem: number }>;
+  getLatestChamberMemoryLog(conversationId: string): Promise<ConversationMemoryLog | null>;
+  getCompactionPolicy(): Promise<CompactionPolicyConfig>;
   appendMessages(input: AppendMessagesInput): Promise<void>;
   clearMessages(conversationId: string): Promise<void>;
-  applyCompaction(conversationId: string, summary: string, compactedMessageIds: string[]): Promise<void>;
+  clearChamberSummary(conversationId: string): Promise<void>;
+  applyCompaction(
+    conversationId: string,
+    summary: string,
+    compactedMessageIds: string[],
+    recentRawTail?: number
+  ): Promise<void>;
 
   setToken(token: string | null): void;
   generateUploadUrl(): Promise<string>;
   setMemberAvatar(memberId: string, storageId: string): Promise<Member>;
+
+  routeHallMembers(input: {
+    conversationId: string;
+    message: string;
+    maxSelections?: number;
+  }): Promise<RouteResult>;
+  suggestHallTitle(input: {
+    message: string;
+    model?: string;
+  }): Promise<HallTitleResult>;
+  suggestMemberSpecialties(input: {
+    name: string;
+    systemPrompt: string;
+    model?: string;
+  }): Promise<MemberSpecialtiesResult>;
+  chatWithMember(input: {
+    conversationId: string;
+    memberId: string;
+    message: string;
+    previousSummary?: string;
+    contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    hallContext?: string;
+  }): Promise<MemberChatResult>;
+  compactConversation(input: {
+    conversationId: string;
+    previousSummary?: string;
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    messageIds: string[];
+    memoryScope?: 'chamber' | 'hall';
+    memoryContext?: {
+      conversationId: string;
+      memberName: string;
+      memberSpecialties: string[];
+    };
+  }): Promise<{ summary: string }>;
+  ensureMemberStore(input: { memberId: string }): Promise<{ storeName: string; created: boolean }>;
+  uploadMemberDocuments(input: {
+    memberId: string;
+    stagedFiles: Array<{
+      storageId: string;
+      displayName: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    }>;
+  }): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }>;
+  listMemberDocuments(input: { memberId: string }): Promise<Array<{ name?: string; displayName?: string }>>;
+  deleteMemberDocument(input: {
+    memberId: string;
+    documentName: string;
+  }): Promise<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }>;
+  rehydrateMemberStore(input: {
+    memberId: string;
+    mode?: 'missing-only' | 'all';
+  }): Promise<{
+    storeName: string;
+    rehydratedCount: number;
+    skippedCount: number;
+    documents: Array<{ name?: string; displayName?: string }>;
+  }>;
+  purgeExpiredStagedDocuments(input: { memberId?: string }): Promise<{ purgedCount: number }>;
 }

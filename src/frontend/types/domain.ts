@@ -31,7 +31,7 @@ export interface Conversation {
   title: string;
   chamberMemberId?: string;
   deletedAt?: number;
-  summary?: string;
+  lastMessageAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -43,6 +43,19 @@ export interface ConversationParticipant {
   status: 'active' | 'removed';
   joinedAt: number;
   leftAt?: number;
+  createdAt: number;
+}
+
+export interface ConversationMemoryLog {
+  id: string;
+  conversationId: string;
+  scope: 'chamber';
+  memory?: string;
+  totalMessagesAtRun: number;
+  activeMessagesAtRun: number;
+  compactedMessageCount: number;
+  recentRawTail: number;
+  deletedAt?: number;
   createdAt: number;
 }
 

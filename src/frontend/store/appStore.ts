@@ -7,6 +7,10 @@ import type {
   MessageRouting,
   ThemeMode,
 } from '../types/domain';
+import {
+  COMPACTION_POLICY_DEFAULTS,
+  type CompactionPolicy,
+} from '../constants/compactionPolicy';
 import { convexRepository as councilRepository } from '../repository/ConvexCouncilRepository';
 import {
   chatWithMember,
@@ -36,14 +40,28 @@ interface AppState {
   selectedConversationId: string;
   pendingReplyCount: Record<string, number>;
   pendingReplyMemberIds: Record<string, string[]>;
+  compactionCheckInFlightByConversation: Record<string, boolean>;
   memberDocuments: Record<string, Array<{ name?: string; displayName?: string }>>;
   chamberByMemberId: Record<string, Conversation>;
+  chamberMemoryByConversation: Record<string, string>;
   hallParticipantsByConversation: Record<string, string[]>;
+  messagePaginationByConversation: Record<
+    string,
+    {
+      oldestLoadedAt?: number;
+      hasOlder: boolean;
+      isLoadingOlder: boolean;
+    }
+  >;
+  compactionPolicy: CompactionPolicy;
 
   initializeApp: () => Promise<void>;
+  refreshCompactionPolicy: () => Promise<CompactionPolicy>;
   selectConversation: (conversationId: string) => void;
   loadMessages: (conversationId: string) => Promise<void>;
+  loadOlderMessages: (conversationId: string) => Promise<void>;
   refreshHallParticipants: (conversationId: string) => Promise<void>;
+  evaluateChamberCompactionOnLoad: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
   renameHallConversation: (conversationId: string, title: string) => Promise<void>;
   archiveHallConversation: (conversationId: string) => Promise<void>;
@@ -55,6 +73,7 @@ interface AppState {
   generateDeterministicReplies: (conversationId: string, text: string) => Promise<void>;
   addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
   removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
+  clearChamberHistory: (conversationId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
@@ -66,6 +85,8 @@ interface AppState {
 }
 
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+type ConversationPatch = Partial<Conversation> | ((conversation: Conversation) => Conversation);
+type ConversationStateSlice = Pick<AppState, 'conversations' | 'chamberByMemberId'>;
 
 function buildMessage(input: BuildMessageInput): Message {
   return {
@@ -76,11 +97,41 @@ function buildMessage(input: BuildMessageInput): Message {
   };
 }
 
-function updateConversationStamp(conversations: Conversation[], conversationId: string): Conversation[] {
+function patchConversationEverywhere(
+  state: ConversationStateSlice,
+  conversationId: string,
+  patch: ConversationPatch
+): ConversationStateSlice {
+  let nextTarget: Conversation | undefined;
+  const conversations = state.conversations.map((item) => {
+    if (item.id !== conversationId) return item;
+    nextTarget = typeof patch === 'function' ? patch(item) : { ...item, ...patch };
+    return nextTarget;
+  });
+
+  if (!nextTarget || nextTarget.kind !== 'chamber' || !nextTarget.chamberMemberId) {
+    return { conversations, chamberByMemberId: state.chamberByMemberId };
+  }
+
+  return {
+    conversations,
+    chamberByMemberId: {
+      ...state.chamberByMemberId,
+      [nextTarget.chamberMemberId]: nextTarget,
+    },
+  };
+}
+
+function updateConversationStamp(
+  state: ConversationStateSlice,
+  conversationId: string,
+  includeMessageActivity = false
+): ConversationStateSlice {
   const now = Date.now();
-  return conversations.map((item) =>
-    item.id === conversationId ? { ...item, updatedAt: now } : item
-  );
+  return patchConversationEverywhere(state, conversationId, {
+    updatedAt: now,
+    ...(includeMessageActivity ? { lastMessageAt: now } : {}),
+  });
 }
 
 function buildMemberContextWindow(
@@ -95,6 +146,7 @@ function buildMemberContextWindow(
       if (msg.conversationId !== conversationId) return false;
       if (msg.compacted) return false;
       if (msg.role === 'system') return false;
+      if (msg.status === 'error') return false;
       if (msg.role === 'user') return true;
       if (msg.role === 'member') {
         return true;
@@ -141,6 +193,7 @@ function buildHallSystemContext(
         msg.conversationId === conversationId &&
         !msg.compacted &&
         msg.role === 'member' &&
+        msg.status !== 'error' &&
         msg.authorMemberId &&
         msg.authorMemberId !== member.id
     )
@@ -161,19 +214,47 @@ function buildHallSystemContext(
   ].join('\n');
 }
 
-const COMPACTION_THRESHOLD = 20;
-
 async function maybeCompact(
   conversationId: string,
-  messages: Message[],
-  conversation: Conversation
-): Promise<{ summary: string; compactedIds: string[] } | null> {
-  const active = messages.filter(
-    (m) => m.conversationId === conversationId && !m.compacted && m.role !== 'system'
-  );
-  if (active.length < COMPACTION_THRESHOLD) return null;
+  conversation: Conversation,
+  compactionPolicy: CompactionPolicy,
+  previousMemory?: string,
+  memoryContext?: {
+    memberName: string;
+    memberSpecialties: string[];
+  }
+): Promise<{ summary: string; activeMessages: Message[] } | null> {
+  if (conversation.kind !== 'chamber') {
+    return null;
+  }
 
-  const toCompact = active.slice(0, Math.floor(active.length / 2));
+  const persistedActiveMessages = await councilRepository.listMessages(conversationId);
+  const persistedActiveChatMessages = persistedActiveMessages.filter(
+    (m) => m.role !== 'system'
+  );
+
+  if (persistedActiveChatMessages.length < compactionPolicy.threshold) {
+    return null;
+  }
+
+  const [counts, latestLog] = await Promise.all([
+    councilRepository.getMessageCounts(conversationId),
+    councilRepository.getLatestChamberMemoryLog(conversationId),
+  ]);
+  const sinceLastLog = latestLog
+    ? Math.max(0, counts.totalNonSystem - latestLog.totalMessagesAtRun)
+    : counts.totalNonSystem;
+  if (sinceLastLog < compactionPolicy.threshold) {
+    return null;
+  }
+
+  const foldableCount = Math.max(0, persistedActiveChatMessages.length - compactionPolicy.recentRawTail);
+  if (foldableCount === 0) {
+    return null;
+  }
+
+  const toCompact = persistedActiveChatMessages.slice(0, foldableCount);
+
   const contextMsgs = toCompact.map((m) => ({
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.content,
@@ -181,14 +262,28 @@ async function maybeCompact(
 
   const result = await compactConversation({
     conversationId,
-    previousSummary: conversation.summary,
+    previousSummary: previousMemory,
     messages: contextMsgs,
     messageIds: toCompact.map((m) => m.id),
+    memoryScope: 'chamber',
+    memoryContext: memoryContext
+      ? {
+        conversationId,
+        memberName: memoryContext.memberName,
+        memberSpecialties: memoryContext.memberSpecialties,
+      }
+      : undefined,
   });
 
-  await councilRepository.applyCompaction(conversationId, result.summary, toCompact.map((m) => m.id));
+  await councilRepository.applyCompaction(
+    conversationId,
+    result.summary,
+    toCompact.map((m) => m.id),
+    compactionPolicy.recentRawTail
+  );
 
-  return { summary: result.summary, compactedIds: toCompact.map((m) => m.id) };
+  const activeMessages = await councilRepository.listMessages(conversationId);
+  return { summary: result.summary, activeMessages };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -202,13 +297,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedConversationId: '',
   pendingReplyCount: {},
   pendingReplyMemberIds: {},
+  compactionCheckInFlightByConversation: {},
   memberDocuments: {},
   chamberByMemberId: {},
+  chamberMemoryByConversation: {},
   hallParticipantsByConversation: {},
+  messagePaginationByConversation: {},
+  compactionPolicy: COMPACTION_POLICY_DEFAULTS,
+
+  refreshCompactionPolicy: async () => {
+    const policy = await councilRepository.getCompactionPolicy();
+    set({ compactionPolicy: policy });
+    return policy;
+  },
 
   initializeApp: async () => {
     await councilRepository.init();
-    const snapshot = await councilRepository.getSnapshot();
+    const [snapshot, policy] = await Promise.all([
+      councilRepository.getSnapshot(),
+      councilRepository.getCompactionPolicy(),
+    ]);
 
     const conversations = snapshot.conversations
       .filter((item) => !item.deletedAt)
@@ -222,6 +330,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       members: snapshot.members,
       conversations,
       chamberByMemberId: snapshot.chamberMap,
+      chamberMemoryByConversation: {},
+      compactionPolicy: policy,
       selectedConversationId: firstHall?.id ?? '',
     });
 
@@ -244,13 +354,153 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadMessages: async (conversationId) => {
-    const msgs = await councilRepository.listMessages(conversationId);
+    const page = await councilRepository.listMessagesPage(conversationId, { limit: 40 });
+    const msgs = page.messages;
     set((state) => ({
       messages: [
         ...state.messages.filter((m) => m.conversationId !== conversationId),
         ...msgs.sort((a, b) => a.createdAt - b.createdAt),
       ],
+      messagePaginationByConversation: {
+        ...state.messagePaginationByConversation,
+        [conversationId]: {
+          oldestLoadedAt: msgs[0]?.createdAt,
+          hasOlder: page.hasMore,
+          isLoadingOlder: false,
+        },
+      },
     }));
+    void get().evaluateChamberCompactionOnLoad(conversationId);
+  },
+
+  loadOlderMessages: async (conversationId) => {
+    const pagination = get().messagePaginationByConversation[conversationId];
+    if (!pagination || pagination.isLoadingOlder || !pagination.hasOlder || !pagination.oldestLoadedAt) {
+      return;
+    }
+
+    set((state) => ({
+      messagePaginationByConversation: {
+        ...state.messagePaginationByConversation,
+        [conversationId]: {
+          ...pagination,
+          isLoadingOlder: true,
+        },
+      },
+    }));
+
+    try {
+      const page = await councilRepository.listMessagesPage(conversationId, {
+        beforeCreatedAt: pagination.oldestLoadedAt,
+        limit: 30,
+      });
+
+      set((state) => {
+        const existing = state.messages.filter((m) => m.conversationId === conversationId);
+        const keepOther = state.messages.filter((m) => m.conversationId !== conversationId);
+        const combined = [...page.messages, ...existing].sort((a, b) => a.createdAt - b.createdAt);
+        const deduped = combined.filter((message, index, list) => list.findIndex((m) => m.id === message.id) === index);
+        return {
+          messages: [...keepOther, ...deduped],
+          messagePaginationByConversation: {
+            ...state.messagePaginationByConversation,
+            [conversationId]: {
+              oldestLoadedAt: deduped[0]?.createdAt,
+              hasOlder: page.hasMore,
+              isLoadingOlder: false,
+            },
+          },
+        };
+      });
+    } catch {
+      set((state) => ({
+        messagePaginationByConversation: {
+          ...state.messagePaginationByConversation,
+          [conversationId]: {
+            ...state.messagePaginationByConversation[conversationId],
+            isLoadingOlder: false,
+          },
+        },
+      }));
+    }
+  },
+
+  evaluateChamberCompactionOnLoad: async (conversationId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+    if (get().compactionCheckInFlightByConversation[conversationId]) return;
+
+    set((state) => ({
+      compactionCheckInFlightByConversation: {
+        ...state.compactionCheckInFlightByConversation,
+        [conversationId]: true,
+      },
+    }));
+
+    try {
+      const [policy, counts, latestLog] = await Promise.all([
+        councilRepository.getCompactionPolicy(),
+        councilRepository.getMessageCounts(conversationId),
+        councilRepository.getLatestChamberMemoryLog(conversationId),
+      ]);
+      set({ compactionPolicy: policy });
+      if (latestLog?.memory) {
+        set((state) => ({
+          chamberMemoryByConversation: {
+            ...state.chamberMemoryByConversation,
+            [conversationId]: latestLog.memory,
+          },
+        }));
+      }
+      const sinceLastLog = latestLog
+        ? Math.max(0, counts.totalNonSystem - latestLog.totalMessagesAtRun)
+        : counts.totalNonSystem;
+      const foldableCount = Math.max(0, counts.activeNonSystem - policy.recentRawTail);
+      const shouldCompact =
+        counts.activeNonSystem >= policy.threshold &&
+        sinceLastLog >= policy.threshold &&
+        foldableCount > 0;
+
+      if (!shouldCompact) return;
+
+      const membersMap = new Map(get().members.map((m) => [m.id, m]));
+      const chamberMemoryContext = conversation.chamberMemberId
+        ? {
+          memberName: membersMap.get(conversation.chamberMemberId)?.name ?? 'Member',
+          memberSpecialties: membersMap.get(conversation.chamberMemberId)?.specialties ?? [],
+        }
+        : undefined;
+
+      const compacted = await maybeCompact(
+        conversationId,
+        conversation,
+        policy,
+        latestLog?.memory ?? get().chamberMemoryByConversation[conversationId],
+        chamberMemoryContext
+      );
+      if (!compacted) return;
+
+      set((state) => ({
+        ...patchConversationEverywhere(state, conversationId, { updatedAt: Date.now() }),
+        chamberMemoryByConversation: {
+          ...state.chamberMemoryByConversation,
+          [conversationId]: compacted.summary,
+        },
+        messages: [
+          ...state.messages.filter((item) => item.conversationId !== conversationId),
+          ...compacted.activeMessages,
+        ],
+      }));
+    } catch (error) {
+      void error;
+    } finally {
+      set((state) => ({
+        compactionCheckInFlightByConversation: {
+          ...state.compactionCheckInFlightByConversation,
+          [conversationId]: false,
+        },
+      }));
+    }
   },
 
   refreshHallParticipants: async (conversationId) => {
@@ -399,7 +649,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set((state) => ({
       messages: [...state.messages, message],
-      conversations: updateConversationStamp(state.conversations, conversationId),
+      ...updateConversationStamp(state, conversationId, true),
     }));
 
     await councilRepository.appendMessages({
@@ -412,8 +662,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
+    const compactionPolicy = await councilRepository.getCompactionPolicy();
+    set({ compactionPolicy });
 
     const membersMap = new Map(state.members.map((m) => [m.id, m]));
+    let chamberMemory =
+      conversation.kind === 'chamber'
+        ? state.chamberMemoryByConversation[conversationId]
+        : undefined;
+    if (conversation.kind === 'chamber' && !chamberMemory) {
+      const latestLog = await councilRepository.getLatestChamberMemoryLog(conversationId);
+      chamberMemory = latestLog?.memory;
+      if (latestLog?.memory) {
+        set((current) => ({
+          chamberMemoryByConversation: {
+            ...current.chamberMemoryByConversation,
+            [conversationId]: latestLog.memory,
+          },
+        }));
+      }
+    }
 
     let memberIds: string[] = [];
     let routingSource: MessageRouting['source'] = 'chamber-fixed';
@@ -440,12 +708,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           const routed = await routeHallMembers({
             message: text,
             conversationId,
-            candidates: candidates.map((c) => ({
-              id: c.id,
-              name: c.name,
-              specialties: c.specialties.filter((item) => item.trim().length > 0),
-              systemPrompt: c.systemPrompt,
-            })),
             maxSelections: dynamicMaxSelections,
           });
           memberIds = routed.chosenMemberIds;
@@ -485,7 +747,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           routing: { memberIds, source: routingSource },
         });
 
-        set((current) => ({ messages: [...current.messages, routeMessage] }));
+        set((current) => ({
+          messages: [...current.messages, routeMessage],
+          ...updateConversationStamp(current, conversationId, true),
+        }));
         await councilRepository.appendMessages({ conversationId, messages: [routeMessage] });
       } else {
         memberIds = participantIds.filter((memberId) => {
@@ -530,10 +795,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         try {
           const result = await chatWithMember({
             message: text,
-            member,
+            memberId: member.id,
             conversationId,
-            storeName: member.kbStoreName,
-            previousSummary: conversation.summary,
+            previousSummary: conversation.kind === 'chamber' ? chamberMemory : undefined,
             contextMessages: buildMemberContextWindow(
               get().messages,
               conversationId,
@@ -555,20 +819,21 @@ export const useAppStore = create<AppState>((set, get) => ({
             status: 'sent',
           });
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Request failed';
           reply = buildMessage({
             conversationId,
             role: 'member',
             authorMemberId: memberId,
             content: 'Could not generate a response right now.',
             status: 'error',
-            error: error instanceof Error ? error.message : 'Request failed',
+            error: errorMessage,
           });
         }
       }
 
       set((current) => ({
         messages: [...current.messages, reply],
-        conversations: updateConversationStamp(current.conversations, conversationId),
+        ...updateConversationStamp(current, conversationId, true),
         pendingReplyCount: {
           ...current.pendingReplyCount,
           [conversationId]: Math.max(0, (current.pendingReplyCount[conversationId] ?? 1) - 1),
@@ -585,19 +850,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     await Promise.all(replyTasks);
 
     try {
-      const compacted = await maybeCompact(conversationId, get().messages, conversation);
+      const chamberMemoryContext = conversation.kind === 'chamber' && conversation.chamberMemberId
+        ? {
+          memberName: membersMap.get(conversation.chamberMemberId)?.name ?? 'Member',
+          memberSpecialties: membersMap.get(conversation.chamberMemberId)?.specialties ?? [],
+        }
+        : undefined;
+      const compacted = await maybeCompact(
+        conversationId,
+        conversation,
+        compactionPolicy,
+        chamberMemory,
+        chamberMemoryContext
+      );
       if (compacted) {
         set((current) => ({
-          conversations: current.conversations.map((item) =>
-            item.id === conversationId ? { ...item, summary: compacted.summary, updatedAt: Date.now() } : item
-          ),
-          messages: current.messages.map((item) =>
-            compacted.compactedIds.includes(item.id) ? { ...item, compacted: true } : item
-          ),
+          ...patchConversationEverywhere(current, conversationId, { updatedAt: Date.now() }),
+          chamberMemoryByConversation: {
+            ...current.chamberMemoryByConversation,
+            [conversationId]: compacted.summary,
+          },
+          messages: [
+            ...current.messages.filter((item) => item.conversationId !== conversationId),
+            ...compacted.activeMessages,
+          ],
         }));
       }
     } catch (error) {
-      console.warn('[compaction] failed, will retry next round:', error);
+      void error;
     }
   },
 
@@ -609,7 +889,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refreshHallParticipants(conversationId);
 
     set((state) => ({
-      conversations: updateConversationStamp(state.conversations, conversationId),
+      ...updateConversationStamp(state, conversationId),
     }));
   },
 
@@ -623,7 +903,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refreshHallParticipants(conversationId);
 
     set((state) => ({
-      conversations: updateConversationStamp(state.conversations, conversationId),
+      ...updateConversationStamp(state, conversationId),
+    }));
+  },
+
+  clearChamberHistory: async (conversationId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+
+    await councilRepository.clearMessages(conversationId);
+    await councilRepository.clearChamberSummary(conversationId);
+
+    set((state) => ({
+      messages: state.messages.filter((message) => message.conversationId !== conversationId),
+      pendingReplyCount: { ...state.pendingReplyCount, [conversationId]: 0 },
+      pendingReplyMemberIds: { ...state.pendingReplyMemberIds, [conversationId]: [] },
+      chamberMemoryByConversation: Object.fromEntries(
+        Object.entries(state.chamberMemoryByConversation).filter(([id]) => id !== conversationId)
+      ),
+      messagePaginationByConversation: {
+        ...state.messagePaginationByConversation,
+        [conversationId]: {
+          oldestLoadedAt: undefined,
+          hasOlder: false,
+          isLoadingOlder: false,
+        },
+      },
+      ...patchConversationEverywhere(state, conversationId, {
+        lastMessageAt: undefined,
+      }),
     }));
   },
 
@@ -661,8 +969,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const response = await uploadMemberDocuments({
       memberId: member.id,
-      memberName: member.name,
-      storeName: member.kbStoreName,
       files,
     });
 
@@ -680,22 +986,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   fetchDocsForMember: async (memberId) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member?.kbStoreName) {
-      set((state) => ({ memberDocuments: { ...state.memberDocuments, [memberId]: [] } }));
-      return;
-    }
-    const docs = await listMemberDocuments(member.kbStoreName);
+    if (!member) return;
+    const docs = await listMemberDocuments(member.id);
     set((state) => ({ memberDocuments: { ...state.memberDocuments, [memberId]: docs } }));
   },
 
   hydrateMemberDocuments: async () => {
-    const membersWithStore = get().members.filter((m) => !m.deletedAt && m.kbStoreName);
+    const membersWithStore = get().members.filter((m) => !m.deletedAt);
     if (membersWithStore.length === 0) return;
 
     const results = await Promise.all(
       membersWithStore.map(async (member) => {
         try {
-          const docs = await listMemberDocuments(member.kbStoreName!);
+          const docs = await listMemberDocuments(member.id);
           return { memberId: member.id, docs };
         } catch {
           return { memberId: member.id, docs: [] as Array<{ name?: string; displayName?: string }> };
@@ -713,9 +1016,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteDocForMember: async (memberId, documentName) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member?.kbStoreName || !documentName) return;
+    if (!member || !documentName) return;
 
-    const docs = await deleteMemberDocument({ storeName: member.kbStoreName, documentName });
+    const docs = await deleteMemberDocument({ memberId, documentName });
     set((state) => ({
       memberDocuments: { ...state.memberDocuments, [memberId]: docs },
     }));

@@ -7,25 +7,24 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 - **Product**: The Council — Hall + Chamber advisory chat UX
 - **Frontend**: React 19 + Vite + TypeScript + Tailwind utility classes + CSS tokens in `globals.css`
 - **State**: Zustand (`appStore.ts`) + Convex repository layer
-- **Backend API**: Express + TypeScript served on port `43111`
-- **Gemini service**: `src/backend/geminiRag.ts` — chat, routing, summarisation (File Search, prompt-only, RAG)
-- **Database**: [Convex](https://convex.dev) (managed serverless DB, real-time capable)
-- **Auth**: Convex Auth + Google OAuth — all routes require authentication
-- **Avatars**: Integrated `react-easy-crop` for members and users (stored in Convex Storage)
+- **Backend**: Convex functions only (queries/mutations/actions); no Express runtime
+- **Gemini service**: `convex/ai.ts` + `convex/ai/*` (routing, chat, summaries, KB ingest)
+- **Database/Auth**: Convex + Convex Auth (Google OAuth)
+- **Avatars**: `react-easy-crop`, stored in Convex Storage
 - **PWA**: Vite PWA plugin (manifest + service worker)
 
 ---
 
 ## High-Level Rules
 
-1. Do not break Gemini/File Search backend behaviour in `src/backend/geminiRag.ts` and `src/backend/server.ts`.
+1. Do not break Convex AI/KB actions in `convex/ai.ts` and `convex/ai/*`.
 2. Keep Hall and Chamber chat UX responsive and mobile-safe.
 3. Avoid over-engineering; prefer feature-level code over deep abstraction.
-4. Preserve route shape unless explicitly requested.
-5. Keep visual style minimal, modern, and consistent with existing CSS tokens.
-6. Always run `npm run build` before finalising any change.
-7. Never commit `.env`, `.env.local`, or secrets to the repo.
-8. All pages are auth-gated — never render app content to unauthenticated users.
+4. Preserve auth-gated behavior for all app content.
+5. Keep visual style minimal, modern, and coherent with CSS tokens.
+6. Always run `npm run build` before finalizing changes.
+7. Never commit `.env`, `.env.local`, or secrets.
+8. Convex is the backend source of truth; do not reintroduce local IndexedDB paths.
 
 ---
 
@@ -34,22 +33,12 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 ### Frontend
 | Path | Purpose |
 |------|---------|
-| `src/frontend/main.tsx` | App entry — `ConvexAuthProvider` + `AuthGate` at root |
-| `src/frontend/lib/convexClient.ts` | Shared `ConvexReactClient` singleton (used by `ConvexAuthProvider`) |
-| `src/frontend/components/auth/AuthGate.tsx` | Auth boundary — shows spinner / sign-in page / app |
-| `src/frontend/components/auth/SignInPage.tsx` | Google sign-in card |
-| `src/frontend/App.tsx` | Route definitions |
-| `src/frontend/layouts/AppShell.tsx` | Layout wrapper |
-| `src/frontend/components/sidebar/Sidebar.tsx` | Sidebar |
-| `src/frontend/components/header/TopBar.tsx` | Fixed header |
-| `src/frontend/features/chat/ChatScreen.tsx` | Main chat view |
-| `src/frontend/features/chat/MessageBubble.tsx` | Individual message UI |
-| `src/frontend/features/chat/Composer.tsx` | Input composer |
-| `src/frontend/routes/MembersPage.tsx` | Members management page |
-| `src/frontend/routes/ProfilePage.tsx` | User profile + sign-out |
+| `src/frontend/main.tsx` | App entry (`ConvexAuthProvider` + `AuthGate`) |
+| `src/frontend/lib/convexClient.ts` | Shared `ConvexReactClient` singleton |
+| `src/frontend/components/auth/AuthGate.tsx` | Auth boundary |
+| `src/frontend/components/auth/SignInPage.tsx` | Google sign-in page |
 | `src/frontend/store/appStore.ts` | Zustand state + actions |
-| `src/frontend/types/domain.ts` | Shared domain types (incl. `User`) |
-| `src/frontend/lib/geminiClient.ts` | API client (fetch wrappers) |
+| `src/frontend/lib/geminiClient.ts` | Convex-backed AI client wrappers |
 | `src/frontend/repository/CouncilRepository.ts` | Repository interface |
 | `src/frontend/repository/ConvexCouncilRepository.ts` | Convex implementation |
 | `src/frontend/styles/globals.css` | Design tokens + global CSS |
@@ -57,266 +46,190 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 ### Backend / Convex
 | Path | Purpose |
 |------|---------|
-| `src/backend/server.ts` | Express API server |
-| `src/backend/geminiRag.ts` | `GeminiRAGChatbot` class |
-| `src/backend/modelConfig.ts` | Single source of truth for model IDs per backend path |
-| `convex/schema.ts` | Convex database schema (V2 + auth) |
-| `convex/auth.ts` | Convex Auth config (Google OAuth provider) |
-| `convex/auth.config.ts` | JWT issuer config (auto-generated) |
-| `convex/http.ts` | HTTP router — OAuth callback (`/api/auth/callback/google`) |
-| `convex/users.ts` | `viewer` query + `updateProfile` mutation |
-| `convex/members.ts` | Members queries/mutations (scoped by `userId`) |
-| `convex/conversations.ts` | Conversations queries/mutations (scoped by `userId`) |
-| `convex/messages.ts` | Messages queries/mutations |
-| `convex/settings.ts` | App-wide key/value config (non-user settings) |
-| `convex/seed.ts` | One-time init sentinel |
+| `convex/ai.ts` | Public AI/KB action surface |
+| `convex/ai/geminiService.ts` | Gemini + File Search orchestration |
+| `convex/ai/modelConfig.ts` | Model ID resolution |
+| `convex/ai/ownership.ts` | Auth/ownership checks for actions |
+| `convex/ai/kbIngest.ts` | KB staging ingest, rehydrate, purge |
+| `convex/kbDigests.ts` | Per-document KB digest storage + lifecycle |
+| `convex/kbStagedDocuments.ts` | KB staged-document audit records |
+| `convex/memoryLogs.ts` | Chamber memory log reads |
+| `convex/schema.ts` | Convex schema |
+| `convex/auth.ts` | Convex Auth config |
+| `convex/http.ts` | HTTP router (auth callbacks only) |
+| `convex/users.ts` | User profile functions |
+| `convex/members.ts` | Member functions |
+| `convex/conversations.ts` | Conversation functions |
+| `convex/messages.ts` | Message functions |
+| `convex/settings.ts` | App config functions |
 
 ---
 
 ## Dev / Build Commands
 
 ```bash
-npm install          # install all deps
-npm run dev          # frontend (43112) + backend (43111) in watch mode
-npm run build        # production build (frontend + server tsc)
-npm start            # serve production bundle
-npx convex dev       # keep Convex schema/functions in sync (run in separate terminal)
+npm install
+npm run dev
+npm run build
+npm start
+npx convex dev
 ```
+
+- Frontend dev: `http://localhost:43112`
+- Convex functions/schema sync through `npx convex dev`
+
+---
+
+## Deployment Sync Checklist
+
+Use this checklist whenever backend actions change:
+
+1. Confirm frontend target deployment in `.env.local`:
+   - `VITE_CONVEX_URL`
+   - `CONVEX_DEPLOYMENT`
+2. Push functions to the same target deployment:
+   - `npx convex dev --once` (dev) or `npx convex deploy` (prod)
+3. Verify new actions exist on that deployment:
+   - `npx convex function-spec | rg "ai.js:chatWithMember|ai.js:routeHallMembers"`
+4. Verify required runtime env exists on that deployment:
+   - `npx convex env list | rg "^GEMINI_API_KEY="`
+
+If the app shows `Could not find public function for 'ai:chatWithMember'`, the frontend is pointed at a deployment that does not have the latest functions yet.
 
 ---
 
 ## Architecture: Authentication
 
-**Provider**: Convex Auth + Google OAuth only. No passwords, no Clerk/Auth0.
-
-### How auth works end-to-end
-
-1. `ConvexAuthProvider` (in `main.tsx`) wraps the entire app with the shared `ConvexReactClient` from `src/frontend/lib/convexClient.ts`.
-2. `AuthGate` (directly inside the provider) blocks all routes. Uses `useConvexAuth()` to check auth state and `useAuthToken()` to read the JWT.
-3. On sign-in, `AuthGate` calls `convexRepository.setToken(token)` to inject the JWT into `ConvexHttpClient.setAuth()` — this makes all Zustand repository calls authenticated.
-4. On sign-out, the token is cleared from `ConvexHttpClient` and the user is returned to the sign-in page.
-
-### Auth token flow (critical — do not break)
-
-```
-ConvexAuthProvider → manages JWT internally on ConvexReactClient
-       ↓
-AuthGate (useAuthToken) → pushes token to ConvexHttpClient via convexRepository.setToken()
-       ↓
-ConvexHttpClient (in ConvexCouncilRepository) → sends token in Authorization header
-       ↓
-Convex backend → getAuthUserId(ctx) → scopes queries/mutations to the signed-in user
-```
-
-> ⚠️ There are **two Convex clients** in use, by design:
-> - `ConvexReactClient` (shared singleton in `convexClient.ts`) — used only for `ConvexAuthProvider` and auth hooks
-> - `ConvexHttpClient` (in `ConvexCouncilRepository`) — used for all data queries/mutations; token is injected by `AuthGate`
->
-> Do NOT create a new `ConvexHttpClient` without calling `setToken()` on it — it will have no auth token and all calls will fail with "Not authenticated".
-
-### Convex Auth environment variables (set on Convex deployment)
-
-| Var | Purpose |
-|-----|---------|
-| `AUTH_GOOGLE_ID` | Google OAuth client ID |
-| `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
-| `JWT_PRIVATE_KEY` | Auto-set by `npx @convex-dev/auth` |
-| `JWKS` | Auto-set by `npx @convex-dev/auth` |
-| `SITE_URL` | Auto-set by `npx @convex-dev/auth` |
+1. `ConvexAuthProvider` wraps the app.
+2. `AuthGate` blocks unauthenticated access and syncs token into repository `ConvexHttpClient`.
+3. All Convex functions rely on auth context (`getAuthUserId`).
+4. Never create a `ConvexHttpClient` without `setToken()` flow.
 
 ---
 
-## Architecture: Data Layer (V2 — Convex)
+## Architecture: Data Layer
 
-**Convex is the single source of truth.** The old IndexedDB layer has been fully removed.
+Core tables:
+- `users`
+- `members`
+- `conversations`
+- `conversationParticipants`
+- `conversationMemoryLogs`
+- `messages`
+- `appConfig`
+- `kbStagedDocuments`
+- `kbDocumentDigests`
+- Convex Auth managed tables (`authSessions`, `authAccounts`, ...)
 
-### Schema tables
-
-| Table | Owner | Key fields |
-|-------|-------|-----------|
-| `users` | — | `name?`, `email?`, `image?` (identity from Google or custom storage ID resolved to URL) |
-| `members` | `userId` | `name`, `avatarId?` (storage ID), `specialties`, `systemPrompt`, `kbStoreName?`, `deletedAt?`, `updatedAt` |
-| `conversations` | `userId` | `kind` (`hall`/`chamber`), `title`, `chamberMemberId?`, `deletedAt?`, `summary?`, `updatedAt` |
-| `conversationParticipants` | `userId` | `conversationId`, `memberId`, `status` (`active`/`removed`), `joinedAt`, `leftAt?` |
-| `messages` | `userId` | `conversationId`, `role`, `authorMemberId?`, `content`, `status`, `compacted`, `routing?`, `inReplyToMessageId?`, `originConversationId?`, `originMessageId?`, `error?` |
-| `appConfig` | — | `key`, `value` — app-wide flags and user theme preference (`theme-mode` key) |
-| `authSessions`, `authAccounts`, etc. | — | Managed by `@convex-dev/auth` — do not touch |
-
-**`members` and `conversations` are always scoped to the authenticated user** via `getAuthUserId(ctx)` on the backend. Never query them without auth context.
-
-### Indexes
-- `members.by_user` — `(userId)` — members for a user (active derived from `deletedAt`)
-- `conversations.by_user` — `(userId)` — conversations for a user
-- `conversations.by_user_kind` — `(userId, kind)` — per-kind conversation lists
-- `conversations.by_user_kind_member` — `(userId, kind, chamberMemberId)` — one chamber per member lookup
-- `conversationParticipants.by_conversation_status` — `(conversationId, status)` — active hall members
-- `conversationParticipants.by_user_conversation` — `(userId, conversationId)` — participant management
-- `messages.by_conversation` — all messages for a conversation
-- `messages.by_conversation_active` — `(conversationId, compacted)` — active messages only
-- `messages.by_conversation_parent` — reply threading
-- `messages.by_origin` — cross-conversation origin linkage
-
-### Repository layer
-`ConvexCouncilRepository` implements `CouncilRepository` using `ConvexHttpClient` (imperative, works outside React). All store actions go through the repository interface — never call Convex directly from components.
+All member/conversation/message access is user-scoped by auth user ID.
 
 ---
 
-## Architecture: Compaction (SummaryBuffer Pattern)
+## Architecture: AI + KB
 
-Long conversations are managed with a rolling summary. After every reply batch:
+Public Convex actions in `convex/ai.ts`:
+- `routeHallMembers`
+- `suggestHallTitle`
+- `suggestMemberSpecialties`
+- `chatWithMember`
+- `compactConversation`
+- `ensureMemberKnowledgeStore`
+- `uploadMemberDocuments`
+- `listMemberKnowledgeDocuments`
+- `deleteMemberKnowledgeDocument`
+- `rehydrateMemberKnowledgeStore`
+- `purgeExpiredStagedKnowledgeDocuments`
 
-1. `maybeCompact()` in `appStore.ts` checks if active messages ≥ `COMPACTION_THRESHOLD` (20).
-2. If threshold is met, the **oldest half** of active non-system messages are sent to `POST /api/compact`.
-3. The server calls `GeminiRAGChatbot.summarizeMessages()` — a Gemini call combining the previous summary + new messages into one rolling summary.
-4. The server then calls `conversations:applyCompaction` on Convex:
-   - Stores the new `summary` on the conversation doc
-   - Marks the compacted message rows `compacted: true`
-5. On the next turn, `buildMemberContextWindow()` skips compacted rows. The `previousSummary` is passed to `POST /api/member-chat` and injected into the effective system prompt between the persona and the recent context window.
-
-**Compaction is fire-and-forget** — failures are logged with `[compaction]` prefix and retried on the next round.
-
----
-
-## API Endpoints
-
-### Chat
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/member-chat` | Single member chat (prompts Gemini) |
-| `POST` | `/api/compact` | Rolling compaction: summarise + store in Convex |
-| `POST` | `/api/hall/route` | Route a message to the best council members |
-| `POST` | `/api/hall/title` | Generate hall title from first user message |
-| `POST` | `/api/member/specialties/suggest` | Generate member specialties from name + system prompt |
-
-### Knowledge Base (per member)
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/member-kb/ensure` | Create File Search store for a member |
-| `POST` | `/api/member-kb/upload` | Upload docs to member's store |
-| `GET`  | `/api/member-kb/documents` | List documents in a store |
-| `POST` | `/api/member-kb/document/delete` | Delete a document by name |
+KB upload flow:
+1. Frontend uploads files to Convex Storage via `generateUploadUrl`.
+2. Frontend sends staged `storageId` metadata to `uploadMemberDocuments`.
+3. Action ingests to Gemini File Search store and records audit rows in `kbStagedDocuments`.
+4. Ingest also upserts per-document digest rows in `kbDocumentDigests`.
+5. KB gate/query rewrite can use those digest hints for better recall on follow-ups.
+4. Staged binaries are retained for 90 days (rehydration support) unless purged.
 
 ---
 
 ## Environment Variables
 
-### Server (`.env`)
-| Var | Purpose |
-|-----|---------|
-| `GEMINI_API_KEY` | Gemini API key (required) |
-| `GEMINI_MODEL` | Default Gemini model |
-| `GEMINI_CHAT_MODEL` | Model for member chat responses |
-| `GEMINI_RETRIEVAL_MODEL` | Model for File Search retrieval |
-| `GEMINI_ROUTER_MODEL` | Model for hall router calls |
-| `GEMINI_HALL_TITLE_MODEL` | Optional title model override |
-| `GEMINI_SPECIALTIES_MODEL` | Optional specialties model override |
-| `GEMINI_SUMMARY_MODEL` | Optional compaction summary model override |
-| `GEMINI_KB_GATE_MODEL` | Model for KB gate decision |
-| `GEMINI_ROUTER_TEMPERATURE` | Router temperature (default `0`) |
-| `GEMINI_ROUTER_TIMEOUT_MS` | Router timeout (default `3500`) |
-| `GEMINI_DEBUG_LOGS` | Set to `1` for server-side verbose logs |
-| `PORT` | Express server port (default `43111`) |
+### Local (`.env.local`)
+- `VITE_CONVEX_URL`
+- `VITE_CONVEX_SITE_URL`
+- `CONVEX_DEPLOYMENT` (if needed by CLI)
 
-### Vite / Convex CLI (`.env.local`)
-| Var | Purpose |
-|-----|---------|
-| `VITE_CONVEX_URL` | Convex deployment URL (written by `npx convex dev`) |
-| `CONVEX_DEPLOYMENT` | Convex deployment ID |
+### Convex runtime env
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `GEMINI_CHAT_MODEL`
+- `GEMINI_RETRIEVAL_MODEL`
+- `GEMINI_ROUTER_MODEL`
+- `GEMINI_HALL_TITLE_MODEL`
+- `GEMINI_SPECIALTIES_MODEL`
+- `GEMINI_SUMMARY_MODEL`
+- `GEMINI_CHAMBER_MEMORY_MODEL`
+- `GEMINI_KB_GATE_MODEL`
+- `GEMINI_KB_QUERY_REWRITE_MODEL`
+- `GEMINI_KB_DIGEST_MODEL`
+- `GEMINI_ROUTER_TEMPERATURE`
+- `GEMINI_DEBUG_LOGS`
 
-> **Important**: The server explicitly loads `.env.local` via `dotenv.config({ path: '.env.local', override: false })` so that `VITE_CONVEX_URL` is available at runtime.
+Set via:
+```bash
+npx convex env set <KEY> <VALUE>
+```
 
-Keep `.env.example` updated whenever new variables are added.
-
-> Model selection is centralized in `src/backend/modelConfig.ts`. Prefer using `resolveModel()`/`MODEL_IDS` instead of ad-hoc strings.
+For production deployment env:
+```bash
+npx convex env set --prod <KEY> <VALUE>
+```
 
 ---
 
 ## Product Contracts (Do Not Regress)
 
 ### Auth
-1. No page is accessible without authentication.
-2. `AuthGate` is the single enforcement point — it wraps the entire app inside `ConvexAuthProvider`.
-3. Sign-out redirects to the sign-in page and clears the Convex session.
-4. User profile data (`name`, `email`, `image`) lives in the `users` table and is editable via the Profile page.
-5. User theme preference (`theme-mode`) lives in `appConfig`.
+1. No app page content is visible without auth.
+2. Sign-out returns to sign-in and clears session state.
+3. User profile (`name`, `email`, `image`) is stored in `users`.
+4. Theme preference lives in `appConfig` key `theme-mode`.
 
 ### UI / UX
-1. **Sidebar**: Desktop collapsible; mobile slide-in sheet with smooth transition.
-2. **Header**: Fixed; scroll in chat/content area only.
-   - Hall: member management pill on the right
-   - Chamber: online indicator (green dot + "Online") on the right
-3. **Composer**: Single-line start, auto-grow, dim send button when empty.
-4. **Chat bubbles**:
-   - Member bubbles: Use member avatar with `UserCircle2` fallback
-   - Hall member bubbles: reply/comment/copy actions
-   - Chamber member bubbles: copy action only
-   - User bubbles: copy action in footer
-   - Markdown rendering enabled inside `.message-markdown`
-5. **Sidebar groups**: Hall and Chambers are collapsible directory-style groups; chamber items show avatar and omit the `Chamber ·` prefix.
-6. **Profile Link**: Shows logged-in user's avatar (or `UserCircle2` fallback) in the navigation sidebar.
-7. **Members page**: No emoji field; uses `AvatarUploader` with `react-easy-crop`; KB upload/delete inside edit/create panel only; on mobile the active panel appears above the list.
+1. Sidebar desktop collapse + mobile sheet behavior stays intact.
+2. Header remains fixed; scroll only in content area.
+3. Composer auto-grows from single-line.
+4. Bubble/action behavior stays role-specific.
+5. Members page uses avatar uploader and in-panel KB management.
 
-### Chat behaviour
-1. Messages are always persisted in Convex after being appended to local state.
-2. Routing messages (system role) are stored and displayed as `RoutePill`.
-3. `buildMemberContextWindow()` excludes `compacted: true` messages and system messages.
-4. Previous conversation summary is prepended to the system prompt on every chat call once compaction has occurred.
-5. Hall routing runs once per hall (first routed turn); later hall turns target active hall participants.
-6. Hall draft (`/hall/new`) is lazy: no persisted hall row until first message.
-7. Hall prompts inject hall context (present members + recent member opinions) for each member call.
-8. Member replies are generated in parallel and appended as each reply finishes (progressive render).
+### Chat Behavior
+1. Messages persist to Convex after local append.
+2. Routing system messages remain persisted and rendered.
+3. Compacted/system rows are excluded from member context windows.
+4. Error-status messages must not be included in LLM context windows.
+4. Chamber memory is injected once compaction exists.
+5. Hall routing runs once, then active participants are reused.
+6. Hall and chamber creation remain lazy on first message.
+7. Member replies remain parallel + progressive.
+8. Message history supports upward lazy-loading/pagination in chat views.
 
-### Gemini / KB
-1. Member KB is optional — AI must work without KB (prompt-only fallback).
-2. KB uploads use File Search store path via `uploadDocumentToStore()`.
-3. Duplicate upload guard: backend skips re-uploading the same filename for the same member store.
-4. Hall routing uses `POST /api/hall/route` with structured output against member IDs.
-5. Member specialties suggestions are generated via `POST /api/member/specialties/suggest`.
-
----
-
-## Browser Debug Contracts
-
-Console group logs for member chat should include:
-
+### Debug Contract
+Console output for member chat should include:
 - `KB Check`
 - `KB Gate Decision`
-- `File Search Request` (when invoked)
-- `File Search Response` (when invoked)
+- `File Search Request`
+- `File Search Response`
 - `Chat Model Prompt`
-
-Server verbose logs are opt-in via `GEMINI_DEBUG_LOGS=1`.
-
----
-
-## Styling / Theming
-
-1. Respect `light` / `dark` / `system` mode — `ThemeProvider` manages CSS class on `<html>`.
-2. Use tokens from `src/frontend/styles/globals.css` (CSS custom properties).
-3. Keep UI subtle: avoid heavy borders, loud shadows, or noisy animations.
-4. Markdown styling lives in `.message-markdown` — keep it coherent with bubble style.
-5. Theme mode preference is stored in `appConfig` under key `theme-mode` — not in the `users` table.
 
 ---
 
 ## Safe Change Strategy
 
-1. Edit the smallest responsible component/module.
-2. Verify mobile + desktop paths after any layout change.
-3. Run `npm run build` before finalising.
-4. Do not remove or break existing endpoints unless explicitly asked.
-5. When changing the Convex schema, run `npx convex dev --once` to validate before pushing.
-6. After any schema change that adds required fields, clear existing data or make fields optional temporarily, then restore after migration.
-
----
-
-## Commit Guidance
-
-- Focused, descriptive commits.
-- Mention user-visible behaviour changes in the message body.
-- Prefer one cohesive commit per user-request batch.
+1. Edit the smallest responsible module.
+2. Validate mobile and desktop behavior on UI changes.
+3. Run `npm run build` before finalizing.
+4. Run `npx convex codegen --typecheck enable --dry-run` for Convex validation.
+5. Use additive schema changes for migrations when possible.
 
 ## Legacy Archive
 
-- Old IndexedDB implementation and seed mocks are archived at `archive/legacy-indexeddb/`.
-- Do not reintroduce IndexedDB paths in the active app unless explicitly requested.
+- Legacy IndexedDB implementation is in `archive/legacy-indexeddb/`.
+- Do not reintroduce IndexedDB runtime paths unless explicitly requested.
