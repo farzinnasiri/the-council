@@ -55,6 +55,10 @@ Merged in this order:
 
 Required keys are defined in `config/env/convex.required.keys`.
 
+Important:
+- `SITE_URL` must be set in `.env.convex.local` (do not rely on defaults).
+- `JWT_PRIVATE_KEY` and `JWKS` are managed by `npx @convex-dev/auth` and should not be manually set in `.env.convex.local`.
+
 Bootstrap local secret file:
 
 ```bash
@@ -85,6 +89,11 @@ make env-sync-prod
 
 - `VITE_CONVEX_URL`
 - `VITE_CONVEX_SITE_URL`
+
+### Required Convex auth URL setting
+
+- Convex runtime `SITE_URL` should match your deployed frontend URL (for OAuth callbacks), for example:
+  - `SITE_URL=https://the-council-hazel.vercel.app`
 
 ### Local/manual Vercel ops
 

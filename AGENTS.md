@@ -121,6 +121,7 @@ Use this checklist whenever backend actions or env values change:
    - `npx convex function-spec | rg "ai.js:chatWithMember|ai.js:routeHallMembers"`
 6. Verify required runtime env exists on that deployment:
    - `npx convex env list | rg "^GEMINI_API_KEY="`
+   - `npx convex env list | rg "^SITE_URL="`
 
 If the app shows `Could not find public function for 'ai:chatWithMember'`, the frontend is pointed at a deployment that does not have the latest functions yet.
 
@@ -206,6 +207,8 @@ KB upload flow:
 - Secrets and deployment-specific overrides for Convex runtime env sync.
 - Merged after `config/env/convex.defaults.env`.
 - May use target-specific suffixes: `KEY__DEV`, `KEY__PROD`.
+- Must include `SITE_URL` for OAuth callback correctness.
+- Do not set `JWT_PRIVATE_KEY` or `JWKS` here; manage them with `npx @convex-dev/auth`.
 
 ### Convex runtime env
 - `GEMINI_API_KEY`
