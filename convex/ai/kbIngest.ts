@@ -208,7 +208,6 @@ export async function deleteMemberDocument(
   await ctx.runMutation(api.kbDigests.markDeletedByDocument as any, {
     memberId,
     geminiDocumentName: documentName,
-    deletedAt: Date.now(),
   });
   return await service.listDocumentsFromStore(member.kbStoreName);
 }

@@ -106,6 +106,19 @@ export interface MemberChatResult {
   };
 }
 
+export interface KBDigestMetadata {
+  id: string;
+  memberId: string;
+  geminiDocumentName?: string;
+  displayName: string;
+  topics: string[];
+  entities: string[];
+  lexicalAnchors: string[];
+  styleAnchors: string[];
+  digestSummary: string;
+  updatedAt: number;
+}
+
 export interface CouncilRepository {
   init(): Promise<void>;
   getSnapshot(): Promise<CouncilSnapshot>;
@@ -204,6 +217,16 @@ export interface CouncilRepository {
     memberId: string;
     documentName: string;
   }): Promise<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }>;
+  listMemberDigestMetadata(input: { memberId: string }): Promise<KBDigestMetadata[]>;
+  updateMemberDigestMetadata(input: {
+    digestId: string;
+    displayName: string;
+    topics: string[];
+    entities: string[];
+    lexicalAnchors: string[];
+    styleAnchors: string[];
+    digestSummary: string;
+  }): Promise<{ ok: boolean }>;
   rehydrateMemberStore(input: {
     memberId: string;
     mode?: 'missing-only' | 'all';

@@ -23,6 +23,7 @@ import type {
   CreateHallInput,
   CreateMemberInput,
   HallTitleResult,
+  KBDigestMetadata,
   MemberChatResult,
   MemberSpecialtiesResult,
   RouteResult,
@@ -486,6 +487,48 @@ class ConvexCouncilRepository implements CouncilRepository {
       memberId: input.memberId as Id<'members'>,
       documentName: input.documentName,
     })) as { ok: boolean; documents?: Array<{ name?: string; displayName?: string }> };
+  }
+
+  async listMemberDigestMetadata(input: { memberId: string }): Promise<KBDigestMetadata[]> {
+    const rows = (await this.client.query(api.kbDigests.listByMember as any, {
+      memberId: input.memberId as Id<'members'>,
+      includeDeleted: false,
+    })) as Array<any>;
+
+    return rows.map((row) => ({
+      id: row._id as string,
+      memberId: row.memberId as string,
+      geminiDocumentName: row.geminiDocumentName as string | undefined,
+      displayName: row.displayName as string,
+      topics: (row.topics ?? []) as string[],
+      entities: (row.entities ?? []) as string[],
+      lexicalAnchors: (row.lexicalAnchors ?? []) as string[],
+      styleAnchors: (row.styleAnchors ?? []) as string[],
+      digestSummary: (row.digestSummary ?? '') as string,
+      updatedAt: row.updatedAt as number,
+    }));
+  }
+
+  async updateMemberDigestMetadata(input: {
+    digestId: string;
+    displayName: string;
+    topics: string[];
+    entities: string[];
+    lexicalAnchors: string[];
+    styleAnchors: string[];
+    digestSummary: string;
+  }): Promise<{ ok: boolean }> {
+    await this.client.mutation(api.kbDigests.updateDigestMetadata as any, {
+      digestId: input.digestId as Id<'kbDocumentDigests'>,
+      displayName: input.displayName,
+      topics: input.topics,
+      entities: input.entities,
+      lexicalAnchors: input.lexicalAnchors,
+      styleAnchors: input.styleAnchors,
+      digestSummary: input.digestSummary,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
   }
 
   async rehydrateMemberStore(input: {

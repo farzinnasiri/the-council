@@ -149,7 +149,6 @@ export const markDeletedByDocument = mutation({
   args: {
     memberId: v.id('members'),
     geminiDocumentName: v.string(),
-    deletedAt: v.optional(v.number()),
   },
   returns: v.number(),
   handler: async (ctx, args) => {
@@ -163,19 +162,51 @@ export const markDeletedByDocument = mutation({
       )
       .collect();
 
-    const deletedAt = args.deletedAt ?? Date.now();
     let count = 0;
 
     for (const row of rows) {
       if (row.userId !== userId) continue;
-      await ctx.db.patch(row._id, {
-        status: 'deleted',
-        deletedAt,
-        updatedAt: deletedAt,
-      });
+      await ctx.db.delete(row._id);
       count += 1;
     }
 
     return count;
+  },
+});
+
+export const updateDigestMetadata = mutation({
+  args: {
+    digestId: v.id('kbDocumentDigests'),
+    displayName: v.optional(v.string()),
+    topics: v.optional(v.array(v.string())),
+    entities: v.optional(v.array(v.string())),
+    lexicalAnchors: v.optional(v.array(v.string())),
+    styleAnchors: v.optional(v.array(v.string())),
+    digestSummary: v.optional(v.string()),
+    updatedAt: v.optional(v.number()),
+  },
+  returns: v.id('kbDocumentDigests'),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const digest = await ctx.db.get(args.digestId);
+    if (!digest || digest.userId !== userId) {
+      throw new Error('Knowledge digest not found');
+    }
+    await assertOwnedMember(ctx, userId, digest.memberId);
+
+    const now = args.updatedAt ?? Date.now();
+    const patch: Record<string, any> = {
+      updatedAt: now,
+    };
+
+    if (args.displayName !== undefined) patch.displayName = args.displayName;
+    if (args.topics !== undefined) patch.topics = args.topics;
+    if (args.entities !== undefined) patch.entities = args.entities;
+    if (args.lexicalAnchors !== undefined) patch.lexicalAnchors = args.lexicalAnchors;
+    if (args.styleAnchors !== undefined) patch.styleAnchors = args.styleAnchors;
+    if (args.digestSummary !== undefined) patch.digestSummary = args.digestSummary;
+
+    await ctx.db.patch(args.digestId, patch);
+    return args.digestId;
   },
 });

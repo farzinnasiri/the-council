@@ -1,16 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, MessageSquarePlus, Pencil, Plus, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
+import { Archive, Expand, MessageSquarePlus, Pencil, Plus, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
+import type { KBDigestMetadata } from '../repository/CouncilRepository';
 import { suggestMemberSpecialties } from '../lib/geminiClient';
 
 interface MemberFormState {
   name: string;
   specialties: string;
   systemPrompt: string;
+}
+
+interface DigestEditorState {
+  digestId: string;
+  displayName: string;
+  topics: string;
+  entities: string;
+  lexicalAnchors: string;
+  styleAnchors: string;
+  digestSummary: string;
 }
 
 const emptyForm: MemberFormState = {
@@ -37,6 +49,14 @@ export function MembersPage() {
   const [deletingDocumentName, setDeletingDocumentName] = useState<string | null>(null);
   const [isSuggestingSpecialties, setIsSuggestingSpecialties] = useState(false);
   const [pendingAvatarBlob, setPendingAvatarBlob] = useState<Blob | null>(null);
+  const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
+  const [promptDialogValue, setPromptDialogValue] = useState('');
+  const [kbDigests, setKbDigests] = useState<KBDigestMetadata[]>([]);
+  const [isDigestLoading, setIsDigestLoading] = useState(false);
+  const [digestLoadError, setDigestLoadError] = useState<string | null>(null);
+  const [digestEditor, setDigestEditor] = useState<DigestEditorState | null>(null);
+  const [isDigestEditorOpen, setIsDigestEditorOpen] = useState(false);
+  const [isSavingDigest, setIsSavingDigest] = useState(false);
 
   const activeMembers = useMemo(() => members.filter((member) => !member.deletedAt), [members]);
   const archivedMembers = useMemo(() => members.filter((member) => Boolean(member.deletedAt)), [members]);
@@ -47,10 +67,26 @@ export function MembersPage() {
 
   useEffect(() => {
     if (!editingMemberId) {
+      setKbDigests([]);
+      setDigestLoadError(null);
       return;
     }
     setBusyMemberId(editingMemberId);
-    void fetchDocsForMember(editingMemberId).finally(() => setBusyMemberId(null));
+    setIsDigestLoading(true);
+    setDigestLoadError(null);
+    void fetchDocsForMember(editingMemberId)
+      .finally(() => setBusyMemberId(null));
+    void convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
+      .then((rows) => setKbDigests(rows))
+      .catch((error) => {
+        console.error('Failed to load KB metadata', error);
+        setKbDigests([]);
+        setDigestLoadError('Could not load metadata. Please reopen edit mode or refresh.');
+      })
+      .finally(() => {
+      setBusyMemberId(null);
+      setIsDigestLoading(false);
+      });
   }, [editingMemberId, fetchDocsForMember]);
 
   const startCreate = () => {
@@ -58,6 +94,10 @@ export function MembersPage() {
     setForm(emptyForm);
     setIsCreating(true);
     setPendingAvatarBlob(null);
+    setKbDigests([]);
+    setDigestLoadError(null);
+    setDigestEditor(null);
+    setIsDigestEditorOpen(false);
   };
 
   const startEdit = (memberId: string) => {
@@ -72,6 +112,9 @@ export function MembersPage() {
     });
     setIsCreating(false);
     setPendingAvatarBlob(null);
+    setDigestLoadError(null);
+    setDigestEditor(null);
+    setIsDigestEditorOpen(false);
   };
 
   const resetForm = () => {
@@ -80,6 +123,12 @@ export function MembersPage() {
     setForm(emptyForm);
     setDeletingDocumentName(null);
     setPendingAvatarBlob(null);
+    setIsPromptDialogOpen(false);
+    setPromptDialogValue('');
+    setKbDigests([]);
+    setDigestLoadError(null);
+    setDigestEditor(null);
+    setIsDigestEditorOpen(false);
   };
 
   const uploadAvatarForMember = async (memberId: string, blob: Blob) => {
@@ -142,7 +191,18 @@ export function MembersPage() {
     setBusyMemberId(editingMemberId);
     try {
       await uploadDocsForMember(editingMemberId, Array.from(files));
-      await fetchDocsForMember(editingMemberId);
+      await Promise.all([
+        fetchDocsForMember(editingMemberId),
+        convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
+          .then((rows) => {
+            setKbDigests(rows);
+            setDigestLoadError(null);
+          })
+          .catch((error) => {
+            console.error('Failed to refresh KB metadata after upload', error);
+            setDigestLoadError('Metadata refresh failed after upload.');
+          }),
+      ]);
     } finally {
       setBusyMemberId(null);
     }
@@ -156,6 +216,9 @@ export function MembersPage() {
     setDeletingDocumentName(documentName);
     try {
       await deleteDocForMember(editingMemberId, documentName);
+      const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
+      setKbDigests(rows);
+      setDigestLoadError(null);
     } finally {
       setDeletingDocumentName(null);
     }
@@ -178,6 +241,75 @@ export function MembersPage() {
     } finally {
       setIsSuggestingSpecialties(false);
     }
+  };
+
+  const openPromptDialog = () => {
+    setPromptDialogValue(form.systemPrompt);
+    setIsPromptDialogOpen(true);
+  };
+
+  const savePromptDialog = () => {
+    setForm((current) => ({ ...current, systemPrompt: promptDialogValue }));
+    setIsPromptDialogOpen(false);
+  };
+
+  const listToText = (items: string[]) => items.join(', ');
+
+  const textToList = (value: string) =>
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const openDigestEditor = (digest: KBDigestMetadata) => {
+    setDigestEditor({
+      digestId: digest.id,
+      displayName: digest.displayName,
+      topics: listToText(digest.topics),
+      entities: listToText(digest.entities),
+      lexicalAnchors: listToText(digest.lexicalAnchors),
+      styleAnchors: listToText(digest.styleAnchors),
+      digestSummary: digest.digestSummary,
+    });
+    setIsDigestEditorOpen(true);
+  };
+
+  const saveDigestEditor = async () => {
+    if (!digestEditor || !editingMemberId) return;
+    setIsSavingDigest(true);
+    try {
+      await convexRepository.updateMemberDigestMetadata({
+        digestId: digestEditor.digestId,
+        displayName: digestEditor.displayName.trim() || 'Untitled document',
+        topics: textToList(digestEditor.topics),
+        entities: textToList(digestEditor.entities),
+        lexicalAnchors: textToList(digestEditor.lexicalAnchors),
+        styleAnchors: textToList(digestEditor.styleAnchors),
+        digestSummary: digestEditor.digestSummary.trim(),
+      });
+      const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
+      setKbDigests(rows);
+      setDigestLoadError(null);
+      setIsDigestEditorOpen(false);
+    } finally {
+      setIsSavingDigest(false);
+    }
+  };
+
+  const normalizeDocKey = (value?: string) => (value ?? '').trim().toLowerCase();
+  const digestByDocumentName = new Map(
+    kbDigests
+      .filter((digest) => Boolean(digest.geminiDocumentName))
+      .map((digest) => [normalizeDocKey(digest.geminiDocumentName), digest] as const)
+  );
+  const digestByDisplayName = new Map(
+    kbDigests.map((digest) => [normalizeDocKey(digest.displayName), digest] as const)
+  );
+
+  const digestForDoc = (doc: { name?: string; displayName?: string }) => {
+    const byName = digestByDocumentName.get(normalizeDocKey(doc.name));
+    if (byName) return byName;
+    return digestByDisplayName.get(normalizeDocKey(doc.displayName ?? doc.name));
   };
 
   return (
@@ -275,7 +407,20 @@ export function MembersPage() {
               </label>
 
               <label className="grid gap-1 text-sm">
-                System prompt
+                <span className="flex items-center justify-between gap-2">
+                  <span>System prompt</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 gap-1 text-xs"
+                    onClick={openPromptDialog}
+                    title="Expand system prompt editor"
+                  >
+                    <Expand className="h-3.5 w-3.5" />
+                    Expand
+                  </Button>
+                </span>
                 <textarea
                   className="min-h-36 rounded-lg border border-border bg-background px-3 py-2"
                   value={form.systemPrompt}
@@ -333,25 +478,58 @@ export function MembersPage() {
                   ) : null}
 
                   {editingMemberId && editingDocs.length > 0 ? (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {editingDocs.map((doc, index) => {
                         const key = doc.name ?? doc.displayName ?? `doc-${index}`;
+                        const digest = digestForDoc(doc);
                         return (
-                          <div key={key} className="flex items-center justify-between rounded-md border border-border/70 px-2 py-1.5">
-                            <span className="truncate pr-3 text-xs text-foreground/90">{doc.displayName ?? doc.name ?? 'Untitled document'}</span>
-                            {doc.name ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                disabled={deletingDocumentName === doc.name}
-                                onClick={() => void deleteDocument(doc.name as string)}
-                                title="Delete document"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            ) : null}
-                          </div>
+                          <article key={key} className="rounded-md border border-border/70 px-2.5 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate pr-3 text-xs text-foreground/90">{doc.displayName ?? doc.name ?? 'Untitled document'}</span>
+                              <div className="flex items-center gap-1">
+                                {digest ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-[11px]"
+                                    onClick={() => openDigestEditor(digest)}
+                                  >
+                                    Edit metadata
+                                  </Button>
+                                ) : null}
+                                {doc.name ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    disabled={deletingDocumentName === doc.name}
+                                    onClick={() => void deleteDocument(doc.name as string)}
+                                    title="Delete document"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="mt-2 border-t border-border/60 pt-2">
+                              {digest ? (
+                                <>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Topics {digest.topics.length} · Entities {digest.entities.length}
+                                  </p>
+                                  {digest.digestSummary ? (
+                                    <p className="mt-1 text-[11px] text-muted-foreground">{digest.digestSummary}</p>
+                                  ) : null}
+                                </>
+                              ) : isDigestLoading ? (
+                                <p className="text-[11px] text-muted-foreground">Metadata syncing…</p>
+                              ) : (
+                                <p className="text-[11px] text-muted-foreground">No digest metadata yet for this document.</p>
+                              )}
+                            </div>
+                          </article>
                         );
                       })}
                     </div>
@@ -360,9 +538,136 @@ export function MembersPage() {
                       {editingMemberId ? 'No documents yet. Upload files to add knowledge.' : 'Document upload becomes available after first save.'}
                     </p>
                   )}
+
+                  {editingMemberId && digestLoadError ? (
+                    <p className="mt-2 text-xs text-destructive">{digestLoadError}</p>
+                  ) : null}
                 </section>
               ) : null}
             </div>
+
+            <DialogPrimitive.Root
+              open={isPromptDialogOpen}
+              onOpenChange={(open) => {
+                setIsPromptDialogOpen(open);
+              }}
+            >
+              <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80 backdrop-blur-sm" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(86vh,820px)] w-[min(95vw,920px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-card p-4 shadow-2xl focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-display text-xl">Edit system prompt</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+                    Review and update the full prompt in a larger editor.
+                  </DialogPrimitive.Description>
+                  <textarea
+                    className="mt-4 min-h-0 flex-1 resize-none overflow-y-auto rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    value={promptDialogValue}
+                    onChange={(event) => setPromptDialogValue(event.target.value)}
+                    placeholder="How should this member think and respond?"
+                  />
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button type="button" className="gap-2" onClick={savePromptDialog}>
+                      <Save className="h-4 w-4" />
+                      Save changes
+                    </Button>
+                    <DialogPrimitive.Close asChild>
+                      <Button type="button" variant="ghost">
+                        Cancel
+                      </Button>
+                    </DialogPrimitive.Close>
+                  </div>
+                </DialogPrimitive.Content>
+              </DialogPrimitive.Portal>
+            </DialogPrimitive.Root>
+
+            <DialogPrimitive.Root open={isDigestEditorOpen} onOpenChange={setIsDigestEditorOpen}>
+              <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80 backdrop-blur-sm" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(90vh,860px)] w-[min(95vw,960px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-card p-4 shadow-2xl focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-display text-lg md:text-xl">Edit KB metadata</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+                    Adjust retrieval hints saved for this document.
+                  </DialogPrimitive.Description>
+
+                  {digestEditor ? (
+                    <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                      <label className="grid gap-1 text-sm">
+                        Display name
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.displayName}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, displayName: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Topics (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.topics}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, topics: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Entities (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.entities}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, entities: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Lexical anchors (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.lexicalAnchors}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, lexicalAnchors: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Style anchors (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.styleAnchors}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, styleAnchors: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Digest summary
+                        <textarea
+                          className="min-h-28 rounded-lg border border-border bg-background px-3 py-2"
+                          value={digestEditor.digestSummary}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, digestSummary: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button type="button" className="gap-2" disabled={isSavingDigest} onClick={() => void saveDigestEditor()}>
+                      <Save className="h-4 w-4" />
+                      {isSavingDigest ? 'Saving…' : 'Save metadata'}
+                    </Button>
+                    <DialogPrimitive.Close asChild>
+                      <Button type="button" variant="ghost" disabled={isSavingDigest}>
+                        Cancel
+                      </Button>
+                    </DialogPrimitive.Close>
+                  </div>
+                </DialogPrimitive.Content>
+              </DialogPrimitive.Portal>
+            </DialogPrimitive.Root>
           </section>
         )}
       </div>
