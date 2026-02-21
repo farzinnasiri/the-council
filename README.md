@@ -34,6 +34,9 @@ make deploy         # validate + deploy to dev (convex dev --once)
 make deploy-prod    # validate + deploy to prod (convex deploy)
 make logs           # dev logs
 make logs-prod      # prod logs
+make vercel-init-check    # validate Vercel CLI + routing config
+make vercel-preview       # deploy frontend to Vercel preview
+make vercel-deploy        # deploy frontend to Vercel production
 ```
 
 ## Environment Source Of Truth
@@ -71,6 +74,32 @@ Sync examples:
 make env-sync
 make env-sync-prod
 ```
+
+## Vercel Deployment
+
+- Frontend is deployed to Vercel as a static SPA.
+- Backend/data/auth remain on Convex.
+- SPA rewrites are configured in `vercel.json` so deep links resolve to `index.html`.
+
+### Required Vercel environment variables
+
+- `VITE_CONVEX_URL`
+- `VITE_CONVEX_SITE_URL`
+
+### Local/manual Vercel ops
+
+```bash
+make vercel-init-check
+make vercel-preview
+make vercel-deploy
+```
+
+### Rollback path
+
+- Re-deploy a known-good commit:
+  - `git checkout <good-commit>`
+  - `npm ci && npm run build`
+  - `make vercel-deploy`
 
 ## Backend Surface (Convex Actions)
 

@@ -26,6 +26,7 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 7. Never commit `.env`, `.env.local`, or secrets.
 8. Convex is the backend source of truth; do not reintroduce local IndexedDB paths.
 9. Use `make` targets for operational workflows (env sync, checks, deploy) unless explicitly debugging.
+10. Use `make vercel-*` targets for Vercel deployment operations unless explicitly debugging.
 
 ---
 
@@ -93,6 +94,9 @@ make env-sync
 make env-sync-prod
 make deploy
 make deploy-prod
+make vercel-init-check
+make vercel-preview
+make vercel-deploy
 ```
 
 ---
@@ -119,6 +123,23 @@ Use this checklist whenever backend actions or env values change:
    - `npx convex env list | rg "^GEMINI_API_KEY="`
 
 If the app shows `Could not find public function for 'ai:chatWithMember'`, the frontend is pointed at a deployment that does not have the latest functions yet.
+
+## Vercel Deployment Checklist
+
+Use this checklist whenever frontend deployment configuration changes:
+
+1. Confirm Vercel config exists:
+   - `vercel.json` rewrites all routes to `/index.html`
+2. Confirm Vercel environment variables:
+   - `VITE_CONVEX_URL`
+   - `VITE_CONVEX_SITE_URL`
+3. Validate locally:
+   - `make vercel-init-check`
+   - `make build`
+4. Preview deploy:
+   - `make vercel-preview`
+5. Production deploy:
+   - `make vercel-deploy`
 
 ---
 
