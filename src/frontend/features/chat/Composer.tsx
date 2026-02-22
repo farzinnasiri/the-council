@@ -1,20 +1,43 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Mic, SendHorizontal } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { cn } from '../../lib/utils';
 
 interface ComposerProps {
-  onSend: (text: string) => void | Promise<void>;
+  onSend: (payload: { text: string; mentionedMemberIds?: string[] }) => void | Promise<void>;
   placeholder?: string;
   sendDisabled?: boolean;
+  mentionOptions?: Array<{ id: string; name: string }>;
+  mentionError?: string;
 }
 
-export function Composer({ onSend, placeholder = 'Ask your council something...', sendDisabled = false }: ComposerProps) {
+export function Composer({
+  onSend,
+  placeholder = 'Ask your council something...',
+  sendDisabled = false,
+  mentionOptions = [],
+  mentionError,
+}: ComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [hasText, setHasText] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([]);
   const isLocked = sendDisabled || isSubmitting;
+
+  useEffect(() => {
+    const mentionSet = new Set(mentionOptions.map((item) => item.id));
+    setSelectedMentionIds((current) => current.filter((id) => mentionSet.has(id)));
+  }, [mentionOptions]);
+
+  const toggleMention = (memberId: string) => {
+    setSelectedMentionIds((current) => {
+      if (current.includes(memberId)) {
+        return current.filter((id) => id !== memberId);
+      }
+      return [...current, memberId];
+    });
+  };
 
   const submit = async () => {
     if (isLocked) return;
@@ -22,12 +45,16 @@ export function Composer({ onSend, placeholder = 'Ask your council something...'
     if (!text) return;
     setIsSubmitting(true);
     try {
-      await onSend(text);
+      await onSend({
+        text,
+        mentionedMemberIds: selectedMentionIds.length > 0 ? selectedMentionIds : undefined,
+      });
       if (inputRef.current) {
         inputRef.current.value = '';
         inputRef.current.style.height = 'auto';
       }
       setHasText(false);
+      setSelectedMentionIds([]);
     } finally {
       setIsSubmitting(false);
     }
@@ -35,7 +62,31 @@ export function Composer({ onSend, placeholder = 'Ask your council something...'
 
   return (
     <div className="bg-background/80 px-4 py-4 backdrop-blur md:px-8">
-      <div className="mx-auto flex w-full max-w-4xl flex-col">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
+        {mentionOptions.length > 0 ? (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {mentionOptions.map((member) => {
+              const active = selectedMentionIds.includes(member.id);
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  className={cn(
+                    'shrink-0 rounded-full border px-3 py-1 text-xs transition',
+                    active
+                      ? 'border-primary/60 bg-primary/20 text-foreground'
+                      : 'border-border bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                  )}
+                  onClick={() => toggleMention(member.id)}
+                  disabled={isLocked}
+                >
+                  @{member.name}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
         <div className="flex items-center gap-2 rounded-[2rem] border border-border bg-card p-2.5 shadow-glass">
           <Textarea
             ref={inputRef}
@@ -79,6 +130,8 @@ export function Composer({ onSend, placeholder = 'Ask your council something...'
             </Button>
           </div>
         </div>
+
+        {mentionError ? <p className="px-2 text-xs text-destructive">{mentionError}</p> : null}
       </div>
     </div>
   );

@@ -26,6 +26,10 @@ const messageDoc = v.object({
   inReplyToMessageId: v.optional(v.id('messages')),
   originConversationId: v.optional(v.id('conversations')),
   originMessageId: v.optional(v.id('messages')),
+  mentionedMemberIds: v.optional(v.array(v.id('members'))),
+  roundNumber: v.optional(v.number()),
+  roundIntent: v.optional(v.union(v.literal('speak'), v.literal('challenge'), v.literal('support'))),
+  roundTargetMemberId: v.optional(v.id('members')),
   error: v.optional(v.string()),
 });
 
@@ -39,6 +43,10 @@ const messageInputValidator = v.object({
   inReplyToMessageId: v.optional(v.id('messages')),
   originConversationId: v.optional(v.id('conversations')),
   originMessageId: v.optional(v.id('messages')),
+  mentionedMemberIds: v.optional(v.array(v.id('members'))),
+  roundNumber: v.optional(v.number()),
+  roundIntent: v.optional(v.union(v.literal('speak'), v.literal('challenge'), v.literal('support'))),
+  roundTargetMemberId: v.optional(v.id('members')),
   error: v.optional(v.string()),
 });
 
@@ -194,6 +202,15 @@ export const appendMany = mutation({
       }
 
       await assertOwnedMember(ctx, userId, msg.authorMemberId);
+      await assertOwnedMember(ctx, userId, msg.roundTargetMemberId);
+
+      if (msg.mentionedMemberIds?.length) {
+        await Promise.all(msg.mentionedMemberIds.map((memberId) => assertOwnedMember(ctx, userId, memberId)));
+      }
+
+      if (msg.roundIntent && typeof msg.roundNumber !== 'number') {
+        throw new Error('roundNumber is required when roundIntent is set');
+      }
 
       if (msg.inReplyToMessageId) {
         const parent = await ctx.db.get(msg.inReplyToMessageId);

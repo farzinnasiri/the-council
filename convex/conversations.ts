@@ -7,6 +7,7 @@ const conversationDoc = v.object({
   _creationTime: v.number(),
   userId: v.id('users'),
   kind: v.union(v.literal('hall'), v.literal('chamber')),
+  hallMode: v.optional(v.union(v.literal('advisory'), v.literal('roundtable'))),
   title: v.string(),
   chamberMemberId: v.optional(v.id('members')),
   // Legacy compatibility while old rows still include status.
@@ -125,6 +126,7 @@ export const createHall = mutation({
   args: {
     title: v.string(),
     memberIds: v.array(v.id('members')),
+    hallMode: v.optional(v.union(v.literal('advisory'), v.literal('roundtable'))),
   },
   returns: conversationDoc,
   handler: async (ctx, args) => {
@@ -137,6 +139,7 @@ export const createHall = mutation({
     const conversationId = await ctx.db.insert('conversations', {
       userId,
       kind: 'hall',
+      hallMode: args.hallMode ?? 'advisory',
       title: args.title,
       updatedAt: now,
     });

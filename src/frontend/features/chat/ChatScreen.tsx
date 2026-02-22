@@ -1,6 +1,12 @@
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
 import type { Message } from '../../types/domain';
+import type { ReactNode } from 'react';
+
+export interface ComposerSendInput {
+  text: string;
+  mentionedMemberIds?: string[];
+}
 
 interface TypingMember {
   id: string;
@@ -13,11 +19,15 @@ interface ChatScreenProps {
   isRouting?: boolean;
   typingMembers?: TypingMember[];
   isSending?: boolean;
+  sendDisabled?: boolean;
   hasOlderMessages?: boolean;
   loadingOlderMessages?: boolean;
   placeholder: string;
-  onSend: (text: string) => void | Promise<void>;
+  mentionOptions?: Array<{ id: string; name: string }>;
+  mentionError?: string;
+  onSend: (payload: ComposerSendInput) => void | Promise<void>;
   onLoadOlder?: () => void | Promise<void>;
+  beforeComposer?: ReactNode;
   emptyState?: {
     title: string;
     description: string;
@@ -29,11 +39,15 @@ export function ChatScreen({
   isRouting = false,
   typingMembers = [],
   isSending = false,
+  sendDisabled = false,
   hasOlderMessages = false,
   loadingOlderMessages = false,
   placeholder,
+  mentionOptions = [],
+  mentionError,
   onSend,
   onLoadOlder,
+  beforeComposer,
   emptyState,
 }: ChatScreenProps) {
   return (
@@ -47,11 +61,14 @@ export function ChatScreen({
         onLoadOlder={onLoadOlder}
         emptyState={emptyState}
       />
+      {beforeComposer}
       <Composer
         placeholder={placeholder}
-        sendDisabled={isSending}
-        onSend={(text) => {
-          void onSend(text);
+        sendDisabled={isSending || sendDisabled}
+        mentionOptions={mentionOptions}
+        mentionError={mentionError}
+        onSend={(payload) => {
+          void onSend(payload);
         }}
       />
     </div>

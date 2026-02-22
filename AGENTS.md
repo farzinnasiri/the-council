@@ -178,6 +178,9 @@ Public Convex actions in `convex/ai.ts`:
 - `suggestHallTitle`
 - `suggestMemberSpecialties`
 - `chatWithMember`
+- `prepareRoundtableRound`
+- `chatRoundtableSpeaker`
+- `chatRoundtableSpeakers`
 - `compactConversation`
 - `ensureMemberKnowledgeStore`
 - `uploadMemberDocuments`
@@ -263,6 +266,15 @@ make env-sync-prod
 6. Hall and chamber creation remain lazy on first message.
 7. Member replies remain parallel + progressive.
 8. Message history supports upward lazy-loading/pagination in chat views.
+
+### Roundtable Contracts (Do Not Regress)
+1. Roundtable first turn: all routed participants provide opening statements automatically.
+2. Hand-raise pre-round intent collection starts after opening statements (and on explicit prepare/continue rounds).
+3. Roundtable intent cards show only intent labels (`speak|challenge|support|pass`) in UI; rationale text is non-visual metadata.
+4. Speaker generation for a started round must run via backend parallel batch path (`chatRoundtableSpeakers`) for latency.
+5. `Prepare round` and `Start round` must not be simultaneously actionable for the same round state.
+6. `Prepare round` must be disabled while a round is awaiting-user, in-progress, or while pre-round collection is already running.
+7. Mentions can force pass-intent members into next-round consideration, but members already selected for the current awaiting-user round should not be mention-selectable in composer chips.
 
 ### Debug Contract
 Console output for member chat should include:

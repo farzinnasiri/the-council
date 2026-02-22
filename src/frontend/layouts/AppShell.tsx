@@ -43,7 +43,10 @@ export function AppShell() {
       }
       return {
         title: activeConversation.title,
-        subtitle: '',
+        subtitle:
+          activeConversation.hallMode === 'roundtable'
+            ? 'Roundtable'
+            : 'Advisory',
         showParticipants: true,
       };
     }

@@ -1,4 +1,5 @@
 import { convexRepository } from '../repository/ConvexCouncilRepository';
+import type { RoundtableState } from '../types/domain';
 
 export interface RouteResult {
   chosenMemberIds: string[];
@@ -207,4 +208,63 @@ export async function chatWithMember(input: {
   }
 
   return result;
+}
+
+export async function prepareRoundtableRound(input: {
+  conversationId: string;
+  trigger: 'user_message' | 'continue';
+  triggerMessageId?: string;
+  mentionedMemberIds?: string[];
+}): Promise<RoundtableState> {
+  return await convexRepository.prepareRoundtableRound(input);
+}
+
+export async function setRoundtableSelections(input: {
+  conversationId: string;
+  roundNumber: number;
+  selectedMemberIds: string[];
+}): Promise<RoundtableState> {
+  return await convexRepository.setRoundtableSelections(input);
+}
+
+export async function markRoundtableInProgress(input: {
+  conversationId: string;
+  roundNumber: number;
+}): Promise<RoundtableState> {
+  return await convexRepository.markRoundtableInProgress(input);
+}
+
+export async function markRoundtableCompleted(input: {
+  conversationId: string;
+  roundNumber: number;
+}): Promise<RoundtableState> {
+  return await convexRepository.markRoundtableCompleted(input);
+}
+
+export async function getRoundtableState(conversationId: string): Promise<RoundtableState | null> {
+  return await convexRepository.getRoundtableState(conversationId);
+}
+
+export async function chatRoundtableSpeaker(input: {
+  conversationId: string;
+  roundNumber: number;
+  memberId: string;
+}): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
+  return await convexRepository.chatRoundtableSpeaker(input);
+}
+
+export async function chatRoundtableSpeakers(input: {
+  conversationId: string;
+  roundNumber: number;
+}): Promise<
+  Array<{
+    memberId: string;
+    status: 'sent' | 'error';
+    answer: string;
+    intent: 'speak' | 'challenge' | 'support';
+    targetMemberId?: string;
+    error?: string;
+  }>
+> {
+  return await convexRepository.chatRoundtableSpeakers(input);
 }

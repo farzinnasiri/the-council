@@ -116,6 +116,12 @@ export interface RouteMemberCandidate {
   systemPrompt?: string;
 }
 
+export interface RoundIntentPromptResult {
+  intent: 'speak' | 'challenge' | 'support' | 'pass';
+  targetMemberId?: string;
+  rationale: string;
+}
+
 export function fallbackRouteMemberIds(message: string, candidates: RouteMemberCandidate[], maxSelections = 3): string[] {
   if (candidates.length === 0) {
     return [];
@@ -403,6 +409,80 @@ export class GeminiService {
         specialties: fallback,
         model,
       };
+    }
+  }
+
+  async proposeRoundIntentPromptOnly(options: {
+    member: { id: string; name: string; specialties?: string[]; systemPrompt: string };
+    conversationContext: string;
+    memberIds: string[];
+    model?: string;
+  }): Promise<RoundIntentPromptResult> {
+    const model = resolveModel('router', options.model);
+    const candidateTargets = options.memberIds.filter((id) => id !== options.member.id);
+
+    const prompt = [
+      'You are choosing whether to speak in the next round of a council discussion.',
+      'Return JSON only with keys: intent, targetMemberId, rationale.',
+      'intent must be one of: speak, challenge, support, pass.',
+      'targetMemberId must be either one valid member id from the candidate list or an empty string.',
+      'If intent is challenge or support, prefer setting a targetMemberId.',
+      'If intent is pass, targetMemberId must be empty.',
+      'Keep rationale short and concrete (<= 140 chars).',
+      '',
+      `Member: ${options.member.name}`,
+      `Specialties: ${options.member.specialties?.join(', ') || 'general'}`,
+      `Member prompt: ${options.member.systemPrompt.slice(0, 500)}`,
+      '',
+      'Round context:',
+      options.conversationContext.slice(0, 3000),
+      '',
+      `Candidate target ids: ${candidateTargets.join(', ') || '(none)'}`,
+    ].join('\n');
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'object',
+            required: ['intent', 'targetMemberId', 'rationale'],
+            properties: {
+              intent: {
+                type: 'string',
+                enum: ['speak', 'challenge', 'support', 'pass'],
+              },
+              targetMemberId: { type: 'string' },
+              rationale: { type: 'string' },
+            },
+          },
+        } as any,
+      });
+
+      const parsed = this.tryParseStructuredJson<{
+        intent?: 'speak' | 'challenge' | 'support' | 'pass';
+        targetMemberId?: string;
+        rationale?: string;
+      }>((response.text ?? '').trim());
+
+      const intent = parsed?.intent ?? 'pass';
+      if (!['speak', 'challenge', 'support', 'pass'].includes(intent)) {
+        return this.fallbackRoundIntent(options.member.id, candidateTargets);
+      }
+
+      const targetMemberId = (parsed?.targetMemberId ?? '').trim();
+      const normalizedTarget = targetMemberId && candidateTargets.includes(targetMemberId) ? targetMemberId : undefined;
+
+      return {
+        intent,
+        targetMemberId: intent === 'challenge' || intent === 'support' ? normalizedTarget : undefined,
+        rationale: (parsed?.rationale ?? 'No additional signal.').trim().slice(0, 200) || 'No additional signal.',
+      };
+    } catch {
+      return this.fallbackRoundIntent(options.member.id, candidateTargets);
     }
   }
 
@@ -1240,6 +1320,21 @@ export class GeminiService {
     const words = cleaned.split(' ').slice(0, 6);
     const title = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
     return title.slice(0, 72);
+  }
+
+  private fallbackRoundIntent(memberId: string, candidateTargets: string[]): RoundIntentPromptResult {
+    if (candidateTargets.length === 0) {
+      return {
+        intent: 'speak',
+        rationale: `No peer target available; ${memberId} can add a new point.`,
+      };
+    }
+
+    return {
+      intent: 'speak',
+      targetMemberId: undefined,
+      rationale: `I have at least one incremental point to add.`,
+    };
   }
 
   private extractGroundedEvidence(groundingMetadata: any): GroundedEvidence {

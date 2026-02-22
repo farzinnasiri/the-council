@@ -35,7 +35,8 @@ export function MessageBubble({ message }: { message: Message }) {
   const conversations = useAppStore((state) => state.conversations);
 
   if (message.role === 'system') {
-    return <RoutePill memberIds={message.routing?.memberIds ?? []} />;
+    const isManual = message.content.toLowerCase().startsWith('manually routed');
+    return <RoutePill memberIds={message.routing?.memberIds ?? []} label={isManual ? 'Manually routed to' : 'Routed to'} />;
   }
 
   const isUser = message.role === 'user';

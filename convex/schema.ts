@@ -30,6 +30,7 @@ export default defineSchema({
   conversations: defineTable({
     userId: v.id('users'),
     kind: v.union(v.literal('hall'), v.literal('chamber')),
+    hallMode: v.optional(v.union(v.literal('advisory'), v.literal('roundtable'))),
     title: v.string(),
     chamberMemberId: v.optional(v.id('members')),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
@@ -53,6 +54,46 @@ export default defineSchema({
     .index('by_conversation_status', ['conversationId', 'status'])
     .index('by_member_status', ['memberId', 'status'])
     .index('by_user_conversation', ['userId', 'conversationId']),
+
+  hallRounds: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    roundNumber: v.number(),
+    status: v.union(
+      v.literal('awaiting_user'),
+      v.literal('in_progress'),
+      v.literal('completed'),
+      v.literal('superseded'),
+    ),
+    trigger: v.union(v.literal('user_message'), v.literal('continue')),
+    triggerMessageId: v.optional(v.id('messages')),
+    maxSpeakers: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_user_conversation', ['userId', 'conversationId'])
+    .index('by_conversation_round', ['conversationId', 'roundNumber'])
+    .index('by_conversation_status', ['conversationId', 'status']),
+
+  hallRoundIntents: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    roundNumber: v.number(),
+    memberId: v.id('members'),
+    intent: v.union(
+      v.literal('speak'),
+      v.literal('challenge'),
+      v.literal('support'),
+      v.literal('pass'),
+    ),
+    targetMemberId: v.optional(v.id('members')),
+    rationale: v.string(),
+    selected: v.boolean(),
+    source: v.union(v.literal('mention'), v.literal('intent_default'), v.literal('user_manual')),
+    updatedAt: v.number(),
+  })
+    .index('by_round_member', ['conversationId', 'roundNumber', 'memberId'])
+    .index('by_conversation_round', ['conversationId', 'roundNumber'])
+    .index('by_conversation_round_selected', ['conversationId', 'roundNumber', 'selected']),
 
   conversationMemoryLogs: defineTable({
     userId: v.id('users'),
@@ -88,6 +129,12 @@ export default defineSchema({
     inReplyToMessageId: v.optional(v.id('messages')),
     originConversationId: v.optional(v.id('conversations')),
     originMessageId: v.optional(v.id('messages')),
+    mentionedMemberIds: v.optional(v.array(v.id('members'))),
+    roundNumber: v.optional(v.number()),
+    roundIntent: v.optional(
+      v.union(v.literal('speak'), v.literal('challenge'), v.literal('support')),
+    ),
+    roundTargetMemberId: v.optional(v.id('members')),
     error: v.optional(v.string()),
   })
     .index('by_conversation', ['conversationId'])

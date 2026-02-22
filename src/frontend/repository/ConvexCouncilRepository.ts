@@ -5,6 +5,7 @@ import type {
   Conversation,
   ConversationMemoryLog,
   ConversationParticipant,
+  RoundtableState,
   Member,
   Message,
   ThemeMode,
@@ -55,6 +56,7 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
   return {
     id: doc._id,
     kind: doc.kind,
+    hallMode: doc.kind === 'hall' ? ((doc.hallMode as 'advisory' | 'roundtable' | undefined) ?? 'advisory') : undefined,
     title: doc.title,
     chamberMemberId: doc.chamberMemberId as string | undefined,
     deletedAt: doc.deletedAt,
@@ -89,8 +91,41 @@ function toMessage(doc: ConvexMessageDoc): Message {
     inReplyToMessageId: doc.inReplyToMessageId,
     originConversationId: doc.originConversationId,
     originMessageId: doc.originMessageId,
+    mentionedMemberIds: doc.mentionedMemberIds,
+    roundNumber: doc.roundNumber,
+    roundIntent: doc.roundIntent,
+    roundTargetMemberId: doc.roundTargetMemberId,
     error: doc.error,
     createdAt: doc._creationTime,
+  };
+}
+
+function toRoundtableState(doc: any): RoundtableState {
+  return {
+    round: {
+      id: doc.round._id,
+      conversationId: doc.round.conversationId,
+      roundNumber: doc.round.roundNumber,
+      status: doc.round.status,
+      trigger: doc.round.trigger,
+      triggerMessageId: doc.round.triggerMessageId,
+      maxSpeakers: doc.round.maxSpeakers,
+      updatedAt: doc.round.updatedAt,
+      createdAt: doc.round._creationTime,
+    },
+    intents: (doc.intents ?? []).map((row: any) => ({
+      id: row._id,
+      conversationId: row.conversationId,
+      roundNumber: row.roundNumber,
+      memberId: row.memberId,
+      intent: row.intent,
+      targetMemberId: row.targetMemberId,
+      rationale: row.rationale,
+      selected: row.selected,
+      source: row.source,
+      updatedAt: row.updatedAt,
+      createdAt: row._creationTime,
+    })),
   };
 }
 
@@ -228,11 +263,32 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async createHall(input: CreateHallInput): Promise<Conversation> {
-    const doc = await this.clientAny.mutation('conversations:createHall', {
+    const payload: Record<string, unknown> = {
       title: input.title,
       memberIds: input.memberIds as Id<'members'>[],
-    });
-    return toConversation(doc);
+    };
+    if (input.hallMode === 'roundtable') {
+      payload.hallMode = 'roundtable';
+    }
+
+    try {
+      const doc = await this.clientAny.mutation('conversations:createHall', payload);
+      return toConversation(doc);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isHallModeValidationError =
+        input.hallMode === 'roundtable' &&
+        message.includes('extra field `hallMode`') &&
+        message.includes('conversations:createHall');
+
+      if (isHallModeValidationError) {
+        throw new Error(
+          'Roundtable mode is not available on the current Convex deployment yet. Run `make deploy` and refresh.'
+        );
+      }
+
+      throw error;
+    }
   }
 
   async renameHall(conversationId: string, title: string): Promise<Conversation> {
@@ -423,6 +479,102 @@ class ConvexCouncilRepository implements CouncilRepository {
       contextMessages: input.contextMessages,
       hallContext: input.hallContext,
     })) as MemberChatResult;
+  }
+
+  async prepareRoundtableRound(input: {
+    conversationId: string;
+    trigger: 'user_message' | 'continue';
+    triggerMessageId?: string;
+    mentionedMemberIds?: string[];
+  }): Promise<RoundtableState> {
+    const result = await this.client.action(api.ai.prepareRoundtableRound as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      trigger: input.trigger,
+      triggerMessageId: input.triggerMessageId as Id<'messages'> | undefined,
+      mentionedMemberIds: input.mentionedMemberIds as Id<'members'>[] | undefined,
+    });
+    return toRoundtableState(result);
+  }
+
+  async setRoundtableSelections(input: {
+    conversationId: string;
+    roundNumber: number;
+    selectedMemberIds: string[];
+  }): Promise<RoundtableState> {
+    const result = await this.clientAny.mutation('hallRounds:setRoundSelections', {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+      selectedMemberIds: input.selectedMemberIds as Id<'members'>[],
+    });
+    return toRoundtableState(result);
+  }
+
+  async markRoundtableInProgress(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<RoundtableState> {
+    const result = await this.clientAny.mutation('hallRounds:markRoundInProgress', {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+    });
+    return toRoundtableState(result);
+  }
+
+  async markRoundtableCompleted(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<RoundtableState> {
+    const result = await this.clientAny.mutation('hallRounds:markRoundCompleted', {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+    });
+    return toRoundtableState(result);
+  }
+
+  async getRoundtableState(conversationId: string): Promise<RoundtableState | null> {
+    const result = await this.clientAny.query('hallRounds:getRoundtableState', {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return result ? toRoundtableState(result) : null;
+  }
+
+  async chatRoundtableSpeaker(input: {
+    conversationId: string;
+    roundNumber: number;
+    memberId: string;
+  }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
+    return (await this.client.action(api.ai.chatRoundtableSpeaker as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+      memberId: input.memberId as Id<'members'>,
+    })) as MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string };
+  }
+
+  async chatRoundtableSpeakers(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<
+    Array<{
+      memberId: string;
+      status: 'sent' | 'error';
+      answer: string;
+      intent: 'speak' | 'challenge' | 'support';
+      targetMemberId?: string;
+      error?: string;
+    }>
+  > {
+    const result = await this.client.action(api.ai.chatRoundtableSpeakers as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+    });
+    return (result?.results ?? []) as Array<{
+      memberId: string;
+      status: 'sent' | 'error';
+      answer: string;
+      intent: 'speak' | 'challenge' | 'support';
+      targetMemberId?: string;
+      error?: string;
+    }>;
   }
 
   async compactConversation(input: {

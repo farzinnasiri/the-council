@@ -2,8 +2,10 @@ import type {
   Conversation,
   ConversationMemoryLog,
   ConversationParticipant,
+  HallMode,
   Member,
   Message,
+  RoundtableState,
   ThemeMode,
 } from '../types/domain';
 import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/compactionPolicy';
@@ -25,6 +27,7 @@ export interface UpdateMemberPatch {
 export interface CreateHallInput {
   title: string;
   memberIds: string[];
+  hallMode?: HallMode;
 }
 
 export interface AppendMessagesInput {
@@ -190,6 +193,44 @@ export interface CouncilRepository {
     contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     hallContext?: string;
   }): Promise<MemberChatResult>;
+  prepareRoundtableRound(input: {
+    conversationId: string;
+    trigger: 'user_message' | 'continue';
+    triggerMessageId?: string;
+    mentionedMemberIds?: string[];
+  }): Promise<RoundtableState>;
+  setRoundtableSelections(input: {
+    conversationId: string;
+    roundNumber: number;
+    selectedMemberIds: string[];
+  }): Promise<RoundtableState>;
+  markRoundtableInProgress(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<RoundtableState>;
+  markRoundtableCompleted(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<RoundtableState>;
+  getRoundtableState(conversationId: string): Promise<RoundtableState | null>;
+  chatRoundtableSpeaker(input: {
+    conversationId: string;
+    roundNumber: number;
+    memberId: string;
+  }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }>;
+  chatRoundtableSpeakers(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<
+    Array<{
+      memberId: string;
+      status: 'sent' | 'error';
+      answer: string;
+      intent: 'speak' | 'challenge' | 'support';
+      targetMemberId?: string;
+      error?: string;
+    }>
+  >;
   compactConversation(input: {
     conversationId: string;
     previousSummary?: string;

@@ -36,6 +36,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const user = useQuery(api.users.viewer);
   const [hallOpen, setHallOpen] = useState(true);
   const [chambersOpen, setChambersOpen] = useState(true);
+  const [newHallOpen, setNewHallOpen] = useState(false);
+  const [newHallMode, setNewHallMode] = useState<'advisory' | 'roundtable'>('advisory');
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteHallTarget, setDeleteHallTarget] = useState<{ id: string; isActive: boolean } | null>(null);
@@ -75,8 +77,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           variant="ghost"
           className="h-10 w-full justify-start gap-2 rounded-lg px-2 text-sm text-foreground/90 hover:bg-background/60"
           onClick={() => {
-            navigate('/hall/new');
-            onNavigate?.();
+            setNewHallMode('advisory');
+            setNewHallOpen(true);
           }}
         >
           <Plus className="h-4 w-4" />
@@ -336,6 +338,68 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                 </Button>
               </div>
             </form>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+
+      <DialogPrimitive.Root open={newHallOpen} onOpenChange={setNewHallOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-[70] bg-background/80 backdrop-blur-sm" />
+          <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[71] w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-2xl focus:outline-none">
+            <DialogPrimitive.Title className="font-display text-lg">Choose Hall Mode</DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-2 text-sm text-muted-foreground">
+              Pick how this Hall should run before you send the first message.
+            </DialogPrimitive.Description>
+            <div className="mt-4 grid gap-3">
+              <button
+                type="button"
+                className={cn(
+                  'rounded-xl border p-4 text-left transition',
+                  newHallMode === 'advisory'
+                    ? 'border-primary/60 bg-primary/10'
+                    : 'border-border hover:border-foreground/30'
+                )}
+                onClick={() => setNewHallMode('advisory')}
+              >
+                <p className="text-sm font-semibold">Advisory</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Fast mode. Active members answer each turn; mentions can focus who speaks.
+                </p>
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'rounded-xl border p-4 text-left transition',
+                  newHallMode === 'roundtable'
+                    ? 'border-primary/60 bg-primary/10'
+                    : 'border-border hover:border-foreground/30'
+                )}
+                onClick={() => setNewHallMode('roundtable')}
+              >
+                <p className="text-sm font-semibold">Roundtable</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Deliberation mode. Members signal intent each round and you approve who speaks.
+                </p>
+              </button>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <DialogPrimitive.Close asChild>
+                <Button variant="ghost" type="button" className="h-9 px-3 text-sm">
+                  Cancel
+                </Button>
+              </DialogPrimitive.Close>
+              <Button
+                type="button"
+                className="h-9 px-3 text-sm"
+                onClick={() => {
+                  setNewHallOpen(false);
+                  navigate(`/hall/new?mode=${newHallMode}`);
+                  onNavigate?.();
+                }}
+              >
+                Continue
+              </Button>
+            </div>
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>

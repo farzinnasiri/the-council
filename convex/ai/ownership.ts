@@ -14,6 +14,7 @@ export interface OwnedMember {
 export interface OwnedConversation {
   _id: Id<'conversations'>;
   kind: 'hall' | 'chamber';
+  hallMode?: 'advisory' | 'roundtable';
   title: string;
   chamberMemberId?: Id<'members'>;
   deletedAt?: number;

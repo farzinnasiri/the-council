@@ -45,7 +45,9 @@ export function ChamberMemberPage() {
             ? { id: member.id, name: member.name, avatarUrl: member.avatarUrl }
             : null
         )
-        .filter((entry): entry is { id: string; name: string; avatarUrl?: string | null } => Boolean(entry))
+        .filter((entry): entry is { id: string; name: string; avatarUrl: string | null | undefined } =>
+          entry !== null
+        )
     : [];
 
   const isSending = chamber ? (pendingReplyCount[chamber.id] ?? 0) > 0 : false;
@@ -68,7 +70,7 @@ export function ChamberMemberPage() {
             description: `Start a conversation with ${member.name}.`,
           }
       }
-      onSend={async (text) => {
+      onSend={async ({ text }) => {
         await sendMessageToChamberMember(member.id, text);
         if (!chamber) {
           navigate(`/chamber/member/${member.id}`, { replace: true });
