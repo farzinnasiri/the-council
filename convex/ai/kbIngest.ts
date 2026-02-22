@@ -1,12 +1,11 @@
 'use node';
 
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import type { Id } from '../_generated/dataModel';
 import { api } from '../_generated/api';
 import { GeminiService, sanitizeLabel } from './geminiService';
 import { requireOwnedMember } from './ownership';
+import { extractTextFromStorage } from './ragExtraction';
+import { deleteDocumentChunks, indexDocumentChunks, listMemberChunkDocuments } from './ragStore';
 
 export const KB_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const DIGEST_SAMPLE_CHAR_LIMIT = 6000;
@@ -28,17 +27,14 @@ function normalizeDigestItems(items: string[], min: number, max: number): string
     .slice(0, Math.max(min, Math.min(max, items.length || min)));
 }
 
-async function writeStorageBlobToTemp(ctx: any, storageId: Id<'_storage'>, displayName: string): Promise<string> {
-  const blob = await ctx.storage.get(storageId);
-  if (!blob) {
-    throw new Error(`Staged file not found in storage: ${storageId}`);
-  }
+function resolveStoreName(memberId: Id<'members'>): string {
+  return `convex-rag/member/${memberId}`;
+}
 
-  const ext = path.extname(displayName) || '.bin';
-  const tempPath = path.join(os.tmpdir(), `council-kb-${crypto.randomUUID()}${ext}`);
-  const bytes = Buffer.from(await blob.arrayBuffer());
-  await fs.writeFile(tempPath, bytes);
-  return tempPath;
+function buildDocumentName(storeName: string, file: { displayName: string; storageId: Id<'_storage'> }): string {
+  const display = sanitizeLabel(file.displayName || 'document');
+  const suffix = `${file.storageId}`.slice(-12).replace(/[^a-z0-9]+/gi, '').toLowerCase();
+  return `${storeName}/documents/${display}-${suffix || 'file'}`;
 }
 
 async function readStorageSampleText(
@@ -47,27 +43,13 @@ async function readStorageSampleText(
   mimeType?: string,
   displayName?: string
 ): Promise<string | undefined> {
-  const blob = await ctx.storage.get(storageId);
-  if (!blob) return undefined;
-  const bytes = Buffer.from(await blob.arrayBuffer());
-  const ext = (displayName ? path.extname(displayName).toLowerCase() : '') || '';
-  const isTextLike =
-    Boolean(mimeType?.startsWith('text/')) ||
-    ['.txt', '.md', '.csv', '.json', '.xml', '.html', '.htm', '.rtf'].includes(ext);
-
-  if (!isTextLike && bytes.length > 200_000) {
+  if (!displayName) return undefined;
+  try {
+    const extracted = await extractTextFromStorage(ctx, { storageId, displayName, mimeType });
+    return extracted.slice(0, DIGEST_SAMPLE_CHAR_LIMIT);
+  } catch {
     return undefined;
   }
-
-  const raw = bytes.toString('utf8');
-  const cleaned = raw
-    .replace(/\0/g, ' ')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!cleaned) return undefined;
-  return cleaned.slice(0, DIGEST_SAMPLE_CHAR_LIMIT);
 }
 
 async function upsertDigestFromDocument(
@@ -75,17 +57,20 @@ async function upsertDigestFromDocument(
   service: GeminiService,
   input: {
     memberId: Id<'members'>;
-    geminiStoreName: string;
-    geminiDocumentName?: string;
+    kbStoreName: string;
+    kbDocumentName?: string;
     displayName: string;
     storageId?: Id<'_storage'>;
     mimeType?: string;
     memberSystemPrompt?: string;
+    sampleText?: string;
   }
 ): Promise<void> {
-  const sampleText = input.storageId
-    ? await readStorageSampleText(ctx, input.storageId, input.mimeType, input.displayName)
-    : undefined;
+  const sampleText =
+    input.sampleText ??
+    (input.storageId
+      ? await readStorageSampleText(ctx, input.storageId, input.mimeType, input.displayName)
+      : undefined);
 
   const digest = await service.summarizeDocumentDigest({
     displayName: input.displayName,
@@ -95,8 +80,8 @@ async function upsertDigestFromDocument(
 
   await ctx.runMutation(api.kbDigests.upsertForDocument as any, {
     memberId: input.memberId,
-    geminiStoreName: input.geminiStoreName,
-    geminiDocumentName: input.geminiDocumentName,
+    kbStoreName: input.kbStoreName,
+    kbDocumentName: input.kbDocumentName,
     displayName: input.displayName,
     storageId: input.storageId,
     topics: normalizeDigestItems(digest.topics, 3, 8),
@@ -117,7 +102,7 @@ async function createIngestRecord(
   file: StagedUploadInput,
   status: 'staged' | 'ingested' | 'skipped_duplicate' | 'failed' | 'rehydrated',
   options?: {
-    geminiDocumentName?: string;
+    kbDocumentName?: string;
     ingestError?: string;
     ingestedAt?: number;
     createdAt?: number;
@@ -132,9 +117,9 @@ async function createIngestRecord(
     displayName: file.displayName,
     mimeType: file.mimeType,
     sizeBytes: file.sizeBytes,
-    geminiStoreName: storeName,
+    kbStoreName: storeName,
     status,
-    geminiDocumentName: options?.geminiDocumentName,
+    kbDocumentName: options?.kbDocumentName,
     ingestError: options?.ingestError,
     createdAt,
     ingestedAt: options?.ingestedAt,
@@ -147,7 +132,7 @@ async function patchIngestRecord(
   recordId: Id<'kbStagedDocuments'>,
   update: {
     status: 'staged' | 'ingested' | 'skipped_duplicate' | 'failed' | 'rehydrated' | 'purged';
-    geminiDocumentName?: string;
+    kbDocumentName?: string;
     ingestError?: string;
     ingestedAt?: number;
     deletedAt?: number;
@@ -156,46 +141,47 @@ async function patchIngestRecord(
   await ctx.runMutation(api.kbStagedDocuments.updateRecord, {
     recordId,
     status: update.status,
-    geminiDocumentName: update.geminiDocumentName,
+    kbDocumentName: update.kbDocumentName,
     ingestError: update.ingestError,
     ingestedAt: update.ingestedAt,
     deletedAt: update.deletedAt,
   });
 }
 
-export async function ensureMemberStore(ctx: any, service: GeminiService, memberId: Id<'members'>) {
+export async function ensureMemberStore(ctx: any, memberId: Id<'members'>) {
   const member = await requireOwnedMember(ctx, memberId);
-  const ensured = await service.ensureKnowledgeBase({
-    storeName: member.kbStoreName ?? null,
-    displayName: `council-${sanitizeLabel(member.name)}-${member._id.slice(0, 6)}`,
-  });
+  const deterministicStore = resolveStoreName(memberId);
+  const storeName =
+    member.kbStoreName && member.kbStoreName.startsWith('convex-rag/member/')
+      ? member.kbStoreName
+      : deterministicStore;
+  const created = member.kbStoreName !== storeName;
 
-  if (member.kbStoreName !== ensured.storeName) {
+  if (created) {
     await ctx.runMutation(api.members.setStoreName, {
       memberId,
-      storeName: ensured.storeName,
+      storeName,
     });
   }
 
   return {
     member,
-    storeName: ensured.storeName,
-    created: ensured.created,
+    storeName,
+    created,
   };
 }
 
-export async function listMemberDocuments(ctx: any, service: GeminiService, memberId: Id<'members'>) {
+export async function listMemberDocuments(ctx: any, memberId: Id<'members'>) {
   const member = await requireOwnedMember(ctx, memberId);
   if (!member.kbStoreName) {
     return [] as Array<{ name?: string; displayName?: string }>;
   }
 
-  return await service.listDocumentsFromStore(member.kbStoreName);
+  return await listMemberChunkDocuments(ctx, { memberId });
 }
 
 export async function deleteMemberDocument(
   ctx: any,
-  service: GeminiService,
   memberId: Id<'members'>,
   documentName: string
 ): Promise<Array<{ name?: string; displayName?: string }>> {
@@ -204,12 +190,15 @@ export async function deleteMemberDocument(
     return [];
   }
 
-  await service.deleteDocumentByName(documentName, true);
+  await deleteDocumentChunks(ctx, {
+    memberId,
+    documentName,
+  });
   await ctx.runMutation(api.kbDigests.markDeletedByDocument as any, {
     memberId,
-    geminiDocumentName: documentName,
+    kbDocumentName: documentName,
   });
-  return await service.listDocumentsFromStore(member.kbStoreName);
+  return await listMemberChunkDocuments(ctx, { memberId });
 }
 
 export async function uploadStagedDocuments(
@@ -218,92 +207,87 @@ export async function uploadStagedDocuments(
   memberId: Id<'members'>,
   stagedFiles: StagedUploadInput[]
 ): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }> {
-  const { storeName, member } = await ensureMemberStore(ctx, service, memberId);
-  const existing = await service.listDocumentsFromStore(storeName);
-  const existingNames = new Set(
-    existing.map((doc) => (doc.displayName ?? '').trim().toLowerCase()).filter(Boolean)
+  const { storeName, member } = await ensureMemberStore(ctx, memberId);
+  const existing = await listMemberChunkDocuments(ctx, { memberId });
+  const existingByDisplay = new Map(
+    existing
+      .filter((doc) => doc.displayName)
+      .map((doc) => [doc.displayName!.trim().toLowerCase(), doc.name])
   );
-  const digestCandidates: StagedUploadInput[] = [];
+  const existingNames = new Set(existingByDisplay.keys());
+
+  const digestCandidates: Array<{
+    file: StagedUploadInput;
+    documentName: string;
+    sampleText?: string;
+  }> = [];
 
   for (const file of stagedFiles) {
     const normalizedName = file.displayName.trim().toLowerCase();
-    const recordId = await createIngestRecord(ctx, memberId, storeName, file, 'staged');
+    const documentName = buildDocumentName(storeName, file);
+    const recordId = await createIngestRecord(ctx, memberId, storeName, file, 'staged', {
+      kbDocumentName: documentName,
+    });
 
     if (normalizedName && existingNames.has(normalizedName)) {
       await patchIngestRecord(ctx, recordId, {
         status: 'skipped_duplicate',
+        kbDocumentName: existingByDisplay.get(normalizedName) ?? documentName,
         ingestedAt: Date.now(),
       });
       continue;
     }
 
-    let tempPath: string | null = null;
     try {
-      tempPath = await writeStorageBlobToTemp(ctx, file.storageId, file.displayName);
-      await service.uploadDocumentToStore(storeName, tempPath, {
+      const extractedText = await extractTextFromStorage(ctx, {
+        storageId: file.storageId,
         displayName: file.displayName,
         mimeType: file.mimeType,
-        maxTokensPerChunk: 500,
-        maxOverlapTokens: 50,
+      });
+      await indexDocumentChunks(ctx, {
+        memberId,
+        storeName,
+        documentName,
+        displayName: file.displayName,
+        text: extractedText,
       });
 
       existingNames.add(normalizedName);
+      existingByDisplay.set(normalizedName, documentName);
       await patchIngestRecord(ctx, recordId, {
         status: 'ingested',
+        kbDocumentName: documentName,
         ingestedAt: Date.now(),
       });
-      digestCandidates.push(file);
+      digestCandidates.push({
+        file,
+        documentName,
+        sampleText: extractedText.slice(0, DIGEST_SAMPLE_CHAR_LIMIT),
+      });
     } catch (error) {
       await patchIngestRecord(ctx, recordId, {
         status: 'failed',
+        kbDocumentName: documentName,
         ingestError: error instanceof Error ? error.message : 'Upload failed',
       });
       throw error;
-    } finally {
-      if (tempPath) {
-        await fs.unlink(tempPath).catch(() => undefined);
-      }
     }
   }
 
-  const documents = await service.listDocumentsFromStore(storeName);
-  const docsByDisplayName = new Map(
-    documents
-      .filter((doc) => doc.displayName)
-      .map((doc) => [doc.displayName!.trim().toLowerCase(), doc.name])
-  );
-
-  const recentRows = await ctx.runQuery(api.kbStagedDocuments.listByMember, {
-    memberId,
-    includeDeleted: false,
-  });
-
-  const now = Date.now();
-  for (const row of recentRows as Array<any>) {
-    if (row.status !== 'ingested' || row.geminiDocumentName) continue;
-    const docName = docsByDisplayName.get((row.displayName ?? '').trim().toLowerCase());
-    if (!docName) continue;
-    await patchIngestRecord(ctx, row._id, {
-      status: 'ingested',
-      geminiDocumentName: docName,
-      ingestedAt: row.ingestedAt ?? now,
-    });
-  }
-
-  for (const file of digestCandidates) {
-    const docName = docsByDisplayName.get(file.displayName.trim().toLowerCase());
-    if (!docName) continue;
+  for (const item of digestCandidates) {
     await upsertDigestFromDocument(ctx, service, {
       memberId,
-      geminiStoreName: storeName,
-      geminiDocumentName: docName,
-      displayName: file.displayName,
-      storageId: file.storageId,
-      mimeType: file.mimeType,
+      kbStoreName: storeName,
+      kbDocumentName: item.documentName,
+      displayName: item.file.displayName,
+      storageId: item.file.storageId,
+      mimeType: item.file.mimeType,
       memberSystemPrompt: member.systemPrompt,
+      sampleText: item.sampleText,
     });
   }
 
+  const documents = await listMemberChunkDocuments(ctx, { memberId });
   return { storeName, documents };
 }
 
@@ -318,7 +302,7 @@ export async function rehydrateMemberStore(
   skippedCount: number;
   documents: Array<{ name?: string; displayName?: string }>;
 }> {
-  const { storeName, member } = await ensureMemberStore(ctx, service, memberId);
+  const { storeName, member } = await ensureMemberStore(ctx, memberId);
   const stagedRows = (await ctx.runQuery(api.kbStagedDocuments.listRehydratableByMember, {
     memberId,
   })) as Array<any>;
@@ -334,14 +318,18 @@ export async function rehydrateMemberStore(
 
   const deduped = Array.from(latestByStorageAndName.values()).sort((a, b) => a.createdAt - b.createdAt);
 
-  const existing = await service.listDocumentsFromStore(storeName);
+  const existing = await listMemberChunkDocuments(ctx, { memberId });
   const existingNames = new Set(
     existing.map((doc) => (doc.displayName ?? '').trim().toLowerCase()).filter(Boolean)
   );
 
   let rehydratedCount = 0;
   let skippedCount = 0;
-  const digestCandidates: StagedUploadInput[] = [];
+  const digestCandidates: Array<{
+    file: StagedUploadInput;
+    documentName: string;
+    sampleText?: string;
+  }> = [];
 
   for (const row of deduped) {
     const normalizedName = (row.displayName ?? '').trim().toLowerCase();
@@ -356,49 +344,48 @@ export async function rehydrateMemberStore(
       mimeType: row.mimeType,
       sizeBytes: row.sizeBytes,
     };
+    const documentName = row.kbDocumentName ?? buildDocumentName(storeName, stagedFile);
 
-    let tempPath: string | null = null;
-    try {
-      tempPath = await writeStorageBlobToTemp(ctx, stagedFile.storageId, stagedFile.displayName);
-      await service.uploadDocumentToStore(storeName, tempPath, {
-        displayName: stagedFile.displayName,
-        mimeType: stagedFile.mimeType,
-        maxTokensPerChunk: 500,
-        maxOverlapTokens: 50,
-      });
-
-      await createIngestRecord(ctx, memberId, storeName, stagedFile, 'rehydrated', {
-        ingestedAt: Date.now(),
-      });
-      rehydratedCount += 1;
-      if (normalizedName) existingNames.add(normalizedName);
-      digestCandidates.push(stagedFile);
-    } finally {
-      if (tempPath) {
-        await fs.unlink(tempPath).catch(() => undefined);
-      }
-    }
-  }
-
-  const documents = await service.listDocumentsFromStore(storeName);
-  const docsByDisplayName = new Map(
-    documents
-      .filter((doc) => doc.displayName)
-      .map((doc) => [doc.displayName!.trim().toLowerCase(), doc.name])
-  );
-  for (const file of digestCandidates) {
-    const docName = docsByDisplayName.get((file.displayName ?? '').trim().toLowerCase());
-    if (!docName) continue;
-    await upsertDigestFromDocument(ctx, service, {
+    const extractedText = await extractTextFromStorage(ctx, {
+      storageId: stagedFile.storageId,
+      displayName: stagedFile.displayName,
+      mimeType: stagedFile.mimeType,
+    });
+    await indexDocumentChunks(ctx, {
       memberId,
-      geminiStoreName: storeName,
-      geminiDocumentName: docName,
-      displayName: file.displayName,
-      storageId: file.storageId,
-      mimeType: file.mimeType,
-      memberSystemPrompt: member.systemPrompt,
+      storeName,
+      documentName,
+      displayName: stagedFile.displayName,
+      text: extractedText,
+    });
+
+    await createIngestRecord(ctx, memberId, storeName, stagedFile, 'rehydrated', {
+      kbDocumentName: documentName,
+      ingestedAt: Date.now(),
+    });
+    rehydratedCount += 1;
+    if (normalizedName) existingNames.add(normalizedName);
+    digestCandidates.push({
+      file: stagedFile,
+      documentName,
+      sampleText: extractedText.slice(0, DIGEST_SAMPLE_CHAR_LIMIT),
     });
   }
+
+  for (const item of digestCandidates) {
+    await upsertDigestFromDocument(ctx, service, {
+      memberId,
+      kbStoreName: storeName,
+      kbDocumentName: item.documentName,
+      displayName: item.file.displayName,
+      storageId: item.file.storageId,
+      mimeType: item.file.mimeType,
+      memberSystemPrompt: member.systemPrompt,
+      sampleText: item.sampleText,
+    });
+  }
+
+  const documents = await listMemberChunkDocuments(ctx, { memberId });
   return {
     storeName,
     rehydratedCount,
@@ -434,8 +421,8 @@ export async function rebuildMemberDigests(
   service: GeminiService,
   memberId: Id<'members'>
 ): Promise<{ rebuiltCount: number; skippedCount: number; storeName: string }> {
-  const { storeName, member } = await ensureMemberStore(ctx, service, memberId);
-  const documents = await service.listDocumentsFromStore(storeName);
+  const { storeName, member } = await ensureMemberStore(ctx, memberId);
+  const documents = await listMemberChunkDocuments(ctx, { memberId });
   const stagedRows = (await ctx.runQuery(api.kbStagedDocuments.listByMember, {
     memberId,
     includeDeleted: false,
@@ -463,8 +450,8 @@ export async function rebuildMemberDigests(
     const staged = latestByDisplay.get(displayName.trim().toLowerCase());
     await upsertDigestFromDocument(ctx, service, {
       memberId,
-      geminiStoreName: storeName,
-      geminiDocumentName: doc.name,
+      kbStoreName: storeName,
+      kbDocumentName: doc.name,
       displayName,
       storageId: staged?.storageId,
       mimeType: staged?.mimeType,

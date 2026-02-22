@@ -1,8 +1,6 @@
 'use node';
 
 import { GoogleGenAI } from '@google/genai';
-import fs from 'node:fs';
-import path from 'node:path';
 import { hallTitleModelCandidates, MODEL_IDS, resolveModel } from './modelConfig';
 
 export interface ContextMessage {
@@ -17,7 +15,7 @@ export interface Citation {
 
 export interface KBDocumentDigestHint {
   displayName: string;
-  geminiDocumentName?: string;
+  kbDocumentName?: string;
   topics: string[];
   entities: string[];
   lexicalAnchors: string[];
@@ -56,6 +54,22 @@ interface GroundedSnippet {
 interface GroundedEvidence {
   citations: Citation[];
   snippets: GroundedSnippet[];
+}
+
+export interface KnowledgeRetriever {
+  listDocuments(input: { storeName: string }): Promise<Array<{ name?: string; displayName?: string }>>;
+  retrieve(input: {
+    storeName: string;
+    query: string;
+    limit?: number;
+    metadataFilter?: string;
+    traceId: string;
+  }): Promise<{
+    retrievalText: string;
+    citations: Citation[];
+    snippets: GroundedSnippet[];
+    grounded: boolean;
+  }>;
 }
 
 export interface ChatResponse {
@@ -102,13 +116,6 @@ export interface ChatResponse {
   };
 }
 
-export interface UploadConfig {
-  displayName?: string;
-  mimeType?: string;
-  maxTokensPerChunk?: number;
-  maxOverlapTokens?: number;
-}
-
 export interface RouteMemberCandidate {
   id: string;
   name: string;
@@ -149,93 +156,6 @@ export class GeminiService {
 
     this.ai = new GoogleGenAI({ apiKey: key });
     this.debugLogsEnabled = process.env.GEMINI_DEBUG_LOGS === '1';
-  }
-
-  async createKnowledgeBase(displayName = 'web-rag-store'): Promise<string> {
-    const store = await this.ai.fileSearchStores.create({
-      config: { displayName },
-    });
-
-    if (!store.name) {
-      throw new Error('File Search store was created but no store name was returned');
-    }
-
-    return store.name;
-  }
-
-  async connectKnowledgeBaseByName(storeName: string): Promise<boolean> {
-    try {
-      const store = await this.ai.fileSearchStores.get({ name: storeName });
-      return Boolean(store?.name);
-    } catch {
-      return false;
-    }
-  }
-
-  async ensureKnowledgeBase(options: {
-    storeName?: string | null;
-    displayName: string;
-  }): Promise<{ storeName: string; created: boolean }> {
-    if (options.storeName) {
-      const connected = await this.connectKnowledgeBaseByName(options.storeName);
-      if (connected) {
-        return { storeName: options.storeName, created: false };
-      }
-    }
-
-    const storeName = await this.createKnowledgeBase(options.displayName);
-    return { storeName, created: true };
-  }
-
-  async uploadDocumentToStore(storeName: string, filePath: string, config: UploadConfig = {}): Promise<void> {
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`);
-    }
-
-    const displayName = config.displayName ?? path.basename(filePath);
-    const mimeType = config.mimeType ?? this.inferMimeType(displayName, filePath);
-
-    let operation = await this.ai.fileSearchStores.uploadToFileSearchStore({
-      file: filePath,
-      fileSearchStoreName: storeName,
-      config: {
-        displayName,
-        mimeType,
-        chunkingConfig: {
-          whiteSpaceConfig: {
-            maxTokensPerChunk: config.maxTokensPerChunk ?? 500,
-            maxOverlapTokens: config.maxOverlapTokens ?? 50,
-          },
-        },
-      },
-    });
-
-    while (!operation.done) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      operation = await this.ai.operations.get({ operation });
-    }
-  }
-
-  async listDocumentsFromStore(storeName: string): Promise<Array<{ name?: string; displayName?: string }>> {
-    const docs: Array<{ name?: string; displayName?: string }> = [];
-    const pager = await this.ai.fileSearchStores.documents.list({ parent: storeName });
-    for await (const doc of pager) {
-      docs.push({ name: doc.name, displayName: doc.displayName });
-    }
-    return docs;
-  }
-
-  async deleteDocumentByName(documentName: string, force = true): Promise<void> {
-    const aiAny = this.ai as any;
-    const documentsApi = aiAny.documents ?? aiAny.fileSearchStores?.documents;
-    if (!documentsApi?.delete) {
-      throw new Error('Documents delete API is not available in current SDK runtime.');
-    }
-
-    await documentsApi.delete({
-      name: documentName,
-      config: { force },
-    });
   }
 
   async routeMembersLite(options: {
@@ -664,6 +584,7 @@ export class GeminiService {
   async chatWithOptionalKnowledgeBase(options: {
     query: string;
     storeName?: string | null;
+    knowledgeRetriever?: KnowledgeRetriever;
     memoryHint?: string;
     kbDigests?: KBDocumentDigestHint[];
     retrievalModel?: string;
@@ -678,9 +599,16 @@ export class GeminiService {
     const retrievalModel = resolveModel('retrieval', options.retrievalModel);
     const kbDigests = options.kbDigests ?? [];
 
-    const storeProbe = options.storeName
-      ? await this.safeListDocuments(options.storeName)
-      : { docs: [], error: undefined as string | undefined };
+    const storeProbe =
+      options.storeName && options.knowledgeRetriever
+        ? await this.safeListDocuments(options.storeName, options.knowledgeRetriever)
+        : {
+            docs: [],
+            error:
+              options.storeName && !options.knowledgeRetriever
+                ? 'knowledge-retriever-not-provided'
+                : (undefined as string | undefined),
+          };
 
     const docs = storeProbe.docs;
     if (!options.storeName || docs.length === 0) {
@@ -794,6 +722,7 @@ export class GeminiService {
       alternateQueries: rewritePlan.alternates,
       queryPlan: queryPlanDebug,
       storeName: options.storeName,
+      knowledgeRetriever: options.knowledgeRetriever,
       retrievalModel,
       responseModel,
       temperature: options.temperature,
@@ -829,10 +758,11 @@ export class GeminiService {
   }
 
   private async safeListDocuments(
-    storeName: string
+    storeName: string,
+    knowledgeRetriever: KnowledgeRetriever
   ): Promise<{ docs: Array<{ name?: string; displayName?: string }>; error?: string }> {
     try {
-      const docs = await this.listDocumentsFromStore(storeName);
+      const docs = await knowledgeRetriever.listDocuments({ storeName });
       return { docs };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown listDocuments error';
@@ -901,6 +831,7 @@ export class GeminiService {
     alternateQueries: string[];
     queryPlan: QueryPlanDebug;
     storeName: string;
+    knowledgeRetriever?: KnowledgeRetriever;
     retrievalModel: string;
     responseModel: string;
     temperature?: number;
@@ -910,8 +841,12 @@ export class GeminiService {
     traceId?: string;
   }): Promise<ChatResponse> {
     const traceId = options.traceId ?? crypto.randomUUID().slice(0, 8);
+    if (!options.knowledgeRetriever) {
+      throw new Error('Knowledge retriever is required for knowledge-base chat mode');
+    }
     const primaryPass = await this.retrieveEvidencePass({
       storeName: options.storeName,
+      knowledgeRetriever: options.knowledgeRetriever,
       retrievalModel: options.retrievalModel,
       query: options.standaloneQuery,
       metadataFilter: options.metadataFilter,
@@ -929,6 +864,7 @@ export class GeminiService {
       alternateQuery = options.alternateQueries[0].trim();
       finalPass = await this.retrieveEvidencePass({
         storeName: options.storeName,
+        knowledgeRetriever: options.knowledgeRetriever,
         retrievalModel: options.retrievalModel,
         query: alternateQuery,
         metadataFilter: options.metadataFilter,
@@ -1027,6 +963,7 @@ export class GeminiService {
 
   private async retrieveEvidencePass(options: {
     storeName: string;
+    knowledgeRetriever: KnowledgeRetriever;
     retrievalModel: string;
     query: string;
     metadataFilter?: string;
@@ -1037,13 +974,6 @@ export class GeminiService {
     retrievalText: string;
     evidence: GroundedEvidence;
   }> {
-    const fileSearchConfig: { fileSearchStoreNames: string[]; metadataFilter?: string } = {
-      fileSearchStoreNames: [options.storeName],
-    };
-    if (options.metadataFilter) {
-      fileSearchConfig.metadataFilter = options.metadataFilter;
-    }
-
     this.logDebug('file-search:start', {
       traceId: options.traceId,
       storeName: options.storeName,
@@ -1052,35 +982,20 @@ export class GeminiService {
       metadataFilter: options.metadataFilter ?? null,
     });
 
-    const retrievalResponse = await this.ai.models.generateContent({
-      model: options.retrievalModel,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: [
-                'You are a retrieval worker.',
-                'Use ONLY the File Search tool and return verbatim evidence spans relevant to the user question.',
-                'Prioritize exact quoted fragments from source passages.',
-                'If nothing relevant is found, output exactly: NO_EVIDENCE',
-                '',
-                `User question: ${options.query}`,
-              ].join('\n'),
-            },
-          ],
-        },
-      ],
-      config: {
-        tools: [{ fileSearch: fileSearchConfig }],
-        temperature: 0,
-      },
+    const retrieved = await options.knowledgeRetriever.retrieve({
+      storeName: options.storeName,
+      query: options.query,
+      metadataFilter: options.metadataFilter,
+      traceId: options.traceId,
     });
-
-    const retrievalText = (retrievalResponse.text ?? '').trim();
-    const groundingMetadata = retrievalResponse.candidates?.[0]?.groundingMetadata;
-    const evidence = this.extractGroundedEvidence(groundingMetadata);
-    const grounded = evidence.snippets.length > 0;
+    const evidence: GroundedEvidence = {
+      citations: retrieved.citations ?? [],
+      snippets: retrieved.snippets ?? [],
+    };
+    const retrievalText = (retrieved.retrievalText ?? '').trim();
+    const grounded = typeof retrieved.grounded === 'boolean'
+      ? retrieved.grounded
+      : evidence.snippets.length > 0;
 
     return {
       query: options.query,
@@ -1337,53 +1252,6 @@ export class GeminiService {
     };
   }
 
-  private extractGroundedEvidence(groundingMetadata: any): GroundedEvidence {
-    const chunks = groundingMetadata?.groundingChunks ?? [];
-    const supports = groundingMetadata?.groundingSupports ?? [];
-
-    const citations: Citation[] = [];
-    const snippets: GroundedSnippet[] = [];
-
-    for (const chunk of chunks) {
-      const title = chunk?.web?.title || chunk?.retrievedContext?.title || chunk?.document?.title;
-      const uri = chunk?.web?.uri || chunk?.retrievedContext?.uri || chunk?.document?.uri;
-      if (title) {
-        citations.push({ title, uri });
-      }
-    }
-
-    for (const support of supports) {
-      const segmentText = support?.segment?.text;
-      if (typeof segmentText === 'string' && segmentText.trim()) {
-        const indices = Array.isArray(support?.groundingChunkIndices)
-          ? support.groundingChunkIndices
-              .filter((value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0)
-              .map((value: number) => Number(value))
-          : [];
-        snippets.push({
-          text: segmentText.trim(),
-          citationIndices: indices,
-        });
-      }
-    }
-
-    const dedupedSnippets = snippets.reduce<Array<GroundedSnippet>>((acc, item) => {
-      const existing = acc.find((entry) => entry.text === item.text);
-      if (!existing) {
-        acc.push(item);
-        return acc;
-      }
-      const merged = Array.from(new Set([...existing.citationIndices, ...item.citationIndices]));
-      existing.citationIndices = merged;
-      return acc;
-    }, []);
-
-    return {
-      citations: citations.filter((item, index, list) => list.findIndex((x) => x.title === item.title && x.uri === item.uri) === index),
-      snippets: dedupedSnippets,
-    };
-  }
-
   private fallbackDocumentDigest(displayName: string, memberSystemPrompt?: string): {
     topics: string[];
     entities: string[];
@@ -1424,32 +1292,6 @@ export class GeminiService {
       .map((item) => item.slice(0, 120))
       .filter((item, index, list) => list.indexOf(item) === index)
       .slice(0, max);
-  }
-
-  private inferMimeType(displayName: string, filePath: string): string {
-    const byExt: Record<string, string> = {
-      '.pdf': 'application/pdf',
-      '.txt': 'text/plain',
-      '.md': 'text/markdown',
-      '.csv': 'text/csv',
-      '.json': 'application/json',
-      '.doc': 'application/msword',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.ppt': 'application/vnd.ms-powerpoint',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      '.xls': 'application/vnd.ms-excel',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.rtf': 'application/rtf',
-      '.html': 'text/html',
-      '.xml': 'application/xml',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.webp': 'image/webp',
-    };
-
-    const ext = path.extname(displayName || filePath).toLowerCase();
-    return byExt[ext] ?? 'application/octet-stream';
   }
 
   private logDebug(event: string, payload: unknown): void {

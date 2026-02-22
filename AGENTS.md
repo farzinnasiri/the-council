@@ -8,7 +8,7 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 - **Frontend**: React 19 + Vite + TypeScript + Tailwind utility classes + CSS tokens in `globals.css`
 - **State**: Zustand (`appStore.ts`) + Convex repository layer
 - **Backend**: Convex functions only (queries/mutations/actions); no Express runtime
-- **Gemini service**: `convex/ai.ts` + `convex/ai/*` (routing, chat, summaries, KB ingest)
+- **AI stack**: Gemini for routing/chat/summaries + Convex RAG retrieval + OpenAI embeddings for vectorization
 - **Database/Auth**: Convex + Convex Auth (Google OAuth)
 - **Avatars**: `react-easy-crop`, stored in Convex Storage
 - **PWA**: Vite PWA plugin (manifest + service worker)
@@ -49,12 +49,17 @@ Guidance for agents working in `/Users/farzin/MyProjects/the-council`.
 | Path | Purpose |
 |------|---------|
 | `convex/ai.ts` | Public AI/KB action surface |
-| `convex/ai/geminiService.ts` | Gemini + File Search orchestration |
+| `convex/ai/geminiService.ts` | Gemini orchestration (routing/chat/summaries + KB gate/query rewrite) |
 | `convex/ai/modelConfig.ts` | Model ID resolution |
 | `convex/ai/ownership.ts` | Auth/ownership checks for actions |
-| `convex/ai/kbIngest.ts` | KB staging ingest, rehydrate, purge |
+| `convex/ai/kbIngest.ts` | KB staging ingest, Convex RAG indexing, rehydrate, purge |
+| `convex/ai/ragConfig.ts` | RAG source-of-truth constants (chunking/search/embedding model) |
+| `convex/ai/ragExtraction.ts` | Storage text extraction (text-like + PDF) |
+| `convex/ai/ragStore.ts` | Chunk split/sample/index/delete/search orchestration |
+| `convex/ai/openaiEmbeddings.ts` | OpenAI embeddings API client |
 | `convex/kbDigests.ts` | Per-document KB digest storage + lifecycle |
 | `convex/kbStagedDocuments.ts` | KB staged-document audit records |
+| `convex/kbDocumentChunks.ts` | Vector chunk storage/list/hydrate helpers |
 | `convex/memoryLogs.ts` | Chamber memory log reads |
 | `convex/schema.ts` | Convex schema |
 | `convex/auth.ts` | Convex Auth config |
@@ -120,6 +125,7 @@ Use this checklist whenever backend actions or env values change:
 5. Verify new actions exist on that deployment:
    - `npx convex function-spec | rg "ai.js:chatWithMember|ai.js:routeHallMembers"`
 6. Verify required runtime env exists on that deployment:
+   - `npx convex env list | rg "^OPENAI_KEY="`
    - `npx convex env list | rg "^GEMINI_API_KEY="`
    - `npx convex env list | rg "^SITE_URL="`
 
@@ -165,6 +171,7 @@ Core tables:
 - `appConfig`
 - `kbStagedDocuments`
 - `kbDocumentDigests`
+- `kbDocumentChunks`
 - Convex Auth managed tables (`authSessions`, `authAccounts`, ...)
 
 All member/conversation/message access is user-scoped by auth user ID.
@@ -189,13 +196,14 @@ Public Convex actions in `convex/ai.ts`:
 - `rehydrateMemberKnowledgeStore`
 - `purgeExpiredStagedKnowledgeDocuments`
 
-KB upload flow:
+KB upload + retrieval flow:
 1. Frontend uploads files to Convex Storage via `generateUploadUrl`.
 2. Frontend sends staged `storageId` metadata to `uploadMemberDocuments`.
-3. Action ingests to Gemini File Search store and records audit rows in `kbStagedDocuments`.
-4. Ingest also upserts per-document digest rows in `kbDocumentDigests`.
-5. KB gate/query rewrite can use those digest hints for better recall on follow-ups.
-4. Staged binaries are retained for 90 days (rehydration support) unless purged.
+3. Action extracts text (text-like + PDF), chunks/samples it, embeds via OpenAI, and stores vectors in `kbDocumentChunks`.
+4. Action records ingest audit rows in `kbStagedDocuments`.
+5. Ingest also upserts per-document digest rows in `kbDocumentDigests`.
+6. KB gate/query rewrite can use digest hints; when KB is selected, retrieval reads from Convex vector search (`kbDocumentChunks`).
+7. Staged binaries are retained for 90 days (rehydration support) unless purged.
 
 ---
 
@@ -214,6 +222,7 @@ KB upload flow:
 - Do not set `JWT_PRIVATE_KEY` or `JWKS` here; manage them with `npx @convex-dev/auth`.
 
 ### Convex runtime env
+- `OPENAI_KEY`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 - `GEMINI_CHAT_MODEL`

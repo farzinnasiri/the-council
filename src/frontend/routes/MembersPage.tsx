@@ -299,8 +299,8 @@ export function MembersPage() {
   const normalizeDocKey = (value?: string) => (value ?? '').trim().toLowerCase();
   const digestByDocumentName = new Map(
     kbDigests
-      .filter((digest) => Boolean(digest.geminiDocumentName))
-      .map((digest) => [normalizeDocKey(digest.geminiDocumentName), digest] as const)
+      .filter((digest) => Boolean(digest.kbDocumentName))
+      .map((digest) => [normalizeDocKey(digest.kbDocumentName), digest] as const)
   );
   const digestByDisplayName = new Map(
     kbDigests.map((digest) => [normalizeDocKey(digest.displayName), digest] as const)

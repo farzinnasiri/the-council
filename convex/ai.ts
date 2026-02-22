@@ -17,6 +17,7 @@ import {
   rehydrateMemberStore,
   uploadStagedDocuments,
 } from './ai/kbIngest';
+import { listMemberChunkDocuments, searchMemberChunks } from './ai/ragStore';
 import { resolveRoundtableMaxSpeakers } from './ai/roundtablePolicy';
 import { applyRoundDefaultSelection, buildRoundContext } from './ai/orchestration/roundtableHall';
 
@@ -26,6 +27,31 @@ function createProvider() {
 
 function createGeminiServiceForKnowledgeBase() {
   return new GeminiService(process.env.GEMINI_API_KEY);
+}
+
+function createKnowledgeRetriever(ctx: any, memberId: Id<'members'>) {
+  return {
+    listDocuments: async ({ storeName: _storeName }: { storeName: string }) =>
+      await listMemberChunkDocuments(ctx, { memberId }),
+    retrieve: async ({
+      storeName: _storeName,
+      query,
+      limit,
+      metadataFilter: _metadataFilter,
+      traceId: _traceId,
+    }: {
+      storeName: string;
+      query: string;
+      limit?: number;
+      metadataFilter?: string;
+      traceId: string;
+    }) =>
+      await searchMemberChunks(ctx, {
+        memberId,
+        query,
+        limit,
+      }),
+  };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -253,10 +279,12 @@ export const chatWithMember = action({
   },
   handler: async (ctx, args): Promise<any> => {
     await requireAuthUser(ctx);
-    const [conversation, member] = await Promise.all([
+    const [conversation, ensured] = await Promise.all([
       requireOwnedConversation(ctx, args.conversationId),
-      requireOwnedMember(ctx, args.memberId),
+      ensureMemberStore(ctx, args.memberId),
     ]);
+    const member = ensured.member;
+    const effectiveStoreName = ensured.storeName;
 
     if (conversation.kind === 'chamber' && conversation.chamberMemberId !== args.memberId) {
       throw new Error('Member does not match chamber conversation');
@@ -277,11 +305,12 @@ export const chatWithMember = action({
     const provider = createProvider();
     return await provider.chatMember({
       query: args.message,
-      storeName: member.kbStoreName ?? null,
+      storeName: effectiveStoreName,
+      knowledgeRetriever: createKnowledgeRetriever(ctx, args.memberId),
       memoryHint: args.previousSummary,
       kbDigests: (kbDigests as Array<any>).map((item) => ({
         displayName: item.displayName as string,
-        geminiDocumentName: item.geminiDocumentName as string | undefined,
+        kbDocumentName: item.kbDocumentName as string | undefined,
         topics: (item.topics ?? []) as string[],
         entities: (item.entities ?? []) as string[],
         lexicalAnchors: (item.lexicalAnchors ?? []) as string[],
@@ -512,7 +541,9 @@ async function runRoundtableSpeaker(options: {
   chatModel?: string;
   provider: ReturnType<typeof createProvider>;
 }) {
-  const member = options.membersById.get(options.memberId as string);
+  const ensured = await ensureMemberStore(options.ctx, options.memberId);
+  const member = ensured.member;
+  const effectiveStoreName = ensured.storeName;
   if (!member || member.deletedAt) {
     const memberName = member?.name ?? 'Member';
     return {
@@ -551,11 +582,12 @@ async function runRoundtableSpeaker(options: {
   try {
     const result = await options.provider.chatMember({
       query: roundPrompt,
-      storeName: member.kbStoreName ?? null,
+      storeName: effectiveStoreName,
+      knowledgeRetriever: createKnowledgeRetriever(options.ctx, options.memberId),
       memoryHint: undefined,
       kbDigests: kbDigests.map((item: any) => ({
         displayName: item.displayName as string,
-        geminiDocumentName: item.geminiDocumentName as string | undefined,
+        kbDocumentName: item.kbDocumentName as string | undefined,
         topics: (item.topics ?? []) as string[],
         entities: (item.entities ?? []) as string[],
         lexicalAnchors: (item.lexicalAnchors ?? []) as string[],
@@ -799,8 +831,7 @@ export const ensureMemberKnowledgeStore = action({
   },
   handler: async (ctx, args) => {
     await requireAuthUser(ctx);
-    const service = createGeminiServiceForKnowledgeBase();
-    const ensured = await ensureMemberStore(ctx, service, args.memberId);
+    const ensured = await ensureMemberStore(ctx, args.memberId);
     return {
       storeName: ensured.storeName,
       created: ensured.created,
@@ -830,8 +861,7 @@ export const listMemberKnowledgeDocuments = action({
   },
   handler: async (ctx, args) => {
     await requireAuthUser(ctx);
-    const service = createGeminiServiceForKnowledgeBase();
-    return await listMemberDocuments(ctx, service, args.memberId);
+    return await listMemberDocuments(ctx, args.memberId);
   },
 });
 
@@ -842,8 +872,7 @@ export const deleteMemberKnowledgeDocument = action({
   },
   handler: async (ctx, args) => {
     await requireAuthUser(ctx);
-    const service = createGeminiServiceForKnowledgeBase();
-    const documents = await deleteMemberDocument(ctx, service, args.memberId, args.documentName);
+    const documents = await deleteMemberDocument(ctx, args.memberId, args.documentName);
     return { ok: true, documents };
   },
 });

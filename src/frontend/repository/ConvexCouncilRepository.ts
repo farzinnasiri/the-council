@@ -650,7 +650,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     return rows.map((row) => ({
       id: row._id as string,
       memberId: row.memberId as string,
-      geminiDocumentName: row.geminiDocumentName as string | undefined,
+      kbDocumentName: row.kbDocumentName as string | undefined,
       displayName: row.displayName as string,
       topics: (row.topics ?? []) as string[],
       entities: (row.entities ?? []) as string[],

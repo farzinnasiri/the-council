@@ -14,7 +14,7 @@ export interface CouncilRouteMemberCandidate {
 
 export interface CouncilKBDocumentDigestHint {
   displayName: string;
-  geminiDocumentName?: string;
+  kbDocumentName?: string;
   topics: string[];
   entities: string[];
   lexicalAnchors: string[];
@@ -26,6 +26,24 @@ export interface RoundIntentProposal {
   intent: RoundIntent;
   targetMemberId?: string;
   rationale: string;
+}
+
+export interface CouncilKnowledgeRetriever {
+  listDocuments(input: {
+    storeName: string;
+  }): Promise<Array<{ name?: string; displayName?: string }>>;
+  retrieve(input: {
+    storeName: string;
+    query: string;
+    limit?: number;
+    metadataFilter?: string;
+    traceId: string;
+  }): Promise<{
+    retrievalText: string;
+    citations: Array<{ title: string; uri?: string }>;
+    snippets: Array<{ text: string; citationIndices: number[] }>;
+    grounded: boolean;
+  }>;
 }
 
 export interface ProviderChatResponse {
@@ -98,6 +116,7 @@ export interface CouncilAiProvider {
   chatMember(input: {
     query: string;
     storeName?: string | null;
+    knowledgeRetriever?: CouncilKnowledgeRetriever;
     memoryHint?: string;
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;

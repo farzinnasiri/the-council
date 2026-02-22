@@ -9,6 +9,7 @@ import type {
   CouncilAiProvider,
   CouncilContextMessage,
   CouncilKBDocumentDigestHint,
+  CouncilKnowledgeRetriever,
   CouncilRouteMemberCandidate,
   RoundIntentProposal,
 } from './types';
@@ -25,7 +26,7 @@ function toRouteCandidates(input: CouncilRouteMemberCandidate[]): RouteMemberCan
 function toDigestHints(input?: CouncilKBDocumentDigestHint[]): KBDocumentDigestHint[] {
   return (input ?? []).map((item) => ({
     displayName: item.displayName,
-    geminiDocumentName: item.geminiDocumentName,
+    kbDocumentName: item.kbDocumentName,
     topics: item.topics,
     entities: item.entities,
     lexicalAnchors: item.lexicalAnchors,
@@ -73,6 +74,7 @@ export class GeminiCouncilAiProvider implements CouncilAiProvider {
   async chatMember(input: {
     query: string;
     storeName?: string | null;
+    knowledgeRetriever?: CouncilKnowledgeRetriever;
     memoryHint?: string;
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;
@@ -86,6 +88,7 @@ export class GeminiCouncilAiProvider implements CouncilAiProvider {
     return await this.service.chatWithOptionalKnowledgeBase({
       query: input.query,
       storeName: input.useKnowledgeBase === false ? null : input.storeName,
+      knowledgeRetriever: input.knowledgeRetriever,
       memoryHint: input.memoryHint,
       kbDigests: toDigestHints(input.kbDigests),
       retrievalModel: input.retrievalModel,

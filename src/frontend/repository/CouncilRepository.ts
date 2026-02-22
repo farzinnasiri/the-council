@@ -112,7 +112,7 @@ export interface MemberChatResult {
 export interface KBDigestMetadata {
   id: string;
   memberId: string;
-  geminiDocumentName?: string;
+  kbDocumentName?: string;
   displayName: string;
   topics: string[];
   entities: string[];

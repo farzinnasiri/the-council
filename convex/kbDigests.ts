@@ -21,8 +21,8 @@ async function assertOwnedMember(ctx: any, userId: any, memberId: any) {
 export const upsertForDocument = mutation({
   args: {
     memberId: v.id('members'),
-    geminiStoreName: v.string(),
-    geminiDocumentName: v.optional(v.string()),
+    kbStoreName: v.string(),
+    kbDocumentName: v.optional(v.string()),
     displayName: v.string(),
     storageId: v.optional(v.id('_storage')),
     topics: v.array(v.string()),
@@ -42,11 +42,11 @@ export const upsertForDocument = mutation({
     const now = args.updatedAt ?? Date.now();
     let existing: any = null;
 
-    if (args.geminiDocumentName) {
+    if (args.kbDocumentName) {
       const byDocument = await ctx.db
         .query('kbDocumentDigests')
         .withIndex('by_member_document', (q: any) =>
-          q.eq('memberId', args.memberId).eq('geminiDocumentName', args.geminiDocumentName)
+          q.eq('memberId', args.memberId).eq('kbDocumentName', args.kbDocumentName)
         )
         .collect();
       existing = byDocument.find((row: any) => row.userId === userId) ?? null;
@@ -63,14 +63,14 @@ export const upsertForDocument = mutation({
       existing =
         candidates.find((row: any) => {
           const sameDisplay = (row.displayName ?? '').trim().toLowerCase() === normalizedDisplay;
-          const sameStore = row.geminiStoreName === args.geminiStoreName;
+          const sameStore = row.kbStoreName === args.kbStoreName;
           return sameDisplay && sameStore;
         }) ?? null;
     }
 
     const patch = {
-      geminiStoreName: args.geminiStoreName,
-      geminiDocumentName: args.geminiDocumentName,
+      kbStoreName: args.kbStoreName,
+      kbDocumentName: args.kbDocumentName,
       displayName: args.displayName,
       storageId: args.storageId,
       topics: args.topics,
@@ -107,8 +107,8 @@ export const listByMember = query({
       _creationTime: v.number(),
       userId: v.id('users'),
       memberId: v.id('members'),
-      geminiStoreName: v.string(),
-      geminiDocumentName: v.optional(v.string()),
+      kbStoreName: v.string(),
+      kbDocumentName: v.optional(v.string()),
       displayName: v.string(),
       storageId: v.optional(v.id('_storage')),
       topics: v.array(v.string()),
@@ -148,7 +148,7 @@ export const listByMember = query({
 export const markDeletedByDocument = mutation({
   args: {
     memberId: v.id('members'),
-    geminiDocumentName: v.string(),
+    kbDocumentName: v.string(),
   },
   returns: v.number(),
   handler: async (ctx, args) => {
@@ -158,7 +158,7 @@ export const markDeletedByDocument = mutation({
     const rows = await ctx.db
       .query('kbDocumentDigests')
       .withIndex('by_member_document', (q: any) =>
-        q.eq('memberId', args.memberId).eq('geminiDocumentName', args.geminiDocumentName)
+        q.eq('memberId', args.memberId).eq('kbDocumentName', args.kbDocumentName)
       )
       .collect();
 

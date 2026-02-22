@@ -157,8 +157,8 @@ export default defineSchema({
     displayName: v.string(),
     mimeType: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
-    geminiStoreName: v.string(),
-    geminiDocumentName: v.optional(v.string()),
+    kbStoreName: v.string(),
+    kbDocumentName: v.optional(v.string()),
     status: v.union(
       v.literal('staged'),
       v.literal('ingested'),
@@ -176,13 +176,13 @@ export default defineSchema({
     .index('by_user_member_status', ['userId', 'memberId', 'status'])
     .index('by_member_createdAt', ['memberId', 'createdAt'])
     .index('by_status_expiresAt', ['status', 'expiresAt'])
-    .index('by_gemini_document_name', ['geminiDocumentName']),
+    .index('by_kb_document_name', ['kbDocumentName']),
 
   kbDocumentDigests: defineTable({
     userId: v.id('users'),
     memberId: v.id('members'),
-    geminiStoreName: v.string(),
-    geminiDocumentName: v.optional(v.string()),
+    kbStoreName: v.string(),
+    kbDocumentName: v.optional(v.string()),
     displayName: v.string(),
     storageId: v.optional(v.id('_storage')),
     topics: v.array(v.string()),
@@ -195,6 +195,25 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
   })
     .index('by_user_member_status', ['userId', 'memberId', 'status'])
-    .index('by_member_document', ['memberId', 'geminiDocumentName'])
-    .index('by_store_document', ['geminiStoreName', 'geminiDocumentName']),
+    .index('by_member_document', ['memberId', 'kbDocumentName'])
+    .index('by_store_document', ['kbStoreName', 'kbDocumentName']),
+
+  kbDocumentChunks: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    kbStoreName: v.string(),
+    kbDocumentName: v.string(),
+    displayName: v.string(),
+    chunkIndex: v.number(),
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    createdAt: v.number(),
+  })
+    .index('by_member_document', ['memberId', 'kbDocumentName'])
+    .index('by_member_createdAt', ['memberId', 'createdAt'])
+    .vectorIndex('by_embedding', {
+      vectorField: 'embedding',
+      dimensions: 1536,
+      filterFields: ['userId', 'memberId', 'kbStoreName'],
+    }),
 });
