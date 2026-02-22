@@ -635,7 +635,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const roundNumber = snapshot.round.roundNumber;
     const selected = snapshot.intents
-      .filter((item) => item.selected && item.intent !== 'pass')
+      .filter((item) => item.selected)
       .map((item) => item.memberId);
 
     if (selected.length === 0) {
@@ -702,7 +702,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => ({
         roundtableStateByConversation: {
           ...state.roundtableStateByConversation,
-          [conversationId]: completed,
+          [conversationId]: null,
         },
       }));
     } finally {

@@ -67,6 +67,8 @@ export function HallPage() {
     .filter((member): member is NonNullable<typeof member> => Boolean(member))
     .map((member) => ({ id: member.id, name: member.name }))
     .filter((member) => !selectedSpeakerSet.has(member.id));
+  const composerMentionOptions =
+    conversation.hallMode === 'roundtable' ? [] : mentionOptions;
 
   const roundtableState = roundtableStateByConversation[conversation.id] ?? null;
   const isPreRoundPreparing = roundtablePreparingByConversation[conversation.id] ?? false;
@@ -94,22 +96,26 @@ export function HallPage() {
       hasOlderMessages={pagination?.hasOlder ?? false}
       loadingOlderMessages={pagination?.isLoadingOlder ?? false}
       placeholder="Ask the Hall..."
-      mentionOptions={mentionOptions}
+      mentionOptions={composerMentionOptions}
       mentionError={mentionError}
       beforeComposer={roundtablePanel}
       onLoadOlder={() => loadOlderMessages(conversation.id)}
       onSend={async ({ text, mentionedMemberIds = [] }) => {
         setMentionError(undefined);
-        const activeSet = new Set(participantIds);
-        const invalidMentions = mentionedMemberIds.filter((memberId) => !activeSet.has(memberId));
+        if (conversation.hallMode !== 'roundtable') {
+          const activeSet = new Set(participantIds);
+          const invalidMentions = mentionedMemberIds.filter((memberId) => !activeSet.has(memberId));
 
-        if (invalidMentions.length > 0) {
-          setMentionError('Mentions must target active Hall participants.');
-          return;
+          if (invalidMentions.length > 0) {
+            setMentionError('Mentions must target active Hall participants.');
+            return;
+          }
         }
 
-        await sendUserMessage(conversation.id, text, mentionedMemberIds);
-        await generateReplies(conversation.id, text, mentionedMemberIds);
+        const normalizedMentions =
+          conversation.hallMode === 'roundtable' ? [] : mentionedMemberIds;
+        await sendUserMessage(conversation.id, text, normalizedMentions);
+        await generateReplies(conversation.id, text, normalizedMentions);
       }}
     />
   );

@@ -261,9 +261,7 @@ export const setRoundSelections = mutation({
     }
 
     const selectableIds = new Set(
-      intents
-        .filter((row: any) => row.intent !== 'pass')
-        .map((row: any) => row.memberId as string)
+      intents.map((row: any) => row.memberId as string)
     );
 
     for (const memberId of uniqueSelections) {

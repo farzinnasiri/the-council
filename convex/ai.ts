@@ -529,8 +529,11 @@ async function runRoundtableSpeaker(options: {
     ? (options.membersById.get(options.intentRow.targetMemberId as string)?.name ?? 'another member')
     : undefined;
 
+  const effectiveIntent: 'speak' | 'challenge' | 'support' =
+    options.intentRow.intent === 'pass' ? 'speak' : options.intentRow.intent;
+
   const roundPrompt = [
-    `Round #${options.roundNumber} intent: ${options.intentRow.intent}.`,
+    `Round #${options.roundNumber} intent: ${effectiveIntent}.`,
     targetName ? `Focus target: ${targetName}.` : '',
     options.latestUserMessage
       ? `User topic: ${options.latestUserMessage.content}`
@@ -580,7 +583,7 @@ async function runRoundtableSpeaker(options: {
       memberId: options.memberId,
       status: 'sent' as const,
       answer: result.answer,
-      intent: options.intentRow.intent as 'speak' | 'challenge' | 'support',
+      intent: effectiveIntent,
       targetMemberId: options.intentRow.targetMemberId as Id<'members'> | undefined,
       error: undefined,
     };
@@ -591,7 +594,7 @@ async function runRoundtableSpeaker(options: {
       memberId: options.memberId,
       status: 'error' as const,
       answer: `${memberName} could not speak in this round.`,
-      intent: options.intentRow.intent as 'speak' | 'challenge' | 'support',
+      intent: effectiveIntent,
       targetMemberId: options.intentRow.targetMemberId as Id<'members'> | undefined,
       error: errorMessage,
     };
@@ -642,7 +645,7 @@ export const chatRoundtableSpeakers = action({
     }
 
     const selectedRows = (state.intents as Array<any>).filter(
-      (row) => row.selected && row.intent !== 'pass'
+      (row) => row.selected
     );
 
     if (selectedRows.length === 0) {
@@ -740,10 +743,6 @@ export const chatRoundtableSpeaker = action({
 
     if (!intentRow) {
       throw new Error('Member is not selected for this round');
-    }
-
-    if (intentRow.intent === 'pass') {
-      throw new Error('Pass intent cannot be spoken');
     }
 
     const [participants, membersById, activeMessages, allMessages] = await Promise.all([
