@@ -90,11 +90,17 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Revisit what metadata is extracted and how it is normalized.
 - Evaluate retrieval quality improvements from richer metadata.
 
-### 3.3 Voice Features
+### 3.3 Advanced KB Search (Parallel Querying)
+- Implement advanced KB retrieval using multiple parallel queries per user request.
+- Add query decomposition/rewrite strategies (facets, synonyms, intent slices).
+- Merge/rank parallel retrieval results before final response generation.
+- Add safeguards for duplicate hits, latency limits, and token/cost budgets.
+
+### 3.4 Voice Features
 - Implement voice-to-text feature (planned provider: Google speech stack).
 - Clarify/confirm final provider and API surface (speech-to-text vs text-to-speech naming).
 
-### 3.4 Member Image Capability
+### 3.5 Member Image Capability
 - Add image capability to members (input and/or generation flow to be finalized).
 - Define storage, moderation, and UI presentation rules.
 
