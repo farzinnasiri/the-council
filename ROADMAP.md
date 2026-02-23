@@ -44,7 +44,20 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Define memory schema and permissions.
 - Add periodic memory cleanup/maintenance (cron-based).
 
-### 2.3 Coach Mode for Members
+### 2.3 The Mirror (Talk to Yourself)
+- Add a "Mirror" experience where the user talks to a reflection of themselves.
+- Mirror should use the user's memories, reflections, and prior conversations as context.
+- Dependency: only implement after memory features are mature and reliable.
+- Goal: make introspection/coaching feel continuous and personal, not stateless.
+
+### 2.4 Chamber Threads with Shared Memory
+- Allow multiple chamber threads per member (different subjects/workstreams).
+- Threads must not feel like fresh-start chats every time.
+- Prerequisite: implement durable member identity memory + user memory integration first.
+- Thread model goal: same member persona and stable understanding of the user across threads, with thread-specific context layered on top.
+- Add clear thread boundaries (topic/history) while preserving shared long-term memory.
+
+### 2.5 Coach Mode for Members
 - Add per-member `Coach Mode` toggle.
 - Create a dedicated coaching room experience.
 - Keep access to chamber memory, plus separate coaching memory tracks:
@@ -55,16 +68,16 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
   - coach identity/profile memory.
 - Apply coaching-specific system prompt/tool presets.
 
-### 2.4 Response Modes (Behavior + Length Control)
+### 2.6 Response Modes (Behavior + Length Control)
 - Add user-selectable response modes (examples):
   - Instant,
   - Brief/Short,
   - Deep Think,
   - Deep Dive,
-  - KB-assisted variants.
+- KB-assisted variants.
 - Define UX for mode selection and mode persistence.
 
-### 2.5 Model Orchestration: Director + Actor
+### 2.7 Model Orchestration: Director + Actor
 - Introduce two-stage generation flow:
   - **Director** sets framing and target length from user prompt.
   - **Actor** generates in-character dialogue/content.
