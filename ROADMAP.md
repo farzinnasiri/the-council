@@ -104,6 +104,16 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Add image capability to members (input and/or generation flow to be finalized).
 - Define storage, moderation, and UI presentation rules.
 
+### 3.6 Implement Wide Events
+- Implement request-scoped wide events across backend pipelines.
+- Standardize event shape for query-first debugging (request/user/conversation/member/model/retrieval context).
+- Ensure critical AI paths emit one rich main event per unit of work with error and latency dimensions.
+
+### 3.7 Improve Chat Compaction/Summarisation Prompt (Post-LangChain)
+- Redesign compaction and summarisation prompt strategy after LangChain/LangGraph migration is in place.
+- Align summary contracts with new orchestration flow and memory lifecycle.
+- Add evaluation checks for summary fidelity, drift, and token-efficiency.
+
 ## 4) Integrations
 
 ### 4.1 Telegram Bot Integration
