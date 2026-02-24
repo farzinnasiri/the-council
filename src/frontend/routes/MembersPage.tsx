@@ -84,8 +84,8 @@ export function MembersPage() {
         setDigestLoadError('Could not load metadata. Please reopen edit mode or refresh.');
       })
       .finally(() => {
-      setBusyMemberId(null);
-      setIsDigestLoading(false);
+        setBusyMemberId(null);
+        setIsDigestLoading(false);
       });
   }, [editingMemberId, fetchDocsForMember]);
 
@@ -317,9 +317,9 @@ export function MembersPage() {
       <div className={`mx-auto grid w-full gap-6 ${isFormActive ? 'max-w-6xl lg:grid-cols-[1.2fr_1fr]' : 'max-w-2xl grid-cols-1'}`}>
         <section className={`space-y-4 ${isFormActive ? 'order-2 lg:order-1' : 'order-1'}`}>
           <div className="flex items-center justify-between">
-            <h1 className="font-display text-2xl">Members</h1>
-            <Button variant="outline" className="gap-2" onClick={startCreate}>
-              <Plus className="h-4 w-4" />
+            <h1 className="font-mono text-xl font-semibold tracking-tight">Members</h1>
+            <Button variant="outline" className="h-8 gap-2 rounded-md text-xs" onClick={startCreate}>
+              <Plus className="h-3.5 w-3.5" />
               New member
             </Button>
           </div>
@@ -351,14 +351,13 @@ export function MembersPage() {
         </section>
 
         {isFormActive && (
-          <section className="order-1 rounded-2xl border border-border bg-card p-4 md:p-5 lg:order-2">
-            <h2 className="font-display text-xl">{editingMemberId ? 'Edit member' : 'Create member'}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Set each member's identity and system prompt. Manage knowledge-base files from here.
+          <section className="order-1 rounded-lg border border-border bg-transparent p-4 lg:order-2">
+            <h2 className="font-mono text-sm font-semibold tracking-tight">{editingMemberId ? 'Edit member' : 'Create member'}</h2>
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              Set member identity and manage knowledge.
             </p>
 
-            <div className="mt-4 space-y-3">
-              {/* Avatar + Name row */}
+            <div className="mt-4 space-y-4">
               <div className="flex items-start gap-3">
                 <AvatarUploader
                   currentAvatarUrl={editingMember?.avatarUrl}
@@ -370,10 +369,10 @@ export function MembersPage() {
                     await uploadAvatarForMember(editingMemberId, blob);
                   }}
                 />
-                <label className="grid flex-1 gap-1 text-sm">
+                <label className="grid flex-1 gap-1.5 font-mono text-xs">
                   Name
                   <input
-                    className="h-10 rounded-lg border border-border bg-background px-3"
+                    className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
                     value={form.name}
                     onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder="Member name"
@@ -381,75 +380,74 @@ export function MembersPage() {
                 </label>
               </div>
 
-              {/* Specialties */}
-              <label className="grid gap-1 text-sm">
+              <label className="grid gap-1.5 font-mono text-xs">
                 <span className="flex items-center justify-between gap-2">
-                  <span>Specialties (comma-separated)</span>
+                  <span>Specialties (csv)</span>
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
-                    className="h-7 gap-1 text-xs"
+                    variant="ghost"
+                    className="h-6 gap-1 rounded-md px-2 text-[10px]"
                     disabled={!form.name.trim() || !form.systemPrompt.trim() || isSuggestingSpecialties}
                     onClick={() => void generateSpecialties()}
                     title="Suggest specialties with AI"
                   >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    {isSuggestingSpecialties ? 'Generating…' : 'AI'}
+                    <Sparkles className="h-3 w-3" />
+                    {isSuggestingSpecialties ? 'Working…' : 'AI'}
                   </Button>
                 </span>
                 <input
-                  className="h-10 rounded-lg border border-border bg-background px-3"
+                  className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
                   value={form.specialties}
                   onChange={(event) => setForm((current) => ({ ...current, specialties: event.target.value }))}
-                  placeholder="strategy, hiring, execution"
+                  placeholder="strategy, execution"
                 />
               </label>
 
-              <label className="grid gap-1 text-sm">
+              <label className="grid gap-1.5 font-mono text-xs">
                 <span className="flex items-center justify-between gap-2">
                   <span>System prompt</span>
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
-                    className="h-7 gap-1 text-xs"
+                    variant="ghost"
+                    className="h-6 gap-1 rounded-md px-2 text-[10px]"
                     onClick={openPromptDialog}
                     title="Expand system prompt editor"
                   >
-                    <Expand className="h-3.5 w-3.5" />
+                    <Expand className="h-3 w-3" />
                     Expand
                   </Button>
                 </span>
                 <textarea
-                  className="min-h-36 rounded-lg border border-border bg-background px-3 py-2"
+                  className="min-h-36 rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
                   value={form.systemPrompt}
                   onChange={(event) => setForm((current) => ({ ...current, systemPrompt: event.target.value }))}
-                  placeholder="How should this member think and respond?"
+                  placeholder="Direct instructions for this member..."
                 />
               </label>
 
-              <div className="flex items-center gap-2">
-                <Button className="gap-2" onClick={() => void save()} disabled={!form.name.trim() || !form.systemPrompt.trim()}>
-                  <Save className="h-4 w-4" />
+              <div className="mt-2 flex items-center gap-2">
+                <Button className="h-8 gap-2 rounded-md text-xs" onClick={() => void save()} disabled={!form.name.trim() || !form.systemPrompt.trim()}>
+                  <Save className="h-3.5 w-3.5" />
                   Save
                 </Button>
-                <Button variant="ghost" onClick={resetForm}>
+                <Button variant="ghost" className="h-8 rounded-md text-xs" onClick={resetForm}>
                   Cancel
                 </Button>
               </div>
 
               {showKbPanel ? (
-                <section className="mt-2 rounded-xl border border-border/80 bg-background p-3">
-                  <div className="mb-3 flex items-center justify-between gap-2">
+                <section className="mt-4 rounded-md border border-border bg-background p-4">
+                  <div className="mb-4 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-medium">Knowledge base documents</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="font-mono text-sm font-semibold">Knowledge base</p>
+                      <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
                         {editingMember?.kbStoreName ? `Store: ${editingMember.kbStoreName.split('/').pop()}` : 'No KB store yet'}
                       </p>
                     </div>
                     <label
-                      className={`inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs ${editingMemberId ? 'cursor-pointer hover:bg-muted/40' : 'cursor-not-allowed opacity-60'
+                      className={`inline-flex items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 py-1.5 font-mono text-xs transition-colors ${editingMemberId ? 'cursor-pointer hover:border-foreground/20 hover:bg-muted/40' : 'cursor-not-allowed opacity-50'
                         }`}
                     >
                       <Upload className="h-3.5 w-3.5" />
@@ -483,16 +481,16 @@ export function MembersPage() {
                         const key = doc.name ?? doc.displayName ?? `doc-${index}`;
                         const digest = digestForDoc(doc);
                         return (
-                          <article key={key} className="rounded-md border border-border/70 px-2.5 py-2">
+                          <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="truncate pr-3 text-xs text-foreground/90">{doc.displayName ?? doc.name ?? 'Untitled document'}</span>
-                              <div className="flex items-center gap-1">
+                              <span className="truncate font-mono text-xs font-semibold">{doc.displayName ?? doc.name ?? 'Untitled document'}</span>
+                              <div className="flex items-center gap-1 opacity-50 transition-opacity group-hover:opacity-100">
                                 {digest ? (
                                   <Button
                                     type="button"
                                     size="sm"
-                                    variant="outline"
-                                    className="h-7 px-2 text-[11px]"
+                                    variant="ghost"
+                                    className="h-6 rounded-md px-2 text-[10px]"
                                     onClick={() => openDigestEditor(digest)}
                                   >
                                     Edit metadata
@@ -513,14 +511,14 @@ export function MembersPage() {
                               </div>
                             </div>
 
-                            <div className="mt-2 border-t border-border/60 pt-2">
+                            <div className="mt-3 border-t border-border pt-2">
                               {digest ? (
                                 <>
-                                  <p className="text-[11px] text-muted-foreground">
+                                  <p className="font-mono text-[10px] text-muted-foreground">
                                     Topics {digest.topics.length} · Entities {digest.entities.length}
                                   </p>
                                   {digest.digestSummary ? (
-                                    <p className="mt-1 text-[11px] text-muted-foreground">{digest.digestSummary}</p>
+                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">{digest.digestSummary}</p>
                                   ) : null}
                                 </>
                               ) : isDigestLoading ? (
@@ -553,10 +551,10 @@ export function MembersPage() {
               }}
             >
               <DialogPrimitive.Portal>
-                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80 backdrop-blur-sm" />
-                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(86vh,820px)] w-[min(95vw,920px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-card p-4 shadow-2xl focus:outline-none md:p-5">
-                  <DialogPrimitive.Title className="font-display text-xl">Edit system prompt</DialogPrimitive.Title>
-                  <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(86vh,820px)] w-[min(95vw,920px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-background p-4 shadow-lg focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-mono text-lg font-semibold tracking-tight">Edit system prompt</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
                     Review and update the full prompt in a larger editor.
                   </DialogPrimitive.Description>
                   <textarea
@@ -566,12 +564,12 @@ export function MembersPage() {
                     placeholder="How should this member think and respond?"
                   />
                   <div className="mt-4 flex items-center gap-2">
-                    <Button type="button" className="gap-2" onClick={savePromptDialog}>
-                      <Save className="h-4 w-4" />
+                    <Button type="button" className="h-8 gap-2 rounded-md text-xs" onClick={savePromptDialog}>
+                      <Save className="h-3.5 w-3.5" />
                       Save changes
                     </Button>
                     <DialogPrimitive.Close asChild>
-                      <Button type="button" variant="ghost">
+                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs">
                         Cancel
                       </Button>
                     </DialogPrimitive.Close>
@@ -582,10 +580,10 @@ export function MembersPage() {
 
             <DialogPrimitive.Root open={isDigestEditorOpen} onOpenChange={setIsDigestEditorOpen}>
               <DialogPrimitive.Portal>
-                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80 backdrop-blur-sm" />
-                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(90vh,860px)] w-[min(95vw,960px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-card p-4 shadow-2xl focus:outline-none md:p-5">
-                  <DialogPrimitive.Title className="font-display text-lg md:text-xl">Edit KB metadata</DialogPrimitive.Title>
-                  <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(90vh,860px)] w-[min(95vw,960px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-background p-4 shadow-lg focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-mono text-lg font-semibold tracking-tight">Edit KB metadata</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
                     Adjust retrieval hints saved for this document.
                   </DialogPrimitive.Description>
 
@@ -655,12 +653,12 @@ export function MembersPage() {
                   ) : null}
 
                   <div className="mt-4 flex items-center gap-2">
-                    <Button type="button" className="gap-2" disabled={isSavingDigest} onClick={() => void saveDigestEditor()}>
-                      <Save className="h-4 w-4" />
+                    <Button type="button" className="h-8 gap-2 rounded-md text-xs" disabled={isSavingDigest} onClick={() => void saveDigestEditor()}>
+                      <Save className="h-3.5 w-3.5" />
                       {isSavingDigest ? 'Saving…' : 'Save metadata'}
                     </Button>
                     <DialogPrimitive.Close asChild>
-                      <Button type="button" variant="ghost" disabled={isSavingDigest}>
+                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs" disabled={isSavingDigest}>
                         Cancel
                       </Button>
                     </DialogPrimitive.Close>
@@ -693,57 +691,58 @@ function MemberList({
   archived?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-3 md:p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
-      <div className="grid gap-3">
+    <div className="mb-6">
+      <h2 className="mb-3 font-mono text-xs font-semibold uppercase tracking-tight text-muted-foreground">{title}</h2>
+      <div className="grid gap-2">
         {members.map((member) => (
-          <article key={member.id} className="rounded-xl border border-border/80 bg-background p-3">
+          <article key={member.id} className="group relative rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
                 {member.avatarUrl
                   ? <img src={member.avatarUrl} alt={member.name} className="h-full w-full object-cover" />
-                  : <UserCircle2 className="h-6 w-6 text-muted-foreground/50" />
+                  : <UserCircle2 className="h-5 w-5 text-muted-foreground/50" />
                 }
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold">{member.name}</p>
+                <p className="font-mono text-sm font-semibold">{member.name}</p>
                 {member.specialties.length > 0 ? (
-                  <p className="mt-1 text-xs text-muted-foreground">{member.specialties.join(' · ')}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{member.specialties.join(' · ')}</p>
                 ) : null}
               </div>
 
               {!archived ? (
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" onClick={() => onEdit(member.id)}>
-                    <Pencil className="h-4 w-4" />
+                <div className="flex items-center gap-1 opacity-50 transition-opacity group-hover:opacity-100">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md" onClick={() => onEdit(member.id)}>
+                    <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => onArchive(member.id)}>
-                    <Archive className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md" onClick={() => onArchive(member.id)}>
+                    <Archive className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ) : null}
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex items-center gap-3">
               {!archived ? (
-                <Button variant="outline" size="sm" className="gap-1" onClick={() => void onCreateChamber(member.id)}>
-                  <MessageSquarePlus className="h-3.5 w-3.5" />
+                <Button variant="outline" size="sm" className="h-7 gap-1 rounded-md text-xs" onClick={() => void onCreateChamber(member.id)}>
+                  <MessageSquarePlus className="h-3 w-3" />
                   New chamber
                 </Button>
               ) : null}
 
-              <span className="text-xs text-muted-foreground">Docs ({docsByMember[member.id]?.length ?? 0})</span>
-
-              {member.kbStoreName ? (
-                <span className="text-[11px] text-muted-foreground">Store: {member.kbStoreName.split('/').pop()}</span>
-              ) : (
-                <span className="text-[11px] text-muted-foreground">No KB yet</span>
-              )}
+              <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+                <span>Docs ({docsByMember[member.id]?.length ?? 0})</span>
+                {member.kbStoreName ? (
+                  <span>Store: {member.kbStoreName.split('/').pop()}</span>
+                ) : (
+                  <span>No KB</span>
+                )}
+              </div>
             </div>
           </article>
         ))}
 
-        {members.length === 0 ? <p className="text-sm text-muted-foreground">No members in this section.</p> : null}
+        {members.length === 0 ? <p className="font-mono text-xs text-muted-foreground">No members yet.</p> : null}
       </div>
     </div>
   );

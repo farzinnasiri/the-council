@@ -57,19 +57,19 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const archiveHallConversation = useAppStore((state) => state.archiveHallConversation);
   const clearChamberHistory = useAppStore((state) => state.clearChamberHistory);
   const sessionItemBaseClass =
-    'group relative rounded-xl border border-transparent bg-transparent px-3 py-2.5 transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out hover:-translate-y-px hover:border-border/80 hover:bg-background/70 hover:shadow-[0_10px_24px_-18px_rgba(0,0,0,0.75)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border/80';
-  const sessionItemActiveClass = 'border-border/90 bg-background/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]';
+    'group relative rounded-md border border-transparent bg-transparent px-3 py-2 transition-colors duration-200 ease-out hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border';
+  const sessionItemActiveClass = 'bg-muted shadow-[inset_2px_0_0_hsl(var(--foreground))]';
 
   const halls = conversations.filter((item) => item.kind === 'hall' && !item.deletedAt);
   const activeMembers = members.filter((item) => !item.deletedAt);
   const membersById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-card/65 backdrop-blur">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       <div className="shrink-0 px-4 pb-3 pt-5">
         <div className="mb-4 flex items-center gap-3">
           <div>
-            <p className="font-display text-lg leading-none">The Council</p>
+            <p className="font-semibold text-lg tracking-tight leading-none">The Council</p>
           </div>
         </div>
 
@@ -109,8 +109,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               >
                 <span
                   className={cn(
-                    'pointer-events-none absolute inset-y-3 left-0.5 w-px rounded-full bg-transparent transition-colors duration-200',
-                    isActive ? 'bg-foreground/35' : 'group-hover:bg-foreground/15'
+                    'pointer-events-none absolute inset-y-2 left-0 w-px rounded-sm transition-colors duration-200',
+                    isActive ? 'bg-foreground' : 'group-hover:bg-foreground/20'
                   )}
                 />
                 <div className="flex items-start justify-between gap-2">

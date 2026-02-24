@@ -67,38 +67,38 @@ export function MessageBubble({ message }: { message: Message }) {
       <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
         {!isUser ? <p className="px-1 pb-1.5 text-xs font-semibold text-muted-foreground">{label}</p> : null}
         <div
-          className={`rounded-3xl border px-4 py-3 text-sm leading-relaxed shadow-sm ${isUser ? 'rounded-br-md border-primary/20 bg-primary/15' : 'rounded-bl-md border-border bg-card'
-            } ${message.status === 'error' ? 'border-destructive/50' : ''}`}
+          className={`px-4 py-3 text-sm leading-relaxed ${isUser
+            ? 'rounded-2xl bg-foreground text-background'
+            : 'rounded-lg border border-border/50 bg-muted/30 text-foreground'
+            } ${message.status === 'error' ? 'border-destructive/50 border' : ''}`}
         >
           <MarkdownMessage content={message.content} />
 
           {!isUser ? (
-            <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-2">
+            <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
               {isChamber ? (
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
-                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                <div className="flex items-center">
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
+                    {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   </Button>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><Reply className="h-4 w-4" /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"><MessageCircle className="h-4 w-4" /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
-                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><Reply className="h-3 w-3" /></Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><MessageCircle className="h-3 w-3" /></Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
+                    {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   </Button>
                 </div>
               )}
-              <span className="text-[11px] text-muted-foreground">{timeLabel}</span>
+              <span className="text-[10px] text-muted-foreground">{timeLabel}</span>
             </div>
           ) : (
-            <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-2">
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </div>
-              <span className="text-[11px] text-muted-foreground">{timeLabel}</span>
+            <div className="mt-2 flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
+              <span className="text-[10px] text-background/70">{timeLabel}</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
+                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              </Button>
             </div>
           )}
         </div>

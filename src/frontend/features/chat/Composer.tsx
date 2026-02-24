@@ -39,13 +39,13 @@ export function Composer({
     });
   };
 
-  const submit = async () => {
+  const submit = () => {
     if (isLocked) return;
     const text = inputRef.current?.value?.trim() ?? '';
     if (!text) return;
     setIsSubmitting(true);
     try {
-      await onSend({
+      void onSend({
         text,
         mentionedMemberIds: selectedMentionIds.length > 0 ? selectedMentionIds : undefined,
       });
@@ -61,7 +61,7 @@ export function Composer({
   };
 
   return (
-    <div className="bg-background/80 px-4 py-4 backdrop-blur md:px-8">
+    <div className="bg-background px-4 py-4 md:px-8 border-t border-border">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
         {mentionOptions.length > 0 ? (
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -72,10 +72,10 @@ export function Composer({
                   key={member.id}
                   type="button"
                   className={cn(
-                    'shrink-0 rounded-full border px-3 py-1 text-xs transition',
+                    'shrink-0 rounded-md border px-3 py-1 font-mono text-xs transition',
                     active
-                      ? 'border-primary/60 bg-primary/20 text-foreground'
-                      : 'border-border bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                      ? 'border-foreground bg-foreground text-background'
+                      : 'border-border bg-transparent text-muted-foreground hover:border-foreground hover:text-foreground'
                   )}
                   onClick={() => toggleMention(member.id)}
                   disabled={isLocked}
@@ -87,7 +87,7 @@ export function Composer({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2 rounded-[2rem] border border-border bg-card p-2.5 shadow-glass">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-transparent p-2">
           <Textarea
             ref={inputRef}
             placeholder={placeholder}
@@ -110,15 +110,15 @@ export function Composer({
           />
 
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="rounded-full">
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground">
               <Mic className="h-4 w-4" />
             </Button>
             <Button
               size="icon"
               className={cn(
-                'rounded-full transition-colors',
+                'h-8 w-8 rounded-md transition-colors',
                 hasText && !isLocked
-                  ? 'bg-primary text-primary-foreground hover:opacity-90'
+                  ? 'bg-foreground text-background hover:bg-foreground/90'
                   : 'bg-muted text-muted-foreground hover:bg-muted'
               )}
               onClick={() => {

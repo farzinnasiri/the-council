@@ -22,13 +22,12 @@ export default {
         primary: 'hsl(var(--primary))',
         'primary-foreground': 'hsl(var(--primary-foreground))',
         ring: 'hsl(var(--ring))',
+        accent: 'hsl(var(--accent))',
       },
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
-        display: ['Fraunces', 'serif'],
-      },
-      boxShadow: {
-        glass: '0 10px 30px rgba(0, 0, 0, 0.28)',
+        sans: ['Geist', 'system-ui', 'sans-serif'],
+        display: ['Geist', 'sans-serif'],
+        mono: ['"Geist Mono"', 'monospace'],
       },
       keyframes: {
         'fade-in-up': {

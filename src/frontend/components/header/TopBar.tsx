@@ -35,13 +35,13 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
   const canManageHall = conversation?.kind === 'hall';
 
   return (
-    <header className="flex h-[74px] items-center justify-between border-b border-border/80 bg-background/80 px-4 backdrop-blur md:h-16 md:px-6">
+    <header className="flex h-[74px] items-center justify-between border-b border-border bg-background px-4 md:h-16 md:px-6">
       <div className="flex items-center gap-3">
         <Button size="icon" variant="ghost" onClick={onToggleSidebar} aria-label="Toggle sidebar">
           <Menu className="h-5 w-5" />
         </Button>
         <div>
-          <p className="font-display text-lg leading-none tracking-tight">{title}</p>
+          <p className="font-mono text-sm font-semibold tracking-tight">{title}</p>
           {subtitle || showHallParticipants ? (
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground md:mt-1">
               {subtitle ? <span>{subtitle}</span> : null}
@@ -86,10 +86,10 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
           <CouncilMembersMenu
             trigger={
               activeCount > 0 ? (
-                <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-2 py-1 sm:flex">
-                  <div className="flex -space-x-2">
+                <div className="hidden items-center gap-2 sm:flex">
+                  <div className="flex -space-x-1.5">
                     {participants.slice(0, 4).map((member) => (
-                      <Avatar key={member.id} className="h-7 w-7 border border-border bg-background">
+                      <Avatar key={member.id} className="h-6 w-6 border border-background bg-muted">
                         {member.avatarUrl ? (
                           <img
                             src={member.avatarUrl}
@@ -104,14 +104,14 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
                       </Avatar>
                     ))}
                   </div>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground/80">
+                  <span className="font-mono text-xs text-muted-foreground">
                     {activeCount} active
                   </span>
                 </div>
               ) : (
-                <span className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-3 py-1 text-xs font-medium text-foreground/80 sm:inline-flex">
-                  <Plus className="h-3.5 w-3.5" />
-                  Manage members
+                <span className="hidden items-center gap-1.5 px-2 py-1 font-mono text-xs text-muted-foreground hover:text-foreground sm:inline-flex">
+                  <Plus className="h-3 w-3" />
+                  Manage
                 </span>
               )
             }
