@@ -90,6 +90,16 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 }
 ```
 
+### 2.8 Member Agent Skills (Lightweight Context Engineering)
+- Add support for installable/authorable member skills (agent behavior packs) that can be added by user or system workflows.
+- Focus on soft-skill behaviors first (tone, coaching style, negotiation style, facilitation patterns, etc.).
+- Build a KB-to-skills pipeline:
+  - parse uploaded member KB files,
+  - extract candidate skills/instructions,
+  - let users enable/disable skills per member.
+- Runtime strategy: prefer precise skill directives for applicable requests instead of always loading full KB RAG context.
+- Treat this primarily as a context-engineering problem (instruction quality, activation rules, composition/conflict handling, observability).
+
 ## 3) Platform / Architecture Changes
 
 ### 3.1 Migrate Core Chat Stack to LangChain/LangGraph
