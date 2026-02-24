@@ -29,6 +29,17 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Avoid carrying stale conversational momentum after long pauses.
 - Re-introduce context with a lightweight recap when needed.
 
+### 1.6 Monetization Guardrails (Tier + Message Caps)
+- Add subscription/usage tiers and enforce usage caps so app sharing/release is cost-safe.
+- Support hour-based value proposition (example: "talk to experts for X hours/month").
+- Add per-user budget controls (hard cap, soft warning, overage behavior).
+- Add model-aware usage accounting so caps can be defined in turns, credits, or estimated conversation hours.
+- Baseline cost assumptions (to validate with real telemetry before launch):
+  - Gemini 3 Flash Preview: `$0.00967/turn`, `$0.213/hour` (SD `$0.068`)
+  - GPT-5.2-chat-latest: `$0.03462/turn`, `$0.762/hour` (SD `$0.244`)
+  - Claude Sonnet 4.6: `$0.05736/turn`, `$1.262/hour` (SD `$0.401`)
+  - Grok 4 Fast (non-thinking): `$0.00371/turn`, `$0.082/hour` (SD `$0.026`)
+
 ## 2) Mid-Term (Core Capabilities)
 
 ### 2.1 User Memory / Background Digestion System
@@ -131,11 +142,17 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Implement request-scoped wide events across backend pipelines.
 - Standardize event shape for query-first debugging (request/user/conversation/member/model/retrieval context).
 - Ensure critical AI paths emit one rich main event per unit of work with error and latency dimensions.
+- Priority: high (required before broader release).
 
 ### 3.7 Improve Chat Compaction/Summarisation Prompt (Post-LangChain)
 - Redesign compaction and summarisation prompt strategy after LangChain/LangGraph migration is in place.
 - Align summary contracts with new orchestration flow and memory lifecycle.
 - Add evaluation checks for summary fidelity, drift, and token-efficiency.
+
+### 3.8 Monitoring, Tracing, and Dashboards
+- Add monitoring + tracing across frontend and backend paths.
+- Add operational dashboards for usage, errors, latency, and cost trends (candidate: PostHog + backend telemetry sink).
+- Priority: low (after core observability event instrumentation is in place).
 
 ## 4) Integrations
 
@@ -143,6 +160,12 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Add Telegram bot channel for interacting with The Council.
 - Define auth/linking flow between Telegram identity and app user account.
 - Define message sync policy and capability scope for Telegram sessions.
+
+### 4.2 Release Compliance (Legal/IP/Terms)
+- Define release-ready terms and policy set (Terms of Service, privacy policy, acceptable use policy).
+- Add legal review for copyright/IP risks in generated content and uploaded knowledge files.
+- Define policy and guardrails for real-world personality mimicry/impersonation risk.
+- Add user-facing disclosures and enforcement rules before public launch.
 
 ## 5) Cross-Cutting Implementation Checklist
 - Add telemetry and debug logging for each new pipeline.
