@@ -40,6 +40,13 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
   - Claude Sonnet 4.6: `$0.05736/turn`, `$1.262/hour` (SD `$0.401`)
   - Grok 4 Fast (non-thinking): `$0.00371/turn`, `$0.082/hour` (SD `$0.026`)
 
+### 1.7 Conversation Scratchpad Notes (Hall + Chamber)
+- Add per-conversation user notes/receipts as a built-in scratchpad in both Hall and Chamber.
+- Goal: preserve chat flow while letting users quickly capture/copy/paste/edit supporting info.
+- Keep editing lightweight (quick add, inline edit, simple formatting only).
+- UX requirement: first-class support on both mobile and desktop (layout, keyboard behavior, easy open/close).
+- Scope boundary: notes are conversation-scoped (not global memory) and should not block chatting.
+
 ## 2) Mid-Term (Core Capabilities)
 
 ### 2.1 User Memory / Background Digestion System
@@ -110,6 +117,13 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
   - let users enable/disable skills per member.
 - Runtime strategy: prefer precise skill directives for applicable requests instead of always loading full KB RAG context.
 - Treat this primarily as a context-engineering problem (instruction quality, activation rules, composition/conflict handling, observability).
+
+### 2.9 Chamber Moderator Reflection Loop
+- Add an optional moderator process in Chamber that runs every `N` turns.
+- Use a lightweight model to review conversation state and emit structured guidance signals for the main member model.
+- Initial signal examples: user is ranting, user is confused, user is disengaged, conversation drifted, tone mismatch.
+- Keep outputs constrained to a controlled hint taxonomy (not freeform prompt sprawl).
+- Treat moderator output as advisory context to improve response quality without changing visible user flow.
 
 ## 3) Platform / Architecture Changes
 
