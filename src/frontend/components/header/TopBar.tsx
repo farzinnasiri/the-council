@@ -1,5 +1,5 @@
 import { Menu, Plus, UserCircle2, X } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
 import {
@@ -13,6 +13,7 @@ import { useAppStore } from '../../store/appStore';
 import {
   CHAMBER_INACTIVITY_TIMEOUT_MS,
   CHAMBER_PRESENCE_POLL_INTERVAL_MS,
+  TYPING_INDICATOR_INITIAL_DELAY_MS,
 } from '../../constants/presence';
 
 interface TopBarProps {
@@ -28,6 +29,7 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
   const removeMemberFromConversation = useAppStore((state) => state.removeMemberFromConversation);
   const members = useAppStore((state) => state.members);
   const messages = useAppStore((state) => state.messages);
+  const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
   const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
   const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
   const participants = participantIds
@@ -39,6 +41,8 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
   const showHallParticipants = showParticipants && !isChamber;
   const canManageHall = conversation?.kind === 'hall';
   const [presenceNow, setPresenceNow] = useState(() => Date.now());
+  const [isChamberTypingVisible, setIsChamberTypingVisible] = useState(false);
+  const typingVisibilityTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isChamber) return;
@@ -48,22 +52,63 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
     return () => window.clearInterval(timer);
   }, [isChamber]);
 
-  const chamberLastActivityAt = useMemo(() => {
+  const isChamberTypingPending = useMemo(() => {
+    if (!conversation || conversation.kind !== 'chamber' || !conversation.chamberMemberId) return false;
+    const pendingIds = pendingReplyMemberIds[conversation.id] ?? [];
+    return pendingIds.includes(conversation.chamberMemberId);
+  }, [conversation, pendingReplyMemberIds]);
+
+  useEffect(() => {
+    if (!isChamber) {
+      setIsChamberTypingVisible(false);
+      return;
+    }
+
+    if (typingVisibilityTimerRef.current !== null) {
+      window.clearTimeout(typingVisibilityTimerRef.current);
+      typingVisibilityTimerRef.current = null;
+    }
+
+    if (!isChamberTypingPending) {
+      setIsChamberTypingVisible(false);
+      return;
+    }
+
+    typingVisibilityTimerRef.current = window.setTimeout(() => {
+      setIsChamberTypingVisible(true);
+      typingVisibilityTimerRef.current = null;
+    }, TYPING_INDICATOR_INITIAL_DELAY_MS);
+
+    return () => {
+      if (typingVisibilityTimerRef.current !== null) {
+        window.clearTimeout(typingVisibilityTimerRef.current);
+        typingVisibilityTimerRef.current = null;
+      }
+    };
+  }, [isChamber, isChamberTypingPending]);
+
+  const chamberLastMemberActivityAt = useMemo(() => {
     if (!conversation || conversation.kind !== 'chamber') return undefined;
     let latest = 0;
     for (const message of messages) {
       if (message.conversationId !== conversation.id) continue;
-      if (message.role !== 'user' && message.role !== 'member') continue;
+      if (message.role !== 'member') continue;
       if (message.status === 'error') continue;
       latest = Math.max(latest, message.createdAt);
     }
-    return Math.max(latest, conversation.lastMessageAt ?? 0, conversation.updatedAt ?? 0);
+    if (latest > 0) return latest;
+    return undefined;
   }, [conversation, messages]);
 
   const isChamberOnline =
     isChamber &&
-    typeof chamberLastActivityAt === 'number' &&
-    presenceNow - chamberLastActivityAt <= CHAMBER_INACTIVITY_TIMEOUT_MS;
+    (
+      isChamberTypingVisible ||
+      (
+        typeof chamberLastMemberActivityAt === 'number' &&
+        presenceNow - chamberLastMemberActivityAt <= CHAMBER_INACTIVITY_TIMEOUT_MS
+      )
+    );
 
   return (
     <header className="flex h-[74px] items-center justify-between border-b border-border bg-background px-4 md:h-16 md:px-6">

@@ -5,7 +5,6 @@ import {
   MoreVertical,
   Pencil,
   Plus,
-  Settings,
   Trash2,
   UserCircle2,
   Users2,
@@ -110,7 +109,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                 <span
                   className={cn(
                     'pointer-events-none absolute inset-y-2 left-0 w-px rounded-sm transition-colors duration-200',
-                    isActive ? 'bg-foreground' : 'group-hover:bg-foreground/20'
+                    isActive ? 'bg-transparent' : 'group-hover:bg-foreground/20'
                   )}
                 />
                 <div className="flex items-start justify-between gap-2">
@@ -209,7 +208,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                 <span
                   className={cn(
                     'pointer-events-none absolute inset-y-3 left-0.5 w-px rounded-full bg-transparent transition-colors duration-200',
-                    isChamberActive ? 'bg-foreground/35' : 'group-hover:bg-foreground/15'
+                    isChamberActive ? 'bg-transparent' : 'group-hover:bg-foreground/15'
                   )}
                 />
                 <div className="flex items-start justify-between gap-2">
@@ -277,9 +276,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       <div className="shrink-0 p-3">
         <nav className="grid gap-1">
           <NavItem to="/members" icon={<Users2 className="h-4 w-4" />} label="Members" onNavigate={onNavigate} />
-          <NavItem to="/settings" icon={<Settings className="h-4 w-4" />} label="Settings" onNavigate={onNavigate} />
           <NavItem
-            to="/profile"
+            to="/settings"
             icon={
               user?.image ? (
                 <img src={user.image} alt={user.name || 'User'} className="h-4 w-4 rounded-full object-cover" />
@@ -287,7 +285,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                 <UserCircle2 className="h-4 w-4" />
               )
             }
-            label="Profile"
+            label="Settings"
             onNavigate={onNavigate}
           />
           <ThemeQuickCycle />

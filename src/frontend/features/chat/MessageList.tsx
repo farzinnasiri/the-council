@@ -1,7 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { UserCircle2 } from 'lucide-react';
 import type { Message } from '../../types/domain';
 import { MessageBubble } from './MessageBubble';
+import {
+  TYPING_INDICATOR_INITIAL_DELAY_MS,
+  TYPING_INDICATOR_STAGGER_MS,
+} from '../../constants/presence';
 
 interface EmptyState {
   title: string;
@@ -36,6 +40,8 @@ export function MessageList({
   const prevFirstMessageIdRef = useRef<string | undefined>(undefined);
   const prevLastMessageIdRef = useRef<string | undefined>(undefined);
   const pendingRestoreHeightRef = useRef<number | null>(null);
+  const typingRevealTimersRef = useRef<number[]>([]);
+  const [visibleTypingMemberIds, setVisibleTypingMemberIds] = useState<string[]>([]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -62,10 +68,43 @@ export function MessageList({
   }, [messages]);
 
   useEffect(() => {
-    if (isRouting || typingMembers.length > 0) {
+    typingRevealTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    typingRevealTimersRef.current = [];
+
+    const typingIds = typingMembers.map((member) => member.id);
+    if (typingIds.length === 0) {
+      setVisibleTypingMemberIds([]);
+      return;
+    }
+
+    setVisibleTypingMemberIds((current) => current.filter((memberId) => typingIds.includes(memberId)));
+
+    typingIds.forEach((memberId, index) => {
+      const timerId = window.setTimeout(() => {
+        setVisibleTypingMemberIds((current) => {
+          if (current.includes(memberId)) return current;
+          return [...current, memberId];
+        });
+      }, TYPING_INDICATOR_INITIAL_DELAY_MS + index * TYPING_INDICATOR_STAGGER_MS);
+      typingRevealTimersRef.current.push(timerId);
+    });
+
+    return () => {
+      typingRevealTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      typingRevealTimersRef.current = [];
+    };
+  }, [typingMembers]);
+
+  const visibleTypingMembers = useMemo(() => {
+    const visible = new Set(visibleTypingMemberIds);
+    return typingMembers.filter((member) => visible.has(member.id));
+  }, [typingMembers, visibleTypingMemberIds]);
+
+  useEffect(() => {
+    if (isRouting || visibleTypingMembers.length > 0) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [isRouting, typingMembers]);
+  }, [isRouting, visibleTypingMembers]);
 
   const tryLoadOlder = () => {
     const container = containerRef.current;
@@ -110,8 +149,8 @@ export function MessageList({
           </div>
         ) : null}
 
-        {!isRouting && typingMembers.length > 0
-          ? typingMembers.map((member) => (
+        {!isRouting && visibleTypingMembers.length > 0
+          ? visibleTypingMembers.map((member) => (
               <div key={member.id} className="flex items-start gap-3 animate-fade-in-up">
                 {member.avatarUrl ? (
                   <img

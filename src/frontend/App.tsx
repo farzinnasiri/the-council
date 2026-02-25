@@ -8,7 +8,6 @@ const HallDraftPage = lazy(() => import('./routes/HallDraftPage').then((m) => ({
 const ChamberPage = lazy(() => import('./routes/ChamberPage').then((m) => ({ default: m.ChamberPage })));
 const ChamberMemberPage = lazy(() => import('./routes/ChamberMemberPage').then((m) => ({ default: m.ChamberMemberPage })));
 const MembersPage = lazy(() => import('./routes/MembersPage').then((m) => ({ default: m.MembersPage })));
-const SettingsPage = lazy(() => import('./routes/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const ProfilePage = lazy(() => import('./routes/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 
 export default function App() {
@@ -31,8 +30,8 @@ export default function App() {
           <Route path="/chamber/member/:memberId" element={<ChamberMemberPage />} />
           <Route path="/chamber/:conversationId" element={<ChamberPage />} />
           <Route path="/members" element={<MembersPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<ProfilePage />} />
+          <Route path="/profile" element={<Navigate to="/settings" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

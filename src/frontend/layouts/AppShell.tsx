@@ -67,14 +67,6 @@ export function AppShell() {
       };
     }
 
-    if (location.pathname.startsWith('/profile')) {
-      return {
-        title: 'Profile',
-        subtitle: '',
-        showParticipants: false,
-      };
-    }
-
     if (location.pathname.startsWith('/hall/new')) {
       return {
         title: 'New Hall',

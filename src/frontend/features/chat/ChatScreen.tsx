@@ -61,7 +61,7 @@ export function ChatScreen({
         onLoadOlder={onLoadOlder}
         emptyState={emptyState}
       />
-      {beforeComposer}
+      {beforeComposer ? <div className="pb-3 md:pb-4">{beforeComposer}</div> : null}
       <Composer
         placeholder={placeholder}
         sendDisabled={isSending || sendDisabled}

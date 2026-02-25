@@ -12,7 +12,7 @@ interface DigestState {
   sampleText?: string;
   memberSystemPrompt?: string;
   model?: string;
-  digest?: {
+  digestResult?: {
     topics: string[];
     entities: string[];
     lexicalAnchors: string[];
@@ -27,7 +27,7 @@ const DigestStateAnnotation = Annotation.Root({
   sampleText: Annotation<string | undefined>(),
   memberSystemPrompt: Annotation<string | undefined>(),
   model: Annotation<string | undefined>(),
-  digest: Annotation<
+  digestResult: Annotation<
     | {
         topics: string[];
         entities: string[];
@@ -88,8 +88,9 @@ export async function runKBDigestGraph(input: {
   digestSummary: string;
   model: string;
 }> {
+  const DIGEST_NODE = 'generateDigest';
   const graph = new StateGraph(DigestStateAnnotation)
-    .addNode('digest', async (state) => {
+    .addNode(DIGEST_NODE, async (state) => {
       const target = modelRegistry.resolve('kbDigest', state.model);
       const model = createChatModel(target, { temperature: 0.1 });
       const fallback = fallbackDocumentDigest(state.displayName, state.memberSystemPrompt);
@@ -120,12 +121,12 @@ export async function runKBDigestGraph(input: {
 
         if (!topics.length || !lexicalAnchors.length || !digestSummary) {
           return {
-            digest: { ...fallback, model: target.model },
+            digestResult: { ...fallback, model: target.model },
           };
         }
 
         return {
-          digest: {
+          digestResult: {
             topics,
             entities: entities.length ? entities : fallback.entities,
             lexicalAnchors,
@@ -136,14 +137,17 @@ export async function runKBDigestGraph(input: {
         };
       } catch {
         return {
-          digest: { ...fallback, model: target.model },
+          digestResult: { ...fallback, model: target.model },
         };
       }
     })
-    .addEdge(START, 'digest')
-    .addEdge('digest', END)
+    .addEdge(START, DIGEST_NODE)
+    .addEdge(DIGEST_NODE, END)
     .compile();
 
   const result = (await graph.invoke(input)) as unknown as DigestState;
-  return result.digest ?? { ...fallbackDocumentDigest(input.displayName, input.memberSystemPrompt), model: modelRegistry.resolve('kbDigest', input.model).model };
+  return result.digestResult ?? {
+    ...fallbackDocumentDigest(input.displayName, input.memberSystemPrompt),
+    model: modelRegistry.resolve('kbDigest', input.model).model,
+  };
 }
