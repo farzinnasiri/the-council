@@ -1,5 +1,5 @@
 import { Menu, Plus, UserCircle2, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
 import {
@@ -10,6 +10,10 @@ import {
 } from '../ui/dropdown-menu';
 import type { Conversation } from '../../types/domain';
 import { useAppStore } from '../../store/appStore';
+import {
+  CHAMBER_INACTIVITY_TIMEOUT_MS,
+  CHAMBER_PRESENCE_POLL_INTERVAL_MS,
+} from '../../constants/presence';
 
 interface TopBarProps {
   conversation?: Conversation;
@@ -23,6 +27,7 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
   const addMemberToConversation = useAppStore((state) => state.addMemberToConversation);
   const removeMemberFromConversation = useAppStore((state) => state.removeMemberFromConversation);
   const members = useAppStore((state) => state.members);
+  const messages = useAppStore((state) => state.messages);
   const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
   const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
   const participants = participantIds
@@ -33,6 +38,32 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
   const isChamber = conversation?.kind === 'chamber';
   const showHallParticipants = showParticipants && !isChamber;
   const canManageHall = conversation?.kind === 'hall';
+  const [presenceNow, setPresenceNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isChamber) return;
+    const timer = window.setInterval(() => {
+      setPresenceNow(Date.now());
+    }, CHAMBER_PRESENCE_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [isChamber]);
+
+  const chamberLastActivityAt = useMemo(() => {
+    if (!conversation || conversation.kind !== 'chamber') return undefined;
+    let latest = 0;
+    for (const message of messages) {
+      if (message.conversationId !== conversation.id) continue;
+      if (message.role !== 'user' && message.role !== 'member') continue;
+      if (message.status === 'error') continue;
+      latest = Math.max(latest, message.createdAt);
+    }
+    return Math.max(latest, conversation.lastMessageAt ?? 0, conversation.updatedAt ?? 0);
+  }, [conversation, messages]);
+
+  const isChamberOnline =
+    isChamber &&
+    typeof chamberLastActivityAt === 'number' &&
+    presenceNow - chamberLastActivityAt <= CHAMBER_INACTIVITY_TIMEOUT_MS;
 
   return (
     <header className="flex h-[74px] items-center justify-between border-b border-border bg-background px-4 md:h-16 md:px-6">
@@ -45,9 +76,6 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
           {subtitle || showHallParticipants ? (
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground md:mt-1">
               {subtitle ? <span>{subtitle}</span> : null}
-              {subtitle && showHallParticipants ? (
-                <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
-              ) : null}
               {showHallParticipants ? (
                 <CouncilMembersMenu
                   trigger={
@@ -77,16 +105,20 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
 
       <div className="flex items-center gap-2">
         {isChamber ? (
-          <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-muted-foreground">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            Online
+          <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-foreground">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                isChamberOnline ? 'bg-emerald-500' : 'bg-destructive'
+              }`}
+            />
+            {isChamberOnline ? 'Online' : 'Offline'}
           </span>
         ) : null}
         {showHallParticipants ? (
           <CouncilMembersMenu
             trigger={
               activeCount > 0 ? (
-                <div className="hidden items-center gap-2 sm:flex">
+                <div className="hidden items-center gap-2 rounded-full border border-border/80 bg-card px-2.5 py-1 sm:flex">
                   <div className="flex -space-x-1.5">
                     {participants.slice(0, 4).map((member) => (
                       <Avatar key={member.id} className="h-6 w-6 border border-background bg-muted">
@@ -109,7 +141,7 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
                   </span>
                 </div>
               ) : (
-                <span className="hidden items-center gap-1.5 px-2 py-1 font-mono text-xs text-muted-foreground hover:text-foreground sm:inline-flex">
+                <span className="hidden items-center gap-1.5 rounded-full border border-border/80 bg-card px-2.5 py-1 font-mono text-xs text-muted-foreground hover:text-foreground sm:inline-flex">
                   <Plus className="h-3 w-3" />
                   Manage
                 </span>
