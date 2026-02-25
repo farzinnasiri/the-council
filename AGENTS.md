@@ -16,6 +16,10 @@ The role of this file is to describe common mistakes and confusion points that a
 2. Prefer `make vercel-*` targets for Vercel operations.
 3. Never commit secrets or env files (`.env`, `.env.local`, `.env.convex.local`), never read them, only ask the user. 
 
+## Known Confusion Points
+
+1. The workspace path currently includes trailing spaces (`.../the-council  `). Absolute-path tooling can fail with `Not a directory` unless paths preserve those trailing spaces exactly. Prefer repo-relative paths in shell/apply_patch commands.
+
 ## Required Validation Before Finalizing
 
 1. `npm run build`

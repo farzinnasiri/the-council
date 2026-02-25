@@ -142,6 +142,20 @@ export interface CouncilAiProvider {
     model?: string;
   }): Promise<string>;
 
+  summarizeDocumentDigest(input: {
+    displayName: string;
+    sampleText?: string;
+    memberSystemPrompt?: string;
+    model?: string;
+  }): Promise<{
+    topics: string[];
+    entities: string[];
+    lexicalAnchors: string[];
+    styleAnchors: string[];
+    digestSummary: string;
+    model: string;
+  }>;
+
   proposeRoundIntentPromptOnly(input: {
     member: { id: string; name: string; specialties?: string[]; systemPrompt: string };
     conversationContext: string;

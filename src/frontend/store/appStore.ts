@@ -27,7 +27,7 @@ import {
   uploadMemberDocuments,
   listMemberDocuments,
   deleteMemberDocument,
-} from '../lib/geminiClient';
+} from '../lib/aiClient';
 import { routeToMembers } from '../lib/mockRouting';
 
 interface CreateMemberPayload {

@@ -1,9 +1,8 @@
 'use node';
 
-import { GeminiService } from '../geminiService';
-import { GeminiCouncilAiProvider } from './geminiProvider';
+import { LangChainCouncilAiProvider } from './langchainProvider';
 import type { CouncilAiProvider } from './types';
 
 export function createCouncilAiProvider(): CouncilAiProvider {
-  return new GeminiCouncilAiProvider(new GeminiService(process.env.GEMINI_API_KEY));
+  return new LangChainCouncilAiProvider();
 }

@@ -1,5 +1,6 @@
 'use node';
 
+import { OpenAIEmbeddings } from '@langchain/openai';
 import { OPENAI_EMBEDDING_DIMENSIONS, OPENAI_EMBEDDING_MODEL } from './ragConfig';
 
 function resolveOpenAiKey(): string {
@@ -10,33 +11,19 @@ function resolveOpenAiKey(): string {
   return key;
 }
 
+const embeddings = new OpenAIEmbeddings({
+  apiKey: resolveOpenAiKey(),
+  model: OPENAI_EMBEDDING_MODEL,
+  dimensions: OPENAI_EMBEDDING_DIMENSIONS,
+});
+
 export async function embedText(text: string): Promise<number[]> {
   const input = text.trim();
   if (!input) {
     throw new Error('Cannot embed empty text');
   }
 
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${resolveOpenAiKey()}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_EMBEDDING_MODEL,
-      input,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI embeddings error (${response.status}): ${body}`);
-  }
-
-  const payload = (await response.json()) as {
-    data?: Array<{ embedding?: number[] }>;
-  };
-  const embedding = payload.data?.[0]?.embedding;
+  const embedding = await embeddings.embedQuery(input);
   if (!Array.isArray(embedding) || embedding.length === 0) {
     throw new Error('OpenAI embeddings response missing embedding vector');
   }

@@ -114,9 +114,9 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 ## 3) Platform / Architecture Changes
 
 ### 3.1 Migrate Core Chat Stack to LangChain/LangGraph
-- Replace direct Google GenAI-first orchestration with LangChain/LangGraph orchestration.
-- Use OpenAI for chat-generation tasks.
-- Keep Gemini for selected non-chat tasks where it performs better.
+- LangChain/LangGraph orchestration is now the core runtime architecture.
+- OpenAI is the default for chat-generation tasks (gpt-5.2-chat-latest).
+- Google models remain for selected non-chat tasks (routing, summaries, KB utility flows).
 - Preserve existing Convex action contracts during migration.
 
 ### 3.2 Improve KB Metadata Extraction

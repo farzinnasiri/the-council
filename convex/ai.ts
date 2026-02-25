@@ -4,7 +4,7 @@ import { action } from './_generated/server';
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { api } from './_generated/api';
-import { GeminiService, fallbackRouteMemberIds } from './ai/geminiService';
+import { fallbackRouteMemberIds } from './ai/graphs/fallbacks';
 import { createCouncilAiProvider } from './ai/provider/factory';
 import type { RoundIntentProposal } from './ai/provider/types';
 import { requireAuthUser, requireOwnedConversation, requireOwnedMember } from './ai/ownership';
@@ -20,13 +20,10 @@ import {
 import { listMemberChunkDocuments, searchMemberChunks } from './ai/ragStore';
 import { resolveRoundtableMaxSpeakers } from './ai/roundtablePolicy';
 import { applyRoundDefaultSelection, buildRoundContext } from './ai/orchestration/roundtableHall';
+import { resolveModel } from './ai/modelConfig';
 
 function createProvider() {
   return createCouncilAiProvider();
-}
-
-function createGeminiServiceForKnowledgeBase() {
-  return new GeminiService(process.env.GEMINI_API_KEY);
 }
 
 function createKnowledgeRetriever(ctx: any, memberId: Id<'members'>) {
@@ -230,7 +227,7 @@ export const routeHallMembers = action({
     } catch {
       return {
         chosenMemberIds: fallbackRouteMemberIds(args.message, normalizedCandidates, maxSelections),
-        model: process.env.GEMINI_ROUTER_MODEL ?? 'fallback',
+        model: resolveModel('router'),
         source: 'fallback' as const,
       };
     }
@@ -815,9 +812,9 @@ export const chatRoundtableSpeaker = action({
       answer: single.answer,
       grounded: false,
       citations: [],
-      model: args.chatModel ?? process.env.GEMINI_CHAT_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini',
+      model: resolveModel('chatResponse', args.chatModel),
       retrievalModel:
-        args.retrievalModel ?? process.env.GEMINI_RETRIEVAL_MODEL ?? process.env.GEMINI_MODEL ?? 'gemini',
+        resolveModel('retrieval', args.retrievalModel),
       usedKnowledgeBase: true,
       intent: single.intent,
       targetMemberId: single.targetMemberId,
@@ -850,7 +847,7 @@ export const uploadMemberDocuments = action({
       throw new Error('No staged files provided');
     }
 
-    const service = createGeminiServiceForKnowledgeBase();
+    const service = createProvider();
     return await uploadStagedDocuments(ctx, service, args.memberId, args.stagedFiles);
   },
 });
@@ -884,7 +881,7 @@ export const rehydrateMemberKnowledgeStore = action({
   },
   handler: async (ctx, args) => {
     await requireAuthUser(ctx);
-    const service = createGeminiServiceForKnowledgeBase();
+    const service = createProvider();
     return await rehydrateMemberStore(ctx, service, args.memberId, args.mode ?? 'missing-only');
   },
 });
@@ -905,7 +902,7 @@ export const rebuildMemberKnowledgeDigests = action({
   },
   handler: async (ctx, args) => {
     await requireAuthUser(ctx);
-    const service = createGeminiServiceForKnowledgeBase();
+    const service = createProvider();
     return await rebuildMemberDigests(ctx, service, args.memberId);
   },
 });

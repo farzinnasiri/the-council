@@ -7,7 +7,7 @@ import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
 import type { KBDigestMetadata } from '../repository/CouncilRepository';
-import { suggestMemberSpecialties } from '../lib/geminiClient';
+import { suggestMemberSpecialties } from '../lib/aiClient';
 
 interface MemberFormState {
   name: string;

@@ -5,7 +5,7 @@ Hall + Chamber advisory chat app with:
 - React 19 + Vite + TypeScript frontend
 - Zustand state + Convex-backed repository layer
 - Convex backend functions (queries, mutations, and Node actions)
-- Gemini + File Search orchestration in `convex/ai.ts` and `convex/ai/*`
+- LangChain/LangGraph orchestration with provider split (OpenAI chat + Google utility tasks) in `convex/ai.ts` and `convex/ai/*`
 - centralized backend model mapping in `convex/ai/modelConfig.ts`
 
 ## Current Product Behavior

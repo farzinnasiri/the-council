@@ -2,7 +2,8 @@
 
 import type { Id } from '../_generated/dataModel';
 import { api } from '../_generated/api';
-import { GeminiService, sanitizeLabel } from './geminiService';
+import { sanitizeLabel } from './graphs/utils';
+import type { CouncilAiProvider } from './provider/types';
 import { requireOwnedMember } from './ownership';
 import { extractTextFromStorage } from './ragExtraction';
 import { deleteDocumentChunks, indexDocumentChunks, listMemberChunkDocuments } from './ragStore';
@@ -54,7 +55,7 @@ async function readStorageSampleText(
 
 async function upsertDigestFromDocument(
   ctx: any,
-  service: GeminiService,
+  service: Pick<CouncilAiProvider, 'summarizeDocumentDigest'>,
   input: {
     memberId: Id<'members'>;
     kbStoreName: string;
@@ -203,7 +204,7 @@ export async function deleteMemberDocument(
 
 export async function uploadStagedDocuments(
   ctx: any,
-  service: GeminiService,
+  service: Pick<CouncilAiProvider, 'summarizeDocumentDigest'>,
   memberId: Id<'members'>,
   stagedFiles: StagedUploadInput[]
 ): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }> {
@@ -293,7 +294,7 @@ export async function uploadStagedDocuments(
 
 export async function rehydrateMemberStore(
   ctx: any,
-  service: GeminiService,
+  service: Pick<CouncilAiProvider, 'summarizeDocumentDigest'>,
   memberId: Id<'members'>,
   mode: 'missing-only' | 'all' = 'missing-only'
 ): Promise<{
@@ -418,7 +419,7 @@ export async function purgeExpiredStagedDocuments(
 
 export async function rebuildMemberDigests(
   ctx: any,
-  service: GeminiService,
+  service: Pick<CouncilAiProvider, 'summarizeDocumentDigest'>,
   memberId: Id<'members'>
 ): Promise<{ rebuiltCount: number; skippedCount: number; storeName: string }> {
   const { storeName, member } = await ensureMemberStore(ctx, memberId);
