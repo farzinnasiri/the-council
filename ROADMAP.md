@@ -145,32 +145,38 @@ Status: Completed (February 25, 2026)
 - Merge/rank parallel retrieval results before final response generation.
 - Add safeguards for duplicate hits, latency limits, and token/cost budgets.
 
-### 3.4 Voice Features
+### 3.4 KB Retrieval Activation + Query Planning Upgrade
+- Increase KB search activation likelihood when requests may benefit from grounded context (reduce over-conservative gating).
+- Add a smarter query planner that can choose between direct retrieval, rewritten retrieval, and multi-query retrieval paths.
+- Improve retrieval relevance/recall via better planning heuristics, reranking, and fallback behavior.
+- Priority: high.
+
+### 3.5 Voice Features
 - Implement voice-to-text feature (planned provider: Google speech stack).
 - Clarify/confirm final provider and API surface (speech-to-text vs text-to-speech naming).
 
-### 3.5 Member Image Capability
+### 3.6 Member Image Capability
 - Add image capability to members (input and/or generation flow to be finalized).
 - Define storage, moderation, and UI presentation rules.
 
-### 3.6 Implement Wide Events
+### 3.7 Implement Wide Events
 - Implement request-scoped wide events across backend pipelines.
 - Standardize event shape for query-first debugging (request/user/conversation/member/model/retrieval context).
 - Ensure critical AI paths emit one rich main event per unit of work with error and latency dimensions.
 - Priority: high (required before broader release).
 
-### 3.7 Improve Chat Compaction/Summarisation Prompt (Post-LangChain)
+### 3.8 Improve Chat Compaction/Summarisation Prompt (Post-LangChain)
 Status: In Progress (as of February 25, 2026)
 - Redesign compaction and summarisation prompt strategy after LangChain/LangGraph migration is in place.
 - Align summary contracts with new orchestration flow and memory lifecycle.
 - Add evaluation checks for summary fidelity, drift, and token-efficiency.
 
-### 3.8 Monitoring, Tracing, and Dashboards
+### 3.9 Monitoring, Tracing, and Dashboards
 - Add monitoring + tracing across frontend and backend paths.
 - Add operational dashboards for usage, errors, latency, and cost trends (candidate: PostHog + backend telemetry sink).
 - Priority: low (after core observability event instrumentation is in place).
 
-### 3.9 Bounded-Context Backend Layout
+### 3.10 Bounded-Context Backend Layout
 Status: Completed (February 25, 2026)
 - Keep Convex action paths stable while organizing backend internals by bounded context.
 - Current target split:
