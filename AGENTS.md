@@ -2,6 +2,10 @@
 
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in the project. If you ever encounter something in the project that surprises you, please alert the developer working with you and indicate that this is the case in the agent MD file to help prevent future agents from having the same issue.
 
+## Surprise Notes
+
+1. The workspace directory currently includes trailing spaces in its name (`/Users/farzin/MyProjects/the-council  `). Some tools fail if they trim the path or if `workdir` is passed without the trailing spaces.
+
 ## Keep These Invariants
 
 1. Backend is Convex-only. Do not add Express/Node API runtime paths.

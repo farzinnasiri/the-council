@@ -5,7 +5,8 @@ Hall + Chamber advisory chat app with:
 - React 19 + Vite + TypeScript frontend
 - Zustand state + Convex-backed repository layer
 - Convex backend functions (queries, mutations, and Node actions)
-- LangChain/LangGraph orchestration with provider split (OpenAI chat + Google utility tasks) in `convex/ai.ts` and `convex/ai/*`
+- LangChain/LangGraph orchestration with provider split (OpenAI chat + Google utility tasks) in `convex/ai/*`
+- DDD-lite bounded-context backend organization under `convex/contexts/*`
 - centralized backend model mapping in `convex/ai/modelConfig.ts`
 
 ## Current Product Behavior
@@ -15,6 +16,15 @@ Hall + Chamber advisory chat app with:
 - Chambers are member-centric (`/chamber/member/:memberId`) and created lazily on first send.
 - Hall member replies are generated in parallel and rendered progressively as they arrive.
 - Member avatars support crop/upload via `react-easy-crop`; create flow stages avatar and applies it after first save.
+
+## Backend Organization
+
+- `convex/ai/*` contains the Convex action surface and AI platform internals (runtime, provider, graphs).
+- `convex/contexts/hall/*` contains Hall + Roundtable domain/application/infrastructure logic.
+- `convex/contexts/chamber/*` contains Chamber chat and compaction application logic.
+- `convex/contexts/knowledge/*` contains knowledge store lifecycle application/infrastructure logic.
+- `convex/contexts/shared/*` contains shared contracts, auth ownership checks, and Convex gateway helpers.
+- `convex/ai/routing.ts`, `convex/ai/chat.ts`, `convex/ai/roundtable.ts`, and `convex/ai/knowledge.ts` are thin action adapters that delegate to context use-cases.
 
 ## Make Commands
 
@@ -112,17 +122,21 @@ make vercel-deploy
 
 ## Backend Surface (Convex Actions)
 
-- `ai:routeHallMembers`
-- `ai:suggestHallTitle`
-- `ai:suggestMemberSpecialties`
-- `ai:chatWithMember`
-- `ai:compactConversation`
-- `ai:ensureMemberKnowledgeStore`
-- `ai:uploadMemberDocuments`
-- `ai:listMemberKnowledgeDocuments`
-- `ai:deleteMemberKnowledgeDocument`
-- `ai:rehydrateMemberKnowledgeStore`
-- `ai:purgeExpiredStagedKnowledgeDocuments`
+- `ai/routing:routeHallMembers`
+- `ai/routing:suggestHallTitle`
+- `ai/routing:suggestMemberSpecialties`
+- `ai/chat:chatWithMember`
+- `ai/chat:compactConversation`
+- `ai/roundtable:prepareRoundtableRound`
+- `ai/roundtable:chatRoundtableSpeakers`
+- `ai/roundtable:chatRoundtableSpeaker`
+- `ai/knowledge:ensureMemberKnowledgeStore`
+- `ai/knowledge:uploadMemberDocuments`
+- `ai/knowledge:listMemberKnowledgeDocuments`
+- `ai/knowledge:deleteMemberKnowledgeDocument`
+- `ai/knowledge:rehydrateMemberKnowledgeStore`
+- `ai/knowledge:purgeExpiredStagedKnowledgeDocuments`
+- `ai/knowledge:rebuildMemberKnowledgeDigests`
 
 ## Notes
 

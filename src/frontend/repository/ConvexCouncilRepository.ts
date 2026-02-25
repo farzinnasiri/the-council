@@ -437,7 +437,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     message: string;
     maxSelections?: number;
   }): Promise<RouteResult> {
-    return (await this.client.action(api.ai.routeHallMembers as any, {
+    return (await this.client.action(api.ai.routing.routeHallMembers as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       message: input.message,
       maxSelections: input.maxSelections,
@@ -445,7 +445,7 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async suggestHallTitle(input: { message: string; model?: string }): Promise<HallTitleResult> {
-    return (await this.client.action(api.ai.suggestHallTitle as any, {
+    return (await this.client.action(api.ai.routing.suggestHallTitle as any, {
       message: input.message,
       model: input.model,
     })) as HallTitleResult;
@@ -456,7 +456,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     systemPrompt: string;
     model?: string;
   }): Promise<MemberSpecialtiesResult> {
-    return (await this.client.action(api.ai.suggestMemberSpecialties as any, {
+    return (await this.client.action(api.ai.routing.suggestMemberSpecialties as any, {
       name: input.name,
       systemPrompt: input.systemPrompt,
       model: input.model,
@@ -471,7 +471,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     hallContext?: string;
   }): Promise<MemberChatResult> {
-    return (await this.client.action(api.ai.chatWithMember as any, {
+    return (await this.client.action(api.ai.chat.chatWithMember as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       memberId: input.memberId as Id<'members'>,
       message: input.message,
@@ -487,7 +487,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     triggerMessageId?: string;
     mentionedMemberIds?: string[];
   }): Promise<RoundtableState> {
-    const result = await this.client.action(api.ai.prepareRoundtableRound as any, {
+    const result = await this.client.action(api.ai.roundtable.prepareRoundtableRound as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       trigger: input.trigger,
       triggerMessageId: input.triggerMessageId as Id<'messages'> | undefined,
@@ -543,7 +543,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     roundNumber: number;
     memberId: string;
   }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
-    return (await this.client.action(api.ai.chatRoundtableSpeaker as any, {
+    return (await this.client.action(api.ai.roundtable.chatRoundtableSpeaker as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       roundNumber: input.roundNumber,
       memberId: input.memberId as Id<'members'>,
@@ -563,7 +563,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       error?: string;
     }>
   > {
-    const result = await this.client.action(api.ai.chatRoundtableSpeakers as any, {
+    const result = await this.client.action(api.ai.roundtable.chatRoundtableSpeakers as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       roundNumber: input.roundNumber,
     });
@@ -589,7 +589,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       memberSpecialties: string[];
     };
   }): Promise<{ summary: string }> {
-    return (await this.client.action(api.ai.compactConversation as any, {
+    return (await this.client.action(api.ai.chat.compactConversation as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       previousSummary: input.previousSummary,
       messages: input.messages,
@@ -600,7 +600,7 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async ensureMemberStore(input: { memberId: string }): Promise<{ storeName: string; created: boolean }> {
-    return (await this.client.action(api.ai.ensureMemberKnowledgeStore as any, {
+    return (await this.client.action(api.ai.knowledge.ensureMemberKnowledgeStore as any, {
       memberId: input.memberId as Id<'members'>,
     })) as { storeName: string; created: boolean };
   }
@@ -614,7 +614,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       sizeBytes?: number;
     }>;
   }): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }> {
-    return (await this.client.action(api.ai.uploadMemberDocuments as any, {
+    return (await this.client.action(api.ai.knowledge.uploadMemberDocuments as any, {
       memberId: input.memberId as Id<'members'>,
       stagedFiles: input.stagedFiles.map((file) => ({
         storageId: file.storageId as Id<'_storage'>,
@@ -626,7 +626,7 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async listMemberDocuments(input: { memberId: string }): Promise<Array<{ name?: string; displayName?: string }>> {
-    return (await this.client.action(api.ai.listMemberKnowledgeDocuments as any, {
+    return (await this.client.action(api.ai.knowledge.listMemberKnowledgeDocuments as any, {
       memberId: input.memberId as Id<'members'>,
     })) as Array<{ name?: string; displayName?: string }>;
   }
@@ -635,7 +635,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     memberId: string;
     documentName: string;
   }): Promise<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }> {
-    return (await this.client.action(api.ai.deleteMemberKnowledgeDocument as any, {
+    return (await this.client.action(api.ai.knowledge.deleteMemberKnowledgeDocument as any, {
       memberId: input.memberId as Id<'members'>,
       documentName: input.documentName,
     })) as { ok: boolean; documents?: Array<{ name?: string; displayName?: string }> };
@@ -692,7 +692,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     skippedCount: number;
     documents: Array<{ name?: string; displayName?: string }>;
   }> {
-    return (await this.client.action(api.ai.rehydrateMemberKnowledgeStore as any, {
+    return (await this.client.action(api.ai.knowledge.rehydrateMemberKnowledgeStore as any, {
       memberId: input.memberId as Id<'members'>,
       mode: input.mode,
     })) as {
@@ -704,7 +704,7 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async purgeExpiredStagedDocuments(input: { memberId?: string }): Promise<{ purgedCount: number }> {
-    return (await this.client.action(api.ai.purgeExpiredStagedKnowledgeDocuments as any, {
+    return (await this.client.action(api.ai.knowledge.purgeExpiredStagedKnowledgeDocuments as any, {
       memberId: input.memberId ? (input.memberId as Id<'members'>) : undefined,
     })) as { purgedCount: number };
   }

@@ -114,6 +114,7 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 ## 3) Platform / Architecture Changes
 
 ### 3.1 Migrate Core Chat Stack to LangChain/LangGraph
+Status: Completed (February 25, 2026)
 - LangChain/LangGraph orchestration is now the core runtime architecture.
 - OpenAI is the default for chat-generation tasks (gpt-5.2-chat-latest).
 - Google models remain for selected non-chat tasks (routing, summaries, KB utility flows).
@@ -145,6 +146,7 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Priority: high (required before broader release).
 
 ### 3.7 Improve Chat Compaction/Summarisation Prompt (Post-LangChain)
+Status: In Progress (as of February 25, 2026)
 - Redesign compaction and summarisation prompt strategy after LangChain/LangGraph migration is in place.
 - Align summary contracts with new orchestration flow and memory lifecycle.
 - Add evaluation checks for summary fidelity, drift, and token-efficiency.
@@ -153,6 +155,16 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Add monitoring + tracing across frontend and backend paths.
 - Add operational dashboards for usage, errors, latency, and cost trends (candidate: PostHog + backend telemetry sink).
 - Priority: low (after core observability event instrumentation is in place).
+
+### 3.9 Bounded-Context Backend Layout
+Status: Completed (February 25, 2026)
+- Keep Convex action paths stable while organizing backend internals by bounded context.
+- Current target split:
+  - `convex/contexts/hall/*`
+  - `convex/contexts/chamber/*`
+  - `convex/contexts/knowledge/*`
+  - `convex/contexts/shared/*`
+- Keep `convex/ai/*` as thin action adapters plus AI platform internals.
 
 ## 4) Integrations
 

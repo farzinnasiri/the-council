@@ -4,7 +4,7 @@ import type { Id } from '../_generated/dataModel';
 import { api } from '../_generated/api';
 import { sanitizeLabel } from './graphs/utils';
 import type { CouncilAiProvider } from './provider/types';
-import { requireOwnedMember } from './ownership';
+import { requireOwnedMember } from '../contexts/shared/auth';
 import { extractTextFromStorage } from './ragExtraction';
 import { deleteDocumentChunks, indexDocumentChunks, listMemberChunkDocuments } from './ragStore';
 

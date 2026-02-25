@@ -108,7 +108,7 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
           <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-foreground">
             <span
               className={`h-2 w-2 rounded-full ${
-                isChamberOnline ? 'bg-emerald-500' : 'bg-destructive'
+                isChamberOnline ? 'bg-emerald-500' : 'bg-red-500'
               }`}
             />
             {isChamberOnline ? 'Online' : 'Offline'}

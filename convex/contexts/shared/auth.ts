@@ -1,6 +1,8 @@
+'use node';
+
 import { getAuthUserId } from '@convex-dev/auth/server';
-import type { Id } from '../_generated/dataModel';
-import { api } from '../_generated/api';
+import type { Id } from '../../_generated/dataModel';
+import { api } from '../../_generated/api';
 
 export interface OwnedMember {
   _id: Id<'members'>;
