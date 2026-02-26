@@ -77,6 +77,7 @@ import type * as hallRounds from "../hallRounds.js";
 import type * as http from "../http.js";
 import type * as kbDigests from "../kbDigests.js";
 import type * as kbDocumentChunks from "../kbDocumentChunks.js";
+import type * as kbDocuments from "../kbDocuments.js";
 import type * as kbStagedDocuments from "../kbStagedDocuments.js";
 import type * as members from "../members.js";
 import type * as memoryLogs from "../memoryLogs.js";
@@ -163,6 +164,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   kbDigests: typeof kbDigests;
   kbDocumentChunks: typeof kbDocumentChunks;
+  kbDocuments: typeof kbDocuments;
   kbStagedDocuments: typeof kbStagedDocuments;
   members: typeof members;
   memoryLogs: typeof memoryLogs;

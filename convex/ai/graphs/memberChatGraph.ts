@@ -15,6 +15,8 @@ interface GateDecision {
   reason: string;
   mode: 'heuristic' | 'llm-gate';
   matchedDigestSignals: string[];
+  decision?: 'required' | 'helpful' | 'unnecessary';
+  confidence?: number;
 }
 
 interface QueryRewriteResult {
@@ -69,6 +71,8 @@ export interface MemberChatOutput {
         mode: 'heuristic' | 'llm-gate';
         useKnowledgeBase: boolean;
         reason: string;
+        decision?: 'required' | 'helpful' | 'unnecessary';
+        confidence?: number;
       };
     };
     queryPlan?: QueryPlanDebug;
@@ -143,8 +147,9 @@ const rewriteSchema = z.object({
 });
 
 const gateSchema = z.object({
-  useKnowledgeBase: z.boolean(),
+  decision: z.enum(['required', 'helpful', 'unnecessary']),
   reason: z.string().default('llm-gate'),
+  confidence: z.number().min(0).max(1).default(0.5),
 });
 
 async function safeListDocuments(state: MemberChatState): Promise<{ docs: Array<{ name?: string; displayName?: string }>; error?: string }> {
@@ -240,7 +245,10 @@ async function retrieveEvidencePass(state: MemberChatState, query: string): Prom
   };
 }
 
-async function llmKnowledgeGate(state: MemberChatState, query: string): Promise<{ useKnowledgeBase: boolean; reason: string; mode: 'heuristic' | 'llm-gate' }> {
+async function llmKnowledgeGate(
+  state: MemberChatState,
+  query: string
+): Promise<{ decision: 'required' | 'helpful' | 'unnecessary'; confidence: number; reason: string; mode: 'heuristic' | 'llm-gate' }> {
   const target = modelRegistry.resolve('kbGate');
   const model = createChatModel(target, { temperature: 0 });
 
@@ -249,8 +257,13 @@ async function llmKnowledgeGate(state: MemberChatState, query: string): Promise<
     .flatMap((digest) => [digest.displayName, ...digest.topics.slice(0, 2), ...digest.entities.slice(0, 2)]);
 
   const prompt = [
-    'Decide whether the following user question likely needs the private knowledge base documents to answer well.',
-    'Return JSON only: {"useKnowledgeBase":true|false,"reason":"short-string"}',
+    'You are deciding whether KB retrieval should run for the next assistant turn.',
+    'Choose one decision:',
+    '- "required": KB is needed for a high-quality answer',
+    '- "helpful": KB likely improves answer quality but is not strictly required',
+    '- "unnecessary": KB is unlikely to help for this turn',
+    'Return JSON only: {"decision":"required|helpful|unnecessary","confidence":0..1,"reason":"short-string"}',
+    'Bias slightly toward recall when uncertain, but do not choose required/helpful for every turn.',
     '',
     `Question: ${query}`,
     `Document hints: ${candidatesHint.join(', ') || 'none'}`,
@@ -259,13 +272,15 @@ async function llmKnowledgeGate(state: MemberChatState, query: string): Promise<
   try {
     const parsed = await invokeStructured(model, prompt, gateSchema);
     return {
-      useKnowledgeBase: Boolean(parsed.useKnowledgeBase),
+      decision: parsed.decision,
+      confidence: Number.isFinite(parsed.confidence) ? parsed.confidence : 0.5,
       reason: parsed.reason?.trim() || 'llm-gate',
       mode: 'llm-gate',
     };
   } catch {
     return {
-      useKnowledgeBase: false,
+      decision: 'unnecessary',
+      confidence: 0,
       reason: 'kb-gate-fallback',
       mode: 'heuristic',
     };
@@ -294,6 +309,7 @@ async function rewriteKnowledgeQuery(state: MemberChatState): Promise<QueryRewri
   const prompt = [
     'Rewrite the user question into a standalone retrieval query for File Search.',
     'Resolve pronouns/ellipsis from conversation context.',
+    'When useful, expand with adjacent conceptual aliases (e.g. system/process/framework/algorithm/workflow) that preserve user intent.',
     'Keep query concise and specific.',
     'Return JSON only:',
     '{"standaloneQuery":"...","alternates":["..."],"intent":"...","confidence":0.0}',
@@ -360,11 +376,17 @@ async function resolveKnowledgeGate(state: MemberChatState, standaloneQuery: str
   }
 
   const llmGate = await llmKnowledgeGate(state, standaloneQuery);
+  const helpfulThreshold = 0.35;
+  const useKnowledgeBase =
+    llmGate.decision === 'required' ||
+    (llmGate.decision === 'helpful' && llmGate.confidence >= helpfulThreshold);
   return {
-    useKnowledgeBase: llmGate.useKnowledgeBase,
+    useKnowledgeBase,
     reason: llmGate.reason,
     mode: llmGate.mode,
     matchedDigestSignals: [],
+    decision: llmGate.decision,
+    confidence: llmGate.confidence,
   };
 }
 
@@ -563,6 +585,8 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
               mode: result.gate.mode,
               useKnowledgeBase: result.gate.useKnowledgeBase,
               reason: result.gate.reason,
+              decision: result.gate.decision,
+              confidence: result.gate.confidence,
             }
           : {
               mode: 'heuristic',

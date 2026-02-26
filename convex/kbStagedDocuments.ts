@@ -192,3 +192,49 @@ export const markPurged = mutation({
     return count;
   },
 });
+
+export const markDeletedByDocument = mutation({
+  args: {
+    memberId: v.id('members'),
+    kbDocumentName: v.optional(v.string()),
+    storageId: v.optional(v.id('_storage')),
+    deletedAt: v.optional(v.number()),
+  },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await assertOwnedMember(ctx, userId, args.memberId);
+
+    const deletedAt = args.deletedAt ?? Date.now();
+    let rows: any[] = [];
+
+    if (args.kbDocumentName) {
+      rows = await ctx.db
+        .query('kbStagedDocuments')
+        .withIndex('by_kb_document_name', (q: any) => q.eq('kbDocumentName', args.kbDocumentName))
+        .collect();
+    } else if (args.storageId) {
+      rows = await ctx.db
+        .query('kbStagedDocuments')
+        .withIndex('by_member_createdAt', (q: any) => q.eq('memberId', args.memberId))
+        .collect();
+      rows = rows.filter((row: any) => row.storageId === args.storageId);
+    } else {
+      return 0;
+    }
+
+    let count = 0;
+    for (const row of rows) {
+      if (row.userId !== userId || row.memberId !== args.memberId) continue;
+      if (row.deletedAt || row.status === 'purged') continue;
+      await ctx.db.patch(row._id, {
+        status: 'purged',
+        deletedAt,
+        ingestError: undefined,
+      });
+      count += 1;
+    }
+
+    return count;
+  },
+});

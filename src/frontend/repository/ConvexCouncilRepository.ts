@@ -25,6 +25,7 @@ import type {
   CreateMemberInput,
   HallTitleResult,
   KBDigestMetadata,
+  KbDocumentLifecycle,
   MemberChatResult,
   MemberSpecialtiesResult,
   RouteResult,
@@ -141,6 +142,33 @@ function toMemoryLog(doc: ConvexMessageDoc): ConversationMemoryLog {
     recentRawTail: doc.recentRawTail,
     deletedAt: doc.deletedAt,
     createdAt: doc._creationTime,
+  };
+}
+
+function toKbDocumentLifecycle(doc: any): KbDocumentLifecycle {
+  if (!doc) {
+    throw new Error('Missing KB document lifecycle payload');
+  }
+  return {
+    id: doc._id,
+    memberId: doc.memberId,
+    storageId: doc.storageId,
+    displayName: doc.displayName,
+    mimeType: doc.mimeType,
+    sizeBytes: doc.sizeBytes,
+    kbStoreName: doc.kbStoreName,
+    kbDocumentName: doc.kbDocumentName,
+    uploadStatus: doc.uploadStatus,
+    chunkingStatus: doc.chunkingStatus,
+    indexingStatus: doc.indexingStatus,
+    metadataStatus: doc.metadataStatus,
+    chunkCountTotal: doc.chunkCountTotal,
+    chunkCountIndexed: doc.chunkCountIndexed,
+    ingestErrorChunking: doc.ingestErrorChunking,
+    ingestErrorIndexing: doc.ingestErrorIndexing,
+    ingestErrorMetadata: doc.ingestErrorMetadata,
+    createdAt: doc.createdAt ?? doc._creationTime,
+    updatedAt: doc.updatedAt,
   };
 }
 
@@ -603,6 +631,76 @@ class ConvexCouncilRepository implements CouncilRepository {
     return (await this.client.action(api.ai.knowledge.ensureMemberKnowledgeStore as any, {
       memberId: input.memberId as Id<'members'>,
     })) as { storeName: string; created: boolean };
+  }
+
+  async createKbDocumentRecord(input: {
+    memberId: string;
+    stagedFile: {
+      storageId: string;
+      displayName: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    };
+  }): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }> {
+    const body = (await this.client.action(api.ai.knowledge.createKbDocumentRecord as any, {
+      memberId: input.memberId as Id<'members'>,
+      stagedFile: {
+        storageId: input.stagedFile.storageId as Id<'_storage'>,
+        displayName: input.stagedFile.displayName,
+        mimeType: input.stagedFile.mimeType,
+        sizeBytes: input.stagedFile.sizeBytes,
+      },
+    })) as any;
+
+    return {
+      kbDocumentId: body.kbDocumentId,
+      document: toKbDocumentLifecycle(body.document),
+    };
+  }
+
+  async startKbDocumentProcessing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+    const body = (await this.client.action(api.ai.knowledge.startKbDocumentProcessing as any, {
+      kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+    })) as any;
+    return {
+      ok: Boolean(body.ok),
+      document: toKbDocumentLifecycle(body.document),
+    };
+  }
+
+  async retryKbDocumentIndexing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+    const body = (await this.client.action(api.ai.knowledge.retryKbDocumentIndexing as any, {
+      kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+    })) as any;
+    return {
+      ok: Boolean(body.ok),
+      document: toKbDocumentLifecycle(body.document),
+    };
+  }
+
+  async retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+    const body = (await this.client.action(api.ai.knowledge.retryKbDocumentMetadata as any, {
+      kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+    })) as any;
+    return {
+      ok: Boolean(body.ok),
+      document: toKbDocumentLifecycle(body.document),
+    };
+  }
+
+  async listKbDocuments(input: { memberId: string }): Promise<KbDocumentLifecycle[]> {
+    const rows = (await this.client.action(api.ai.knowledge.listKbDocumentsByMember as any, {
+      memberId: input.memberId as Id<'members'>,
+    })) as any[];
+    return rows.map(toKbDocumentLifecycle);
+  }
+
+  async deleteKbDocument(input: {
+    kbDocumentId: string;
+  }): Promise<{ ok: boolean; alreadyDeleted?: boolean; deletedChunkCount?: number; clearedStoreName?: boolean; error?: string }> {
+    return (await this.client.action(api.ai.knowledge.deleteKbDocument as any, {
+      kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+    })) as { ok: boolean; alreadyDeleted?: boolean; deletedChunkCount?: number; clearedStoreName?: boolean; error?: string };
   }
 
   async uploadMemberDocuments(input: {

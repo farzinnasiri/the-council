@@ -66,6 +66,8 @@ export interface ProviderChatResponse {
         mode: 'heuristic' | 'llm-gate';
         useKnowledgeBase: boolean;
         reason: string;
+        decision?: 'required' | 'helpful' | 'unnecessary';
+        confidence?: number;
       };
     };
     queryPlan?: {

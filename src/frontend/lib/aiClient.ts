@@ -1,4 +1,5 @@
 import { convexRepository } from '../repository/ConvexCouncilRepository';
+import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
 import type { RoundtableState } from '../types/domain';
 
 export interface RouteResult {
@@ -37,6 +38,8 @@ interface MemberChatResult {
         mode: 'heuristic' | 'llm-gate';
         useKnowledgeBase: boolean;
         reason: string;
+        decision?: 'required' | 'helpful' | 'unnecessary';
+        confidence?: number;
       };
     };
     queryPlan?: {
@@ -68,23 +71,53 @@ interface MemberChatResult {
   };
 }
 
-async function uploadFileToConvexStorage(file: File): Promise<{ storageId: string; displayName: string; mimeType?: string; sizeBytes: number }> {
+export async function uploadFileToConvexStorage(
+  file: File,
+  onProgress?: (payload: { loaded: number; total: number; progress: number }) => void
+): Promise<{ storageId: string; displayName: string; mimeType?: string; sizeBytes: number }> {
   const uploadUrl = await convexRepository.generateUploadUrl();
-  const upload = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
+
+  const payload = await new Promise<{ storageId: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', uploadUrl, true);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      onProgress?.({
+        loaded: event.loaded,
+        total: event.total,
+        progress: Math.max(0, Math.min(1, event.loaded / event.total)),
+      });
+    };
+
+    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onabort = () => reject(new Error('Upload aborted'));
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(xhr.responseText || `Upload failed: ${xhr.status}`));
+        return;
+      }
+      try {
+        const body = JSON.parse(xhr.responseText) as { storageId: string };
+        if (!body.storageId) {
+          reject(new Error('Upload did not return a storageId'));
+          return;
+        }
+        resolve(body);
+      } catch {
+        reject(new Error('Invalid upload response'));
+      }
+    };
+
+    xhr.send(file);
   });
 
-  if (!upload.ok) {
-    const body = await upload.text();
-    throw new Error(body || `Upload failed: ${upload.status}`);
-  }
-
-  const payload = (await upload.json()) as { storageId: string };
-  if (!payload.storageId) {
-    throw new Error('Upload did not return a storageId');
-  }
+  onProgress?.({
+    loaded: file.size,
+    total: file.size,
+    progress: 1,
+  });
 
   return {
     storageId: payload.storageId,
@@ -136,6 +169,40 @@ export async function uploadMemberDocuments(input: {
     memberId: input.memberId,
     stagedFiles,
   });
+}
+
+export async function createKbDocumentRecord(input: {
+  memberId: string;
+  stagedFile: {
+    storageId: string;
+    displayName: string;
+    mimeType?: string;
+    sizeBytes?: number;
+  };
+}): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }> {
+  return await convexRepository.createKbDocumentRecord(input);
+}
+
+export async function startKbDocumentProcessing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+  return await convexRepository.startKbDocumentProcessing(input);
+}
+
+export async function retryKbDocumentIndexing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+  return await convexRepository.retryKbDocumentIndexing(input);
+}
+
+export async function retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+  return await convexRepository.retryKbDocumentMetadata(input);
+}
+
+export async function listKbDocuments(memberId: string): Promise<KbDocumentLifecycle[]> {
+  return await convexRepository.listKbDocuments({ memberId });
+}
+
+export async function deleteKbDocument(input: {
+  kbDocumentId: string;
+}): Promise<{ ok: boolean; alreadyDeleted?: boolean; deletedChunkCount?: number; clearedStoreName?: boolean; error?: string }> {
+  return await convexRepository.deleteKbDocument(input);
 }
 
 export async function listMemberDocuments(memberId: string): Promise<Array<{ name?: string; displayName?: string }>> {

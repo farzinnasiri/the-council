@@ -117,3 +117,15 @@ export const setStoreName = mutation({
     return null;
   },
 });
+
+export const clearStoreName = mutation({
+  args: { memberId: v.id('members') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const current = await ctx.db.get(args.memberId);
+    if (!current || current.userId !== userId) throw new Error('Member not found');
+    await ctx.db.patch(args.memberId, { kbStoreName: undefined, updatedAt: Date.now() });
+    return null;
+  },
+});

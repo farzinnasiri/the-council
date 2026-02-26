@@ -26,6 +26,11 @@ const vectorResult = v.object({
   _id: v.id('kbDocumentChunks'),
   _score: v.float64(),
 });
+const deleteBatchResult = v.object({
+  deletedCount: v.number(),
+  hasMore: v.boolean(),
+});
+const MAX_DELETE_BATCH = 64;
 
 export const upsertDocumentChunks = mutation({
   args: {
@@ -39,17 +44,6 @@ export const upsertDocumentChunks = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
     await assertOwnedMember(ctx, userId, args.memberId);
-
-    const existing = await ctx.db
-      .query('kbDocumentChunks')
-      .withIndex('by_member_document', (q: any) =>
-        q.eq('memberId', args.memberId).eq('kbDocumentName', args.kbDocumentName)
-      )
-      .collect();
-    for (const row of existing) {
-      if (row.userId !== userId) continue;
-      await ctx.db.delete(row._id);
-    }
 
     const now = Date.now();
     let inserted = 0;
@@ -71,6 +65,39 @@ export const upsertDocumentChunks = mutation({
     }
 
     return inserted;
+  },
+});
+
+export const deleteDocumentChunksBatch = mutation({
+  args: {
+    memberId: v.id('members'),
+    kbDocumentName: v.string(),
+    limit: v.optional(v.number()),
+  },
+  returns: deleteBatchResult,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await assertOwnedMember(ctx, userId, args.memberId);
+
+    const limit = Math.max(1, Math.min(args.limit ?? MAX_DELETE_BATCH, MAX_DELETE_BATCH));
+    const rows = await ctx.db
+      .query('kbDocumentChunks')
+      .withIndex('by_member_document', (q: any) =>
+        q.eq('memberId', args.memberId).eq('kbDocumentName', args.kbDocumentName)
+      )
+      .take(limit);
+
+    let deletedCount = 0;
+    for (const row of rows) {
+      if (row.userId !== userId) continue;
+      await ctx.db.delete(row._id);
+      deletedCount += 1;
+    }
+
+    return {
+      deletedCount,
+      hasMore: rows.length === limit,
+    };
   },
 });
 
@@ -116,29 +143,18 @@ export const listDocumentsByMember = query({
     await assertOwnedMember(ctx, userId, args.memberId);
 
     const rows = await ctx.db
-      .query('kbDocumentChunks')
-      .withIndex('by_member_createdAt', (q: any) => q.eq('memberId', args.memberId))
+      .query('kbDocumentDigests')
+      .withIndex('by_user_member_status', (q: any) =>
+        q.eq('userId', userId).eq('memberId', args.memberId).eq('status', 'active')
+      )
       .collect();
 
-    const latestByDoc = new Map<string, { name: string; displayName: string; createdAt: number }>();
-    for (const row of rows) {
-      if (row.userId !== userId) continue;
-      const key = row.kbDocumentName;
-      const current = latestByDoc.get(key);
-      if (!current || row.createdAt > current.createdAt) {
-        latestByDoc.set(key, {
-          name: row.kbDocumentName,
-          displayName: row.displayName,
-          createdAt: row.createdAt,
-        });
-      }
-    }
-
-    return Array.from(latestByDoc.values())
-      .sort((a, b) => a.displayName.localeCompare(b.displayName))
-      .map((item) => ({
-        name: item.name,
-        displayName: item.displayName,
+    return rows
+      .filter((row: any) => !row.deletedAt)
+      .sort((a: any, b: any) => a.displayName.localeCompare(b.displayName))
+      .map((row: any) => ({
+        name: row.kbDocumentName,
+        displayName: row.displayName ?? row.kbDocumentName,
       }));
   },
 });

@@ -9,6 +9,7 @@ const ChamberPage = lazy(() => import('./routes/ChamberPage').then((m) => ({ def
 const ChamberMemberPage = lazy(() => import('./routes/ChamberMemberPage').then((m) => ({ default: m.ChamberMemberPage })));
 const MembersPage = lazy(() => import('./routes/MembersPage').then((m) => ({ default: m.MembersPage })));
 const ProfilePage = lazy(() => import('./routes/ProfilePage').then((m) => ({ default: m.ProfilePage })));
+const KbQueryPage = lazy(() => import('./routes/KbQueryPage').then((m) => ({ default: m.KbQueryPage })));
 
 export default function App() {
   const hydrated = useAppStore((state) => state.hydrated);
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/chamber/member/:memberId" element={<ChamberMemberPage />} />
           <Route path="/chamber/:conversationId" element={<ChamberPage />} />
           <Route path="/members" element={<MembersPage />} />
+          <Route path="/kb-query" element={<KbQueryPage />} />
           <Route path="/settings" element={<ProfilePage />} />
           <Route path="/profile" element={<Navigate to="/settings" replace />} />
         </Route>

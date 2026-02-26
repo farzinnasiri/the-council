@@ -17,18 +17,23 @@ import {
   chatWithMember,
   chatRoundtableSpeakers,
   compactConversation,
+  createKbDocumentRecord,
+  deleteKbDocument,
   getRoundtableState,
+  listKbDocuments,
   markRoundtableCompleted,
   markRoundtableInProgress,
   prepareRoundtableRound,
+  retryKbDocumentIndexing,
+  retryKbDocumentMetadata,
   routeHallMembers,
   setRoundtableSelections,
+  startKbDocumentProcessing,
   suggestHallTitle,
-  uploadMemberDocuments,
-  listMemberDocuments,
-  deleteMemberDocument,
+  uploadFileToConvexStorage,
 } from '../lib/aiClient';
 import { routeToMembers } from '../lib/mockRouting';
+import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
 
 interface CreateMemberPayload {
   name: string;
@@ -49,6 +54,11 @@ interface AppState {
   pendingReplyMemberIds: Record<string, string[]>;
   compactionCheckInFlightByConversation: Record<string, boolean>;
   memberDocuments: Record<string, Array<{ name?: string; displayName?: string }>>;
+  kbDocumentsByMember: Record<string, KbDocumentLifecycle[]>;
+  kbUploadProgressByMember: Record<string, Array<{ localId: string; fileName: string; loaded: number; total: number; progress: number }>>;
+  kbDeletingDocumentIds: Record<string, boolean>;
+  kbRetryingIndexDocumentIds: Record<string, boolean>;
+  kbRetryingMetadataDocumentIds: Record<string, boolean>;
   chamberByMemberId: Record<string, Conversation>;
   chamberMemoryByConversation: Record<string, string>;
   hallParticipantsByConversation: Record<string, string[]>;
@@ -111,7 +121,9 @@ interface AppState {
   uploadDocsForMember: (memberId: string, files: File[]) => Promise<void>;
   fetchDocsForMember: (memberId: string) => Promise<void>;
   hydrateMemberDocuments: () => Promise<void>;
-  deleteDocForMember: (memberId: string, documentName: string) => Promise<void>;
+  deleteDocForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
+  retryKbDocumentIndexForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
+  retryKbDocumentMetadataForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
@@ -316,6 +328,15 @@ async function maybeCompact(
   return { summary: result.summary, activeMessages };
 }
 
+function lifecycleToMemberDocuments(rows: KbDocumentLifecycle[]): Array<{ name?: string; displayName?: string }> {
+  return rows
+    .filter((row) => row.indexingStatus === 'completed')
+    .map((row) => ({
+      name: row.kbDocumentName,
+      displayName: row.displayName,
+    }));
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   hydrated: false,
   isRouting: false,
@@ -329,6 +350,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingReplyMemberIds: {},
   compactionCheckInFlightByConversation: {},
   memberDocuments: {},
+  kbDocumentsByMember: {},
+  kbUploadProgressByMember: {},
+  kbDeletingDocumentIds: {},
+  kbRetryingIndexDocumentIds: {},
+  kbRetryingMetadataDocumentIds: {},
   chamberByMemberId: {},
   chamberMemoryByConversation: {},
   hallParticipantsByConversation: {},
@@ -1441,28 +1467,119 @@ export const useAppStore = create<AppState>((set, get) => ({
     const member = get().members.find((item) => item.id === memberId);
     if (!member || files.length === 0) return;
 
-    const response = await uploadMemberDocuments({
-      memberId: member.id,
-      files,
-    });
+    for (const file of files) {
+      const localId = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+      set((state) => ({
+        kbUploadProgressByMember: {
+          ...state.kbUploadProgressByMember,
+          [memberId]: [
+            ...(state.kbUploadProgressByMember[memberId] ?? []),
+            { localId, fileName: file.name, loaded: 0, total: Math.max(file.size, 1), progress: 0 },
+          ],
+        },
+      }));
 
-    await councilRepository.setMemberStoreName(memberId, response.storeName);
+      try {
+        const staged = await uploadFileToConvexStorage(file, ({ loaded, total, progress }) => {
+          set((state) => ({
+            kbUploadProgressByMember: {
+              ...state.kbUploadProgressByMember,
+              [memberId]: (state.kbUploadProgressByMember[memberId] ?? []).map((entry) =>
+                entry.localId === localId
+                  ? {
+                      ...entry,
+                      loaded,
+                      total: Math.max(total, 1),
+                      progress,
+                    }
+                  : entry
+              ),
+            },
+          }));
+        });
 
-    set((state) => ({
-      members: state.members.map((item) =>
-        item.id === memberId
-          ? { ...item, kbStoreName: response.storeName, updatedAt: Date.now() }
-          : item
-      ),
-      memberDocuments: { ...state.memberDocuments, [memberId]: response.documents },
-    }));
+        const created = await createKbDocumentRecord({
+          memberId,
+          stagedFile: staged,
+        });
+
+        set((state) => {
+          const current = state.kbDocumentsByMember[memberId] ?? [];
+          const deduped = current.filter((row) => row.id !== created.document.id);
+          const nextRows = [created.document, ...deduped].sort((a, b) => b.updatedAt - a.updatedAt);
+          return {
+            members: state.members.map((item) =>
+              item.id === memberId
+                ? { ...item, kbStoreName: created.document.kbStoreName, updatedAt: Date.now() }
+                : item
+            ),
+            kbDocumentsByMember: {
+              ...state.kbDocumentsByMember,
+              [memberId]: nextRows,
+            },
+            memberDocuments: {
+              ...state.memberDocuments,
+              [memberId]: lifecycleToMemberDocuments(nextRows),
+            },
+          };
+        });
+
+        void startKbDocumentProcessing({ kbDocumentId: created.kbDocumentId })
+          .then(() => get().fetchDocsForMember(memberId))
+          .catch(() => get().fetchDocsForMember(memberId));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Upload failed';
+        const failedRow: KbDocumentLifecycle = {
+          id: `upload-failed-${localId}`,
+          memberId,
+          storageId: '',
+          displayName: file.name,
+          mimeType: file.type || undefined,
+          sizeBytes: file.size,
+          kbStoreName: member.kbStoreName ?? '',
+          kbDocumentName: '',
+          uploadStatus: 'failed',
+          chunkingStatus: 'failed',
+          indexingStatus: 'failed',
+          metadataStatus: 'failed',
+          ingestErrorChunking: message,
+          ingestErrorIndexing: message,
+          ingestErrorMetadata: message,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        set((state) => ({
+          kbDocumentsByMember: {
+            ...state.kbDocumentsByMember,
+            [memberId]: [failedRow, ...(state.kbDocumentsByMember[memberId] ?? [])],
+          },
+        }));
+      } finally {
+        set((state) => ({
+          kbUploadProgressByMember: {
+            ...state.kbUploadProgressByMember,
+            [memberId]: (state.kbUploadProgressByMember[memberId] ?? []).filter((entry) => entry.localId !== localId),
+          },
+        }));
+      }
+    }
   },
 
   fetchDocsForMember: async (memberId) => {
     const member = get().members.find((item) => item.id === memberId);
     if (!member) return;
-    const docs = await listMemberDocuments(member.id);
-    set((state) => ({ memberDocuments: { ...state.memberDocuments, [memberId]: docs } }));
+    const lifecycleRows = await listKbDocuments(member.id);
+    set((state) => ({
+      kbDocumentsByMember: {
+        ...state.kbDocumentsByMember,
+        [memberId]: lifecycleRows,
+      },
+      memberDocuments: {
+        ...state.memberDocuments,
+        [memberId]: lifecycleToMemberDocuments(lifecycleRows),
+      },
+    }));
   },
 
   hydrateMemberDocuments: async () => {
@@ -1472,29 +1589,108 @@ export const useAppStore = create<AppState>((set, get) => ({
     const results = await Promise.all(
       membersWithStore.map(async (member) => {
         try {
-          const docs = await listMemberDocuments(member.id);
+          const docs = await listKbDocuments(member.id);
           return { memberId: member.id, docs };
         } catch {
-          return { memberId: member.id, docs: [] as Array<{ name?: string; displayName?: string }> };
+          return { memberId: member.id, docs: [] as KbDocumentLifecycle[] };
         }
       })
     );
 
     set((state) => ({
+      kbDocumentsByMember: {
+        ...state.kbDocumentsByMember,
+        ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
+      },
       memberDocuments: {
         ...state.memberDocuments,
-        ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
+        ...Object.fromEntries(results.map((result) => [result.memberId, lifecycleToMemberDocuments(result.docs)])),
       },
     }));
   },
 
-  deleteDocForMember: async (memberId, documentName) => {
+  deleteDocForMember: async (memberId, kbDocumentId) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member || !documentName) return;
+    if (!member || !kbDocumentId) return { ok: false, error: 'Member or document not found' };
 
-    const docs = await deleteMemberDocument({ memberId, documentName });
     set((state) => ({
-      memberDocuments: { ...state.memberDocuments, [memberId]: docs },
+      kbDeletingDocumentIds: {
+        ...state.kbDeletingDocumentIds,
+        [kbDocumentId]: true,
+      },
     }));
+
+    try {
+      const result = await deleteKbDocument({ kbDocumentId });
+      await get().fetchDocsForMember(memberId);
+      if (!result.ok) {
+        return { ok: false, error: result.error ?? 'Delete failed' };
+      }
+      if (result.clearedStoreName) {
+        set((state) => ({
+          members: state.members.map((item) =>
+            item.id === memberId ? { ...item, kbStoreName: undefined, updatedAt: Date.now() } : item
+          ),
+        }));
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Delete failed' };
+    } finally {
+      set((state) => ({
+        kbDeletingDocumentIds: {
+          ...state.kbDeletingDocumentIds,
+          [kbDocumentId]: false,
+        },
+      }));
+    }
+  },
+
+  retryKbDocumentIndexForMember: async (memberId, kbDocumentId) => {
+    set((state) => ({
+      kbRetryingIndexDocumentIds: {
+        ...state.kbRetryingIndexDocumentIds,
+        [kbDocumentId]: true,
+      },
+    }));
+
+    try {
+      await retryKbDocumentIndexing({ kbDocumentId });
+      await get().fetchDocsForMember(memberId);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Retry indexing failed' };
+    } finally {
+      set((state) => ({
+        kbRetryingIndexDocumentIds: {
+          ...state.kbRetryingIndexDocumentIds,
+          [kbDocumentId]: false,
+        },
+      }));
+    }
+  },
+
+  retryKbDocumentMetadataForMember: async (memberId, kbDocumentId) => {
+    set((state) => ({
+      kbRetryingMetadataDocumentIds: {
+        ...state.kbRetryingMetadataDocumentIds,
+        [kbDocumentId]: true,
+      },
+    }));
+
+    try {
+      await retryKbDocumentMetadata({ kbDocumentId });
+      await get().fetchDocsForMember(memberId);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Retry metadata failed' };
+    } finally {
+      set((state) => ({
+        kbRetryingMetadataDocumentIds: {
+          ...state.kbRetryingMetadataDocumentIds,
+          [kbDocumentId]: false,
+        },
+      }));
+    }
   },
 }));

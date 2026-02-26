@@ -78,6 +78,8 @@ export interface MemberChatResult {
         mode: 'heuristic' | 'llm-gate';
         useKnowledgeBase: boolean;
         reason: string;
+        decision?: 'required' | 'helpful' | 'unnecessary';
+        confidence?: number;
       };
     };
     queryPlan?: {
@@ -119,6 +121,28 @@ export interface KBDigestMetadata {
   lexicalAnchors: string[];
   styleAnchors: string[];
   digestSummary: string;
+  updatedAt: number;
+}
+
+export interface KbDocumentLifecycle {
+  id: string;
+  memberId: string;
+  storageId: string;
+  displayName: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  kbStoreName: string;
+  kbDocumentName: string;
+  uploadStatus: 'uploaded' | 'failed';
+  chunkingStatus: 'pending' | 'running' | 'completed' | 'failed';
+  indexingStatus: 'pending' | 'running' | 'completed' | 'failed';
+  metadataStatus: 'pending' | 'running' | 'completed' | 'failed';
+  chunkCountTotal?: number;
+  chunkCountIndexed?: number;
+  ingestErrorChunking?: string;
+  ingestErrorIndexing?: string;
+  ingestErrorMetadata?: string;
+  createdAt: number;
   updatedAt: number;
 }
 
@@ -244,6 +268,22 @@ export interface CouncilRepository {
     };
   }): Promise<{ summary: string }>;
   ensureMemberStore(input: { memberId: string }): Promise<{ storeName: string; created: boolean }>;
+  createKbDocumentRecord(input: {
+    memberId: string;
+    stagedFile: {
+      storageId: string;
+      displayName: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    };
+  }): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }>;
+  startKbDocumentProcessing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  retryKbDocumentIndexing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  listKbDocuments(input: { memberId: string }): Promise<KbDocumentLifecycle[]>;
+  deleteKbDocument(input: {
+    kbDocumentId: string;
+  }): Promise<{ ok: boolean; alreadyDeleted?: boolean; deletedChunkCount?: number; clearedStoreName?: boolean; error?: string }>;
   uploadMemberDocuments(input: {
     memberId: string;
     stagedFiles: Array<{

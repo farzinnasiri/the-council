@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from '../components/sidebar/Sidebar';
 import { Sheet, SheetContent } from '../components/ui/sheet';
 import { useAppStore } from '../store/appStore';
@@ -11,9 +11,13 @@ export function AppShell() {
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const location = useLocation();
+  const navigate = useNavigate();
   const conversations = useAppStore((state) => state.conversations);
   const members = useAppStore((state) => state.members);
   const chamberByMemberId = useAppStore((state) => state.chamberByMemberId);
+  const anyUploadInProgress = useAppStore((state) =>
+    Object.values(state.kbUploadProgressByMember).some((rows) => rows.length > 0)
+  );
 
   const activeConversation = useMemo(() => {
     const parts = location.pathname.split('/');
@@ -54,6 +58,14 @@ export function AppShell() {
     if (location.pathname.startsWith('/members')) {
       return {
         title: 'Members',
+        subtitle: '',
+        showParticipants: false,
+      };
+    }
+
+    if (location.pathname.startsWith('/kb-query')) {
+      return {
+        title: 'KB Query',
         subtitle: '',
         showParticipants: false,
       };
@@ -113,6 +125,46 @@ export function AppShell() {
       setMobileOpen(false);
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    if (!anyUploadInProgress) return;
+
+    const onClickCapture = (event: MouseEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor) return;
+      if (anchor.target && anchor.target !== '_self') return;
+      if (anchor.hasAttribute('download')) return;
+
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      if (href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (next === current) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const shouldLeave = window.confirm(
+        'A file upload is still in progress. Leaving now may cancel the upload. Do you want to leave this page?'
+      );
+      if (shouldLeave) {
+        navigate(next);
+      }
+    };
+
+    document.addEventListener('click', onClickCapture, true);
+    return () => document.removeEventListener('click', onClickCapture, true);
+  }, [anyUploadInProgress, navigate]);
 
   return (
     <div className="relative h-svh overflow-hidden bg-background text-foreground">

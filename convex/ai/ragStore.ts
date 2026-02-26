@@ -1,13 +1,15 @@
 'use node';
 
 import type { Id } from '../_generated/dataModel';
-import { embedText } from './openaiEmbeddings';
+import { embedText, embedTexts } from './openaiEmbeddings';
 import {
   CHUNK_OVERLAP,
   CHUNK_SIZE,
-  MAX_EMBEDDED_CHUNKS,
+  EMBEDDING_BATCH_SIZE,
+  MAX_INDEXED_CHUNKS,
   SEARCH_LIMIT_DEFAULT,
   SEARCH_LIMIT_MAX,
+  UPSERT_BATCH_SIZE,
 } from './ragConfig';
 
 export interface RAGGroundedSnippet {
@@ -34,16 +36,6 @@ export function splitIntoChunks(text: string): string[] {
   return out;
 }
 
-export function sampleChunks(chunks: string[]): Array<{ text: string; chunkIndex: number }> {
-  if (chunks.length <= MAX_EMBEDDED_CHUNKS) {
-    return chunks.map((text, index) => ({ text, chunkIndex: index }));
-  }
-  return Array.from({ length: MAX_EMBEDDED_CHUNKS }, (_, index) => {
-    const chunkIndex = Math.floor((index * (chunks.length - 1)) / (MAX_EMBEDDED_CHUNKS - 1));
-    return { text: chunks[chunkIndex], chunkIndex };
-  });
-}
-
 export async function indexDocumentChunks(
   ctx: any,
   input: {
@@ -59,32 +51,56 @@ export async function indexDocumentChunks(
     throw new Error(`No text to index for "${input.displayName}"`);
   }
 
-  const chunkSpecs = sampleChunks(splitIntoChunks(cleaned));
-  const chunks: Array<{ chunkIndex: number; text: string; embedding: number[] }> = [];
-  for (const chunk of chunkSpecs) {
-    const normalized = chunk.text.trim();
-    if (!normalized) continue;
-    const embedding = await embedText(normalized);
-    chunks.push({
-      chunkIndex: chunk.chunkIndex,
-      text: normalized,
-      embedding,
-    });
+  const splitChunks = splitIntoChunks(cleaned);
+  if (splitChunks.length > MAX_INDEXED_CHUNKS) {
+    throw new Error(
+      `Document "${input.displayName}" is too large to index (${splitChunks.length} chunks > ${MAX_INDEXED_CHUNKS}).`
+    );
   }
 
-  if (chunks.length === 0) {
+  const chunkSpecs = splitChunks
+    .map((text, chunkIndex) => ({
+      chunkIndex,
+      text: text.trim(),
+    }))
+    .filter((chunk) => chunk.text.length > 0);
+
+  if (chunkSpecs.length === 0) {
     throw new Error(`No non-empty chunks generated for "${input.displayName}"`);
   }
 
-  const inserted = await ctx.runMutation('kbDocumentChunks:upsertDocumentChunks', {
+  await deleteDocumentChunks(ctx, {
     memberId: input.memberId,
-    kbStoreName: input.storeName,
-    kbDocumentName: input.documentName,
-    displayName: input.displayName,
-    chunks,
+    documentName: input.documentName,
   });
 
-  return { chunkCount: inserted as number };
+  const chunks: Array<{ chunkIndex: number; text: string; embedding: number[] }> = [];
+  for (let index = 0; index < chunkSpecs.length; index += EMBEDDING_BATCH_SIZE) {
+    const batch = chunkSpecs.slice(index, index + EMBEDDING_BATCH_SIZE);
+    const vectors = await embedTexts(batch.map((item) => item.text));
+    for (let batchIndex = 0; batchIndex < batch.length; batchIndex += 1) {
+      chunks.push({
+        chunkIndex: batch[batchIndex].chunkIndex,
+        text: batch[batchIndex].text,
+        embedding: vectors[batchIndex],
+      });
+    }
+  }
+
+  let inserted = 0;
+  for (let index = 0; index < chunks.length; index += UPSERT_BATCH_SIZE) {
+    const batch = chunks.slice(index, index + UPSERT_BATCH_SIZE);
+    const insertedBatch = await ctx.runMutation('kbDocumentChunks:upsertDocumentChunks', {
+      memberId: input.memberId,
+      kbStoreName: input.storeName,
+      kbDocumentName: input.documentName,
+      displayName: input.displayName,
+      chunks: batch,
+    });
+    inserted += insertedBatch as number;
+  }
+
+  return { chunkCount: inserted };
 }
 
 export async function deleteDocumentChunks(
@@ -94,11 +110,20 @@ export async function deleteDocumentChunks(
     documentName: string;
   }
 ): Promise<{ deletedCount: number }> {
-  const deleted = await ctx.runMutation('kbDocumentChunks:deleteDocumentChunks', {
-    memberId: input.memberId,
-    kbDocumentName: input.documentName,
-  });
-  return { deletedCount: deleted as number };
+  let deletedCount = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const batch = (await ctx.runMutation('kbDocumentChunks:deleteDocumentChunksBatch', {
+      memberId: input.memberId,
+      kbDocumentName: input.documentName,
+      limit: 64,
+    })) as { deletedCount: number; hasMore: boolean };
+    deletedCount += batch.deletedCount ?? 0;
+    hasMore = Boolean(batch.hasMore);
+  }
+
+  return { deletedCount };
 }
 
 export async function listMemberChunkDocuments(
@@ -107,9 +132,15 @@ export async function listMemberChunkDocuments(
     memberId: Id<'members'>;
   }
 ): Promise<Array<{ name?: string; displayName?: string }>> {
-  return (await ctx.runQuery('kbDocumentChunks:listDocumentsByMember', {
+  const digests = (await ctx.runQuery('kbDigests:listByMember', {
     memberId: input.memberId,
-  })) as Array<{ name?: string; displayName?: string }>;
+    includeDeleted: false,
+  })) as Array<{ kbDocumentName?: string; displayName?: string }>;
+
+  return digests.map((digest) => ({
+    name: digest.kbDocumentName,
+    displayName: digest.displayName ?? digest.kbDocumentName,
+  }));
 }
 
 export async function searchMemberChunks(

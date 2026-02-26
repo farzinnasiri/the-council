@@ -178,6 +178,34 @@ export default defineSchema({
     .index('by_status_expiresAt', ['status', 'expiresAt'])
     .index('by_kb_document_name', ['kbDocumentName']),
 
+  kbDocuments: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    storageId: v.id('_storage'),
+    displayName: v.string(),
+    mimeType: v.optional(v.string()),
+    sizeBytes: v.optional(v.number()),
+    kbStoreName: v.string(),
+    kbDocumentName: v.string(),
+    uploadStatus: v.union(v.literal('uploaded'), v.literal('failed')),
+    chunkingStatus: v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed')),
+    indexingStatus: v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed')),
+    metadataStatus: v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed')),
+    chunkCountTotal: v.optional(v.number()),
+    chunkCountIndexed: v.optional(v.number()),
+    ingestErrorChunking: v.optional(v.string()),
+    ingestErrorIndexing: v.optional(v.string()),
+    ingestErrorMetadata: v.optional(v.string()),
+    status: v.union(v.literal('active'), v.literal('deleted')),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+  })
+    .index('by_user_member', ['userId', 'memberId'])
+    .index('by_member_storage', ['memberId', 'storageId'])
+    .index('by_member_status', ['memberId', 'status'])
+    .index('by_member_document_name', ['memberId', 'kbDocumentName']),
+
   kbDocumentDigests: defineTable({
     userId: v.id('users'),
     memberId: v.id('members'),

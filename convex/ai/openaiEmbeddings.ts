@@ -35,3 +35,25 @@ export async function embedText(text: string): Promise<number[]> {
 
   return embedding;
 }
+
+export async function embedTexts(texts: string[]): Promise<number[][]> {
+  const inputs = texts.map((text) => text.trim()).filter(Boolean);
+  if (inputs.length === 0) {
+    throw new Error('Cannot embed an empty text batch');
+  }
+
+  const vectors = await embeddings.embedDocuments(inputs);
+  if (!Array.isArray(vectors) || vectors.length !== inputs.length) {
+    throw new Error('OpenAI embeddings response missing document vectors');
+  }
+
+  for (const vector of vectors) {
+    if (!Array.isArray(vector) || vector.length !== OPENAI_EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `Unexpected embedding dimensions in batch: expected ${OPENAI_EMBEDDING_DIMENSIONS}`
+      );
+    }
+  }
+
+  return vectors;
+}

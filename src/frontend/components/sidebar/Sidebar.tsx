@@ -5,6 +5,7 @@ import {
   MoreVertical,
   Pencil,
   Plus,
+  Search,
   Trash2,
   UserCircle2,
   Users2,
@@ -276,6 +277,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       <div className="shrink-0 p-3">
         <nav className="grid gap-1">
           <NavItem to="/members" icon={<Users2 className="h-4 w-4" />} label="Members" onNavigate={onNavigate} />
+          <NavItem to="/kb-query" icon={<Search className="h-4 w-4" />} label="KB Query" onNavigate={onNavigate} />
           <NavItem
             to="/settings"
             icon={

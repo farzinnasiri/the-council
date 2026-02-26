@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Expand, MessageSquarePlus, Pencil, Plus, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
+import { Archive, Expand, Loader2, MessageSquarePlus, Pencil, Plus, RefreshCcw, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -17,6 +17,7 @@ interface MemberFormState {
 
 interface DigestEditorState {
   digestId: string;
+  kbDocumentId?: string;
   displayName: string;
   topics: string;
   entities: string;
@@ -40,13 +41,19 @@ export function MembersPage() {
   const uploadDocsForMember = useAppStore((state) => state.uploadDocsForMember);
   const fetchDocsForMember = useAppStore((state) => state.fetchDocsForMember);
   const deleteDocForMember = useAppStore((state) => state.deleteDocForMember);
-  const docsByMember = useAppStore((state) => state.memberDocuments);
+  const retryKbDocumentIndexForMember = useAppStore((state) => state.retryKbDocumentIndexForMember);
+  const retryKbDocumentMetadataForMember = useAppStore((state) => state.retryKbDocumentMetadataForMember);
+  const kbDocumentsByMember = useAppStore((state) => state.kbDocumentsByMember);
+  const kbUploadProgressByMember = useAppStore((state) => state.kbUploadProgressByMember);
+  const kbDeletingDocumentIds = useAppStore((state) => state.kbDeletingDocumentIds);
+  const kbRetryingIndexDocumentIds = useAppStore((state) => state.kbRetryingIndexDocumentIds);
+  const kbRetryingMetadataDocumentIds = useAppStore((state) => state.kbRetryingMetadataDocumentIds);
 
   const [isCreating, setIsCreating] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [form, setForm] = useState<MemberFormState>(emptyForm);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
-  const [deletingDocumentName, setDeletingDocumentName] = useState<string | null>(null);
+  const [kbPanelError, setKbPanelError] = useState<string | null>(null);
   const [isSuggestingSpecialties, setIsSuggestingSpecialties] = useState(false);
   const [pendingAvatarBlob, setPendingAvatarBlob] = useState<Blob | null>(null);
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
@@ -57,11 +64,17 @@ export function MembersPage() {
   const [digestEditor, setDigestEditor] = useState<DigestEditorState | null>(null);
   const [isDigestEditorOpen, setIsDigestEditorOpen] = useState(false);
   const [isSavingDigest, setIsSavingDigest] = useState(false);
+  const [isRetryingDigestFromEditor, setIsRetryingDigestFromEditor] = useState(false);
 
   const activeMembers = useMemo(() => members.filter((member) => !member.deletedAt), [members]);
   const archivedMembers = useMemo(() => members.filter((member) => Boolean(member.deletedAt)), [members]);
   const editingMember = useMemo(() => members.find((item) => item.id === editingMemberId), [members, editingMemberId]);
-  const editingDocs = editingMemberId ? docsByMember[editingMemberId] ?? [] : [];
+  const editingDocs = editingMemberId ? kbDocumentsByMember[editingMemberId] ?? [] : [];
+  const editingUploadProgress = editingMemberId ? kbUploadProgressByMember[editingMemberId] ?? [] : [];
+  const anyUploadInProgress = useMemo(
+    () => Object.values(kbUploadProgressByMember).some((rows) => rows.length > 0),
+    [kbUploadProgressByMember]
+  );
   const isFormActive = isCreating || Boolean(editingMemberId);
   const showKbPanel = isCreating || Boolean(editingMemberId);
 
@@ -69,13 +82,13 @@ export function MembersPage() {
     if (!editingMemberId) {
       setKbDigests([]);
       setDigestLoadError(null);
+      setKbPanelError(null);
       return;
     }
     setBusyMemberId(editingMemberId);
     setIsDigestLoading(true);
     setDigestLoadError(null);
-    void fetchDocsForMember(editingMemberId)
-      .finally(() => setBusyMemberId(null));
+    void fetchDocsForMember(editingMemberId).finally(() => setBusyMemberId(null));
     void convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
       .then((rows) => setKbDigests(rows))
       .catch((error) => {
@@ -88,6 +101,39 @@ export function MembersPage() {
         setIsDigestLoading(false);
       });
   }, [editingMemberId, fetchDocsForMember]);
+
+  useEffect(() => {
+    if (!editingMemberId) return;
+    const hasInFlightProcessing = editingDocs.some(
+      (doc) =>
+        doc.chunkingStatus === 'pending' ||
+        doc.chunkingStatus === 'running' ||
+        doc.indexingStatus === 'pending' ||
+        doc.indexingStatus === 'running' ||
+        doc.metadataStatus === 'pending' ||
+        doc.metadataStatus === 'running'
+    );
+    if (!hasInFlightProcessing) return;
+
+    const timer = window.setInterval(() => {
+      void fetchDocsForMember(editingMemberId);
+      void convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
+        .then((rows) => setKbDigests(rows))
+        .catch(() => undefined);
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [editingDocs, editingMemberId, fetchDocsForMember]);
+
+  useEffect(() => {
+    if (!anyUploadInProgress) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [anyUploadInProgress]);
 
   const startCreate = () => {
     setEditingMemberId(null);
@@ -121,12 +167,12 @@ export function MembersPage() {
     setIsCreating(false);
     setEditingMemberId(null);
     setForm(emptyForm);
-    setDeletingDocumentName(null);
     setPendingAvatarBlob(null);
     setIsPromptDialogOpen(false);
     setPromptDialogValue('');
     setKbDigests([]);
     setDigestLoadError(null);
+    setKbPanelError(null);
     setDigestEditor(null);
     setIsDigestEditorOpen(false);
   };
@@ -191,37 +237,53 @@ export function MembersPage() {
     setBusyMemberId(editingMemberId);
     try {
       await uploadDocsForMember(editingMemberId, Array.from(files));
-      await Promise.all([
-        fetchDocsForMember(editingMemberId),
-        convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
-          .then((rows) => {
-            setKbDigests(rows);
-            setDigestLoadError(null);
-          })
-          .catch((error) => {
-            console.error('Failed to refresh KB metadata after upload', error);
-            setDigestLoadError('Metadata refresh failed after upload.');
-          }),
-      ]);
+      await fetchDocsForMember(editingMemberId);
+      const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
+      setKbDigests(rows);
+      setDigestLoadError(null);
+      setKbPanelError(null);
+    } catch (error) {
+      console.error('Failed to upload documents', error);
+      setKbPanelError(error instanceof Error ? error.message : 'Upload failed');
     } finally {
       setBusyMemberId(null);
     }
   };
 
-  const deleteDocument = async (documentName: string) => {
+  const deleteDocument = async (kbDocumentId: string) => {
     if (!editingMemberId) {
       return;
     }
 
-    setDeletingDocumentName(documentName);
-    try {
-      await deleteDocForMember(editingMemberId, documentName);
-      const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
-      setKbDigests(rows);
-      setDigestLoadError(null);
-    } finally {
-      setDeletingDocumentName(null);
+    const result = await deleteDocForMember(editingMemberId, kbDocumentId);
+    if (!result.ok) {
+      setKbPanelError(result.error ?? 'Delete failed');
+      return;
     }
+    const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
+    setKbDigests(rows);
+    setDigestLoadError(null);
+    setKbPanelError(null);
+  };
+
+  const retryIndexing = async (kbDocumentId: string) => {
+    if (!editingMemberId) return;
+    const result = await retryKbDocumentIndexForMember(editingMemberId, kbDocumentId);
+    if (!result.ok) {
+      setKbPanelError(result.error ?? 'Retry indexing failed');
+      return;
+    }
+    setKbPanelError(null);
+  };
+
+  const retryMetadata = async (kbDocumentId: string) => {
+    if (!editingMemberId) return;
+    const result = await retryKbDocumentMetadataForMember(editingMemberId, kbDocumentId);
+    if (!result.ok) {
+      setKbPanelError(result.error ?? 'Retry metadata failed');
+      return;
+    }
+    setKbPanelError(null);
   };
 
   const generateSpecialties = async () => {
@@ -261,9 +323,10 @@ export function MembersPage() {
       .map((item) => item.trim())
       .filter(Boolean);
 
-  const openDigestEditor = (digest: KBDigestMetadata) => {
+  const openDigestEditor = (digest: KBDigestMetadata, kbDocumentId?: string) => {
     setDigestEditor({
       digestId: digest.id,
+      kbDocumentId,
       displayName: digest.displayName,
       topics: listToText(digest.topics),
       entities: listToText(digest.entities),
@@ -296,6 +359,43 @@ export function MembersPage() {
     }
   };
 
+  const retryDigestEditorMetadata = async () => {
+    if (!editingMemberId || !digestEditor?.kbDocumentId) return;
+    setIsRetryingDigestFromEditor(true);
+    try {
+      const result = await retryKbDocumentMetadataForMember(editingMemberId, digestEditor.kbDocumentId);
+      if (!result.ok) {
+        setKbPanelError(result.error ?? 'Retry metadata failed');
+        return;
+      }
+
+      await fetchDocsForMember(editingMemberId);
+      const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
+      setKbDigests(rows);
+      setDigestLoadError(null);
+      setKbPanelError(null);
+
+      const refreshed = rows.find((item) => item.id === digestEditor.digestId);
+      if (refreshed) {
+        setDigestEditor((current) =>
+          current
+            ? {
+                ...current,
+                displayName: refreshed.displayName,
+                topics: listToText(refreshed.topics),
+                entities: listToText(refreshed.entities),
+                lexicalAnchors: listToText(refreshed.lexicalAnchors),
+                styleAnchors: listToText(refreshed.styleAnchors),
+                digestSummary: refreshed.digestSummary,
+              }
+            : current
+        );
+      }
+    } finally {
+      setIsRetryingDigestFromEditor(false);
+    }
+  };
+
   const normalizeDocKey = (value?: string) => (value ?? '').trim().toLowerCase();
   const digestByDocumentName = new Map(
     kbDigests
@@ -306,10 +406,17 @@ export function MembersPage() {
     kbDigests.map((digest) => [normalizeDocKey(digest.displayName), digest] as const)
   );
 
-  const digestForDoc = (doc: { name?: string; displayName?: string }) => {
-    const byName = digestByDocumentName.get(normalizeDocKey(doc.name));
+  const digestForDoc = (doc: { kbDocumentName?: string; displayName?: string }) => {
+    const byName = digestByDocumentName.get(normalizeDocKey(doc.kbDocumentName));
     if (byName) return byName;
-    return digestByDisplayName.get(normalizeDocKey(doc.displayName ?? doc.name));
+    return digestByDisplayName.get(normalizeDocKey(doc.displayName ?? doc.kbDocumentName));
+  };
+
+  const stageClass = (status: 'pending' | 'running' | 'completed' | 'failed') => {
+    if (status === 'completed') return 'border-border bg-muted/40 text-emerald-500';
+    if (status === 'running') return 'border-border bg-muted/40 text-sky-400';
+    if (status === 'failed') return 'border-border bg-muted/40 text-destructive';
+    return 'border-border bg-muted/40 text-muted-foreground';
   };
 
   return (
@@ -327,7 +434,7 @@ export function MembersPage() {
           <MemberList
             title="Active"
             members={activeMembers}
-            docsByMember={docsByMember}
+            kbDocumentsByMember={kbDocumentsByMember}
             onEdit={startEdit}
             onArchive={(memberId) => {
               void archiveMember(memberId);
@@ -341,7 +448,7 @@ export function MembersPage() {
             <MemberList
               title="Archived"
               members={archivedMembers}
-              docsByMember={docsByMember}
+              kbDocumentsByMember={kbDocumentsByMember}
               onEdit={() => { }}
               onArchive={() => { }}
               onCreateChamber={() => Promise.resolve()}
@@ -443,7 +550,7 @@ export function MembersPage() {
                     <div>
                       <p className="font-mono text-sm font-semibold">Knowledge base</p>
                       <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
-                        {editingMember?.kbStoreName ? `Store: ${editingMember.kbStoreName.split('/').pop()}` : 'No KB store yet'}
+                        Track upload, chunking, indexing, and metadata per document.
                       </p>
                     </div>
                     <label
@@ -475,48 +582,112 @@ export function MembersPage() {
                     <p className="text-xs text-muted-foreground">Loading documents...</p>
                   ) : null}
 
+                  {editingUploadProgress.length > 0 ? (
+                    <div className="mb-3 space-y-2">
+                      {editingUploadProgress.map((entry) => (
+                        <div key={entry.localId} className="rounded-md border border-border/70 bg-muted/20 p-2">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <p className="truncate font-mono text-[11px] font-semibold">{entry.fileName}</p>
+                            <p className="font-mono text-[10px] text-muted-foreground">
+                              {Math.round(entry.progress * 100)}%
+                            </p>
+                          </div>
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                            <div className="h-full bg-foreground/80 transition-[width] duration-150" style={{ width: `${Math.round(entry.progress * 100)}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-muted-foreground">
+                        Upload in progress. Keep this tab open until uploads finish.
+                      </p>
+                    </div>
+                  ) : null}
+
                   {editingMemberId && editingDocs.length > 0 ? (
                     <div className="space-y-2">
                       {editingDocs.map((doc, index) => {
-                        const key = doc.name ?? doc.displayName ?? `doc-${index}`;
+                        const key = doc.id ?? `doc-${index}`;
                         const digest = digestForDoc(doc);
+                        const isDeleting = Boolean(kbDeletingDocumentIds[doc.id]);
+                        const isRetryingIndex = Boolean(kbRetryingIndexDocumentIds[doc.id]);
+                        const isRetryingMetadata = Boolean(kbRetryingMetadataDocumentIds[doc.id]);
                         return (
                           <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="truncate font-mono text-xs font-semibold">{doc.displayName ?? doc.name ?? 'Untitled document'}</span>
-                              <div className="flex items-center gap-1 opacity-50 transition-opacity group-hover:opacity-100">
+                              <span className="truncate font-mono text-xs font-semibold">{doc.displayName ?? 'Untitled document'}</span>
+                              <div className="flex items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
                                 {digest ? (
                                   <Button
                                     type="button"
                                     size="sm"
                                     variant="ghost"
                                     className="h-6 rounded-md px-2 text-[10px]"
-                                    onClick={() => openDigestEditor(digest)}
+                                    onClick={() => openDigestEditor(digest, doc.id)}
                                   >
                                     Edit metadata
                                   </Button>
                                 ) : null}
-                                {doc.name ? (
+                                {doc.storageId && doc.indexingStatus === 'failed' ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 rounded-md px-2 text-[10px]"
+                                    disabled={isRetryingIndex || isDeleting}
+                                    onClick={() => void retryIndexing(doc.id)}
+                                  >
+                                    {isRetryingIndex ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCcw className="mr-1 h-3 w-3" />}
+                                    Retry indexing
+                                  </Button>
+                                ) : null}
+                                {doc.storageId && doc.metadataStatus === 'failed' ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 rounded-md px-2 text-[10px]"
+                                    disabled={isRetryingMetadata || isDeleting}
+                                    onClick={() => void retryMetadata(doc.id)}
+                                  >
+                                    {isRetryingMetadata ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCcw className="mr-1 h-3 w-3" />}
+                                    Retry metadata
+                                  </Button>
+                                ) : null}
+                                {doc.id && doc.storageId ? (
                                   <Button
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7"
-                                    disabled={deletingDocumentName === doc.name}
-                                    onClick={() => void deleteDocument(doc.name as string)}
+                                    disabled={isDeleting}
+                                    onClick={() => void deleteDocument(doc.id)}
                                     title="Delete document"
                                   >
-                                    <Trash2 className="h-3.5 w-3.5" />
+                                    {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                   </Button>
                                 ) : null}
                               </div>
                             </div>
 
                             <div className="mt-3 border-t border-border pt-2">
+                              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                                <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.chunkingStatus)}`}>
+                                  Chunking: {doc.chunkingStatus}
+                                </span>
+                                <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.indexingStatus)}`}>
+                                  Indexing: {doc.indexingStatus}
+                                </span>
+                                <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.metadataStatus)}`}>
+                                  Metadata: {doc.metadataStatus}
+                                </span>
+                              </div>
+                              {doc.ingestErrorIndexing ? (
+                                <p className="mt-1 text-[11px] text-destructive">Indexing error: {doc.ingestErrorIndexing}</p>
+                              ) : null}
+                              {doc.ingestErrorMetadata ? (
+                                <p className="mt-1 text-[11px] text-destructive">Metadata error: {doc.ingestErrorMetadata}</p>
+                              ) : null}
                               {digest ? (
                                 <>
-                                  <p className="font-mono text-[10px] text-muted-foreground">
-                                    Topics {digest.topics.length} · Entities {digest.entities.length}
-                                  </p>
                                   {digest.digestSummary ? (
                                     <p className="mt-1 font-mono text-[10px] text-muted-foreground">{digest.digestSummary}</p>
                                   ) : null}
@@ -540,6 +711,7 @@ export function MembersPage() {
                   {editingMemberId && digestLoadError ? (
                     <p className="mt-2 text-xs text-destructive">{digestLoadError}</p>
                   ) : null}
+                  {kbPanelError ? <p className="mt-2 text-xs text-destructive">{kbPanelError}</p> : null}
                 </section>
               ) : null}
             </div>
@@ -653,12 +825,32 @@ export function MembersPage() {
                   ) : null}
 
                   <div className="mt-4 flex items-center gap-2">
-                    <Button type="button" className="h-8 gap-2 rounded-md text-xs" disabled={isSavingDigest} onClick={() => void saveDigestEditor()}>
+                    <Button
+                      type="button"
+                      className="h-8 gap-2 rounded-md text-xs"
+                      disabled={isSavingDigest || isRetryingDigestFromEditor}
+                      onClick={() => void saveDigestEditor()}
+                    >
                       <Save className="h-3.5 w-3.5" />
                       {isSavingDigest ? 'Saving…' : 'Save metadata'}
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 gap-2 rounded-md text-xs"
+                      disabled={!digestEditor?.kbDocumentId || isSavingDigest || isRetryingDigestFromEditor}
+                      onClick={() => void retryDigestEditorMetadata()}
+                    >
+                      <RefreshCcw className={`h-3.5 w-3.5 ${isRetryingDigestFromEditor ? 'animate-spin' : ''}`} />
+                      {isRetryingDigestFromEditor ? 'Retrying…' : 'Retry metadata'}
+                    </Button>
                     <DialogPrimitive.Close asChild>
-                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs" disabled={isSavingDigest}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-8 rounded-md text-xs"
+                        disabled={isSavingDigest || isRetryingDigestFromEditor}
+                      >
                         Cancel
                       </Button>
                     </DialogPrimitive.Close>
@@ -676,7 +868,7 @@ export function MembersPage() {
 function MemberList({
   title,
   members,
-  docsByMember,
+  kbDocumentsByMember,
   onEdit,
   onArchive,
   onCreateChamber,
@@ -684,7 +876,7 @@ function MemberList({
 }: {
   title: string;
   members: ReturnType<typeof useAppStore.getState>['members'];
-  docsByMember: ReturnType<typeof useAppStore.getState>['memberDocuments'];
+  kbDocumentsByMember: ReturnType<typeof useAppStore.getState>['kbDocumentsByMember'];
   onEdit: (memberId: string) => void;
   onArchive: (memberId: string) => void;
   onCreateChamber: (memberId: string) => Promise<void>;
@@ -731,12 +923,7 @@ function MemberList({
               ) : null}
 
               <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
-                <span>Docs ({docsByMember[member.id]?.length ?? 0})</span>
-                {member.kbStoreName ? (
-                  <span>Store: {member.kbStoreName.split('/').pop()}</span>
-                ) : (
-                  <span>No KB</span>
-                )}
+                <span>Docs ({kbDocumentsByMember[member.id]?.length ?? 0})</span>
               </div>
             </div>
           </article>
