@@ -3,7 +3,6 @@
 import type { Id } from '../../../_generated/dataModel';
 import { applyRoundDefaultSelection, buildRoundContext } from '../../../ai/orchestration/roundtableHall';
 import type { RoundIntentProposal } from '../../../ai/provider/types';
-import { resolveRoundtableMaxSpeakers } from '../../../ai/roundtablePolicy';
 import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, withTimeout } from '../../shared/convexGateway';
 import type { MessageRow, PreparedRoundIntent, RoundtableState } from '../../shared/types';
@@ -29,15 +28,15 @@ export async function prepareRoundtableRoundUseCase(
     throw new Error('Conversation is not in roundtable mode');
   }
 
-  const [membersById, participants, activeMessages, maxSpeakers] = await Promise.all([
+  const [membersById, participants, activeMessages] = await Promise.all([
     loadActiveMembersMap(ctx),
     listActiveParticipants(ctx, args.conversationId),
     listActiveMessages(ctx, args.conversationId),
-    resolveRoundtableMaxSpeakers(ctx),
   ]);
 
   const activeMemberIds = participants.map((row) => row.memberId);
   const filteredMentioned = (args.mentionedMemberIds ?? []).filter((memberId) => activeMemberIds.includes(memberId));
+  const maxSpeakers = Math.max(1, activeMemberIds.length);
 
   const triggerMessage = args.triggerMessageId
     ? activeMessages.find((message) => message._id === args.triggerMessageId)

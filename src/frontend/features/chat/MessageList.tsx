@@ -168,7 +168,7 @@ export function MessageList({
                   <p className="px-1 pb-1.5 text-xs font-semibold text-muted-foreground">
                     {member.name}
                   </p>
-                  <div className="flex items-center gap-1 rounded-3xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-sm">
+                  <div className="inline-flex w-fit items-center gap-1 rounded-3xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-sm">
                     <TypingDot delayMs={0} />
                     <TypingDot delayMs={120} />
                     <TypingDot delayMs={240} />

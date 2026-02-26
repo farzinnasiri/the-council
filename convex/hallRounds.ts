@@ -256,13 +256,11 @@ export const setRoundSelections = mutation({
     }
 
     const uniqueSelections = Array.from(new Set(args.selectedMemberIds.map((id) => id as string)));
-    if (uniqueSelections.length > round.maxSpeakers) {
-      throw new Error(`At most ${round.maxSpeakers} speakers can be selected`);
+    const selectableIds = new Set(intents.map((row: any) => row.memberId as string));
+    const maxSelectable = Math.max(1, selectableIds.size);
+    if (uniqueSelections.length > maxSelectable) {
+      throw new Error(`At most ${maxSelectable} speakers can be selected`);
     }
-
-    const selectableIds = new Set(
-      intents.map((row: any) => row.memberId as string)
-    );
 
     for (const memberId of uniqueSelections) {
       if (!selectableIds.has(memberId)) {

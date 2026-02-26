@@ -103,7 +103,7 @@ export function RoundtablePanel({
   }
 
   const round = state.round;
-  const cap = round.maxSpeakers;
+  const cap = Math.max(1, state.intents.length);
   const selectedIds = state.intents.filter((intent) => intent.selected).map((intent) => intent.memberId);
   const selectedSet = new Set(selectedIds);
   const isAwaitingUser = round.status === 'awaiting_user';
