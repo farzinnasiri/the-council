@@ -5,12 +5,14 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 ## 1) Near-Term (High Priority)
 
 ### 1.1 KB Upload UX (Members)
+Status: Completed (February 26, 2026)
 - Add upload progress/loading bars for knowledge-base document uploads.
 - Improve overall KB upload UI states (queued, uploading, staged, ingesting, completed, failed).
 - Add retry support for files already staged but not yet ingested.
 - Improve error visibility with clear, actionable messages.
 
 ### 1.2 Knowledge Store Lifecycle
+Status: Completed (February 26, 2026)
 - When the last document in a member knowledge store is deleted, delete the underlying store as well.
 - Ensure cleanup is safe and idempotent.
 - Add backend + UI confirmation and post-delete state refresh.
@@ -46,6 +48,13 @@ This roadmap organizes current brainstormed ideas into a practical implementatio
 - Keep editing lightweight (quick add, inline edit, simple formatting only).
 - UX requirement: first-class support on both mobile and desktop (layout, keyboard behavior, easy open/close).
 - Scope boundary: notes are conversation-scoped (not global memory) and should not block chatting.
+
+### 1.8 Response-Level User Signals (Auto-Adjustment)
+- Let users attach lightweight feedback signals to each AI response (for example: shorter, clearer, too verbose, better structure).
+- Convert these signals into automatic response-style adjustments for subsequent turns.
+- Keep controls frictionless in both Hall and Chamber so feedback does not interrupt chat flow.
+- Add guardrails to avoid overfitting to one-off signals (decay, recency weighting, reset controls).
+- Make the adaptation behavior visible and reversible by the user.
 
 ## 2) Mid-Term (Core Capabilities)
 
@@ -146,6 +155,7 @@ Status: Completed (February 25, 2026)
 - Add safeguards for duplicate hits, latency limits, and token/cost budgets.
 
 ### 3.4 KB Retrieval Activation + Query Planning Upgrade
+Status: Completed (February 26, 2026, single-plan + fallback phase)
 - Increase KB search activation likelihood when requests may benefit from grounded context (reduce over-conservative gating).
 - Add a smarter query planner that can choose between direct retrieval, rewritten retrieval, and multi-query retrieval paths.
 - Improve retrieval relevance/recall via better planning heuristics, reranking, and fallback behavior.
