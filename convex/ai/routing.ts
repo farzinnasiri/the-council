@@ -5,6 +5,7 @@ import { v } from 'convex/values';
 import { routeHallMembersUseCase } from '../contexts/hall/application/routeHallMembers';
 import { suggestHallTitleUseCase } from '../contexts/hall/application/suggestHallTitle';
 import { suggestMemberSpecialtiesUseCase } from '../contexts/hall/application/suggestMemberSpecialties';
+import { suggestChamberTitleUseCase } from '../contexts/chamber/application/suggestChamberTitle';
 
 export const routeHallMembers = action({
   args: {
@@ -21,6 +22,14 @@ export const suggestHallTitle = action({
     model: v.optional(v.string()),
   },
   handler: async (ctx, args) => await suggestHallTitleUseCase(ctx, args),
+});
+
+export const suggestChamberTitle = action({
+  args: {
+    message: v.string(),
+    model: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => await suggestChamberTitleUseCase(ctx, args),
 });
 
 export const suggestMemberSpecialties = action({

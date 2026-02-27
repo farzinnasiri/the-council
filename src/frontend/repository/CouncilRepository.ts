@@ -39,7 +39,6 @@ export interface CouncilSnapshot {
   themeMode: ThemeMode;
   members: Member[];
   conversations: Conversation[];
-  chamberMap: Record<string, Conversation>;
 }
 
 export interface RouteResult {
@@ -162,12 +161,13 @@ export interface CouncilRepository {
   listConversations(includeArchived?: boolean): Promise<Conversation[]>;
   listHalls(includeArchived?: boolean): Promise<Conversation[]>;
   listChambers(includeArchived?: boolean): Promise<Conversation[]>;
+  listChamberThreadsByMember(memberId: string, includeArchived?: boolean): Promise<Conversation[]>;
   createHall(input: CreateHallInput): Promise<Conversation>;
-  renameHall(conversationId: string, title: string): Promise<Conversation>;
-  archiveHall(conversationId: string): Promise<void>;
-  getOrCreateChamber(memberId: string): Promise<Conversation>;
-  getChamberByMember(memberId: string): Promise<Conversation | null>;
-  listChamberMap(): Promise<Record<string, Conversation>>;
+  createChamberThread(memberId: string): Promise<Conversation>;
+  getLatestChamberThread(memberId: string): Promise<Conversation | null>;
+  renameConversation(conversationId: string, title: string): Promise<Conversation>;
+  archiveConversation(conversationId: string): Promise<void>;
+  clearChamberByMember(memberId: string): Promise<void>;
 
   listParticipants(conversationId: string, includeRemoved?: boolean): Promise<ConversationParticipant[]>;
   addHallParticipant(conversationId: string, memberId: string): Promise<void>;
@@ -211,6 +211,10 @@ export interface CouncilRepository {
     maxSelections?: number;
   }): Promise<RouteResult>;
   suggestHallTitle(input: {
+    message: string;
+    model?: string;
+  }): Promise<HallTitleResult>;
+  suggestChamberTitle(input: {
     message: string;
     model?: string;
   }): Promise<HallTitleResult>;

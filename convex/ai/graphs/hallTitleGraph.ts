@@ -19,27 +19,32 @@ const HallTitleStateAnnotation = Annotation.Root({
   usedModel: Annotation<string | undefined>(),
 });
 
-function fallbackHallTitle(message: string): string {
+function fallbackTitle(message: string, emptyFallback: string): string {
   const cleaned = message
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[.!?]+$/g, '');
 
-  if (!cleaned) return 'New Hall';
+  if (!cleaned) return emptyFallback;
 
   const words = cleaned.split(' ').slice(0, 6);
   const title = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
   return title.slice(0, 72);
 }
 
-export async function runHallTitleGraph(input: { message: string; model?: string }): Promise<{ title: string; model: string }> {
+async function runConversationTitleGraph(input: {
+  message: string;
+  model?: string;
+  promptLabel: string;
+  emptyFallback: string;
+}): Promise<{ title: string; model: string }> {
   const graph = new StateGraph(HallTitleStateAnnotation)
     .addNode('generate', async (state) => {
-      const fallbackTitle = fallbackHallTitle(state.message);
+      const fallback = fallbackTitle(state.message, input.emptyFallback);
       const candidateModels = hallTitleModelCandidates(state.model);
 
       const prompt = [
-        'Generate a concise title for this conversation.',
+        `Generate a concise title for this ${input.promptLabel}.`,
         'Requirements:',
         '- 2 to 6 words',
         '- Title Case',
@@ -73,7 +78,7 @@ export async function runHallTitleGraph(input: { message: string; model?: string
       }
 
       return {
-        title: fallbackTitle,
+        title: fallback,
         usedModel: candidateModels[0] ?? 'heuristic',
       };
     })
@@ -81,9 +86,27 @@ export async function runHallTitleGraph(input: { message: string; model?: string
     .addEdge('generate', END)
     .compile();
 
-  const result = (await graph.invoke(input)) as unknown as HallTitleState;
+  const result = (await graph.invoke({ message: input.message, model: input.model })) as unknown as HallTitleState;
   return {
-    title: result.title ?? fallbackHallTitle(input.message),
+    title: result.title ?? fallbackTitle(input.message, input.emptyFallback),
     model: result.usedModel ?? 'heuristic',
   };
+}
+
+export async function runHallTitleGraph(input: { message: string; model?: string }): Promise<{ title: string; model: string }> {
+  return await runConversationTitleGraph({
+    message: input.message,
+    model: input.model,
+    promptLabel: 'conversation',
+    emptyFallback: 'New Hall',
+  });
+}
+
+export async function runChamberTitleGraph(input: { message: string; model?: string }): Promise<{ title: string; model: string }> {
+  return await runConversationTitleGraph({
+    message: input.message,
+    model: input.model,
+    promptLabel: 'chamber thread',
+    emptyFallback: 'New Thread',
+  });
 }

@@ -173,6 +173,13 @@ export async function suggestHallTitle(input: {
   return await convexRepository.suggestHallTitle(input);
 }
 
+export async function suggestChamberTitle(input: {
+  message: string;
+  model?: string;
+}): Promise<HallTitleResult> {
+  return await convexRepository.suggestChamberTitle(input);
+}
+
 export async function suggestMemberSpecialties(input: {
   name: string;
   systemPrompt: string;

@@ -41,7 +41,8 @@ export default defineSchema({
   })
     .index('by_user', ['userId'])
     .index('by_user_kind', ['userId', 'kind'])
-    .index('by_user_kind_member', ['userId', 'kind', 'chamberMemberId']),
+    .index('by_user_kind_member', ['userId', 'kind', 'chamberMemberId'])
+    .index('by_user_kind_member_updated', ['userId', 'kind', 'chamberMemberId', 'updatedAt']),
 
   conversationParticipants: defineTable({
     conversationId: v.id('conversations'),

@@ -14,7 +14,6 @@ export function AppShell() {
   const navigate = useNavigate();
   const conversations = useAppStore((state) => state.conversations);
   const members = useAppStore((state) => state.members);
-  const chamberByMemberId = useAppStore((state) => state.chamberByMemberId);
   const anyUploadInProgress = useAppStore((state) =>
     Object.values(state.kbUploadProgressByMember).some((rows) => rows.length > 0)
   );
@@ -25,13 +24,15 @@ export function AppShell() {
       return conversations.find((item) => item.id === parts[2]);
     }
     if (parts[1] === 'chamber' && parts[2] === 'member' && parts[3]) {
-      return chamberByMemberId[parts[3]];
+      return conversations
+        .filter((item) => item.kind === 'chamber' && item.chamberMemberId === parts[3] && !item.deletedAt)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     }
     if (parts[1] === 'chamber' && parts[2]) {
       return conversations.find((item) => item.id === parts[2]);
     }
     return undefined;
-  }, [chamberByMemberId, conversations, location.pathname]);
+  }, [conversations, location.pathname]);
 
   const headerMeta = useMemo(() => {
     if (activeConversation) {
@@ -40,8 +41,8 @@ export function AppShell() {
           ? members.find((item) => item.id === activeConversation.chamberMemberId)
           : undefined;
         return {
-          title: chamberMember ? `Chamber · ${chamberMember.name}` : 'Chamber',
-          subtitle: '',
+          title: activeConversation.title,
+          subtitle: chamberMember?.name ?? 'Chamber',
           showParticipants: true,
         };
       }

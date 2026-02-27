@@ -37,4 +37,5 @@ export interface CompactConversationResult {
 export interface ChamberApplicationService {
   chatWithMember(input: ChatWithMemberInput): Promise<ChatWithMemberResult>;
   compactConversation(input: CompactConversationInput): Promise<CompactConversationResult>;
+  suggestChamberTitle(input: { message: string; model?: string }): Promise<{ title: string; model: string }>;
 }

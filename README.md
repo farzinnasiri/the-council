@@ -13,7 +13,7 @@ Hall + Chamber advisory chat app with:
 
 - Halls are created lazily from `/hall/new` on first send.
 - Hall routing is one-off per hall: first routed turn chooses participants, later turns use active hall participants.
-- Chambers are member-centric (`/chamber/member/:memberId`) and created lazily on first send.
+- Chambers support multiple threads per member. `/chamber/member/:memberId` opens the latest thread, and `/chamber/:conversationId` is the canonical thread route.
 - Hall member replies are generated in parallel and rendered progressively as they arrive.
 - Member avatars support crop/upload via `react-easy-crop`; create flow stages avatar and applies it after first save.
 

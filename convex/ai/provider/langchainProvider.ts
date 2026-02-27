@@ -1,6 +1,6 @@
 'use node';
 
-import { runHallTitleGraph } from '../graphs/hallTitleGraph';
+import { runChamberTitleGraph, runHallTitleGraph } from '../graphs/hallTitleGraph';
 import { runKBDigestGraph } from '../graphs/kbDigestGraph';
 import { runMemberChatGraph } from '../graphs/memberChatGraph';
 import { runRoundIntentGraph } from '../graphs/roundIntentGraph';
@@ -28,6 +28,10 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
 
   async suggestHallTitle(input: { message: string; model?: string }): Promise<{ title: string; model: string }> {
     return await runHallTitleGraph(input);
+  }
+
+  async suggestChamberTitle(input: { message: string; model?: string }): Promise<{ title: string; model: string }> {
+    return await runChamberTitleGraph(input);
   }
 
   async suggestMemberSpecialties(input: {

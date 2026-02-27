@@ -28,6 +28,7 @@ import {
   retryKbDocumentIndexing,
   retryKbDocumentMetadata,
   routeHallMembers,
+  suggestChamberTitle,
   setRoundtableSelections,
   startKbDocumentProcessing,
   suggestHallTitle,
@@ -60,7 +61,6 @@ interface AppState {
   kbDeletingDocumentIds: Record<string, boolean>;
   kbRetryingIndexDocumentIds: Record<string, boolean>;
   kbRetryingMetadataDocumentIds: Record<string, boolean>;
-  chamberByMemberId: Record<string, Conversation>;
   chamberMemoryByConversation: Record<string, string>;
   hallParticipantsByConversation: Record<string, string[]>;
   roundtableStateByConversation: Record<string, RoundtableState | null>;
@@ -85,10 +85,11 @@ interface AppState {
   syncHallRoundSummaries: (conversationId: string) => Promise<void>;
   evaluateChamberCompactionOnLoad: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
-  renameHallConversation: (conversationId: string, title: string) => Promise<void>;
-  archiveHallConversation: (conversationId: string) => Promise<void>;
-  createChamberForMember: (memberId: string) => Promise<Conversation>;
-  getChamberForMember: (memberId: string) => Conversation | undefined;
+  renameConversation: (conversationId: string, title: string) => Promise<void>;
+  archiveConversation: (conversationId: string) => Promise<void>;
+  createChamberThread: (memberId: string) => Promise<Conversation>;
+  listChamberThreadsForMember: (memberId: string) => Conversation[];
+  getLatestChamberThreadForMember: (memberId: string) => Conversation | undefined;
   sendHallDraftMessage: (
     text: string,
     hallMode?: 'advisory' | 'roundtable',
@@ -116,7 +117,7 @@ interface AppState {
   continueRoundtableRound: (conversationId: string) => Promise<void>;
   addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
   removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
-  clearChamberHistory: (conversationId: string) => Promise<void>;
+  clearChamberByMember: (memberId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
@@ -131,7 +132,7 @@ interface AppState {
 
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
 type ConversationPatch = Partial<Conversation> | ((conversation: Conversation) => Conversation);
-type ConversationStateSlice = Pick<AppState, 'conversations' | 'chamberByMemberId'>;
+type ConversationStateSlice = Pick<AppState, 'conversations'>;
 
 function buildMessage(input: BuildMessageInput): Message {
   return {
@@ -147,24 +148,11 @@ function patchConversationEverywhere(
   conversationId: string,
   patch: ConversationPatch
 ): ConversationStateSlice {
-  let nextTarget: Conversation | undefined;
   const conversations = state.conversations.map((item) => {
     if (item.id !== conversationId) return item;
-    nextTarget = typeof patch === 'function' ? patch(item) : { ...item, ...patch };
-    return nextTarget;
+    return typeof patch === 'function' ? patch(item) : { ...item, ...patch };
   });
-
-  if (!nextTarget || nextTarget.kind !== 'chamber' || !nextTarget.chamberMemberId) {
-    return { conversations, chamberByMemberId: state.chamberByMemberId };
-  }
-
-  return {
-    conversations,
-    chamberByMemberId: {
-      ...state.chamberByMemberId,
-      [nextTarget.chamberMemberId]: nextTarget,
-    },
-  };
+  return { conversations };
 }
 
 function updateConversationStamp(
@@ -177,6 +165,27 @@ function updateConversationStamp(
     updatedAt: now,
     ...(includeMessageActivity ? { lastMessageAt: now } : {}),
   });
+}
+
+function listChamberThreadsForMember(
+  conversations: Conversation[],
+  memberId: string
+): Conversation[] {
+  return conversations
+    .filter(
+      (conversation) =>
+        conversation.kind === 'chamber' &&
+        conversation.chamberMemberId === memberId &&
+        !conversation.deletedAt
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function getLatestChamberThreadForMember(
+  conversations: Conversation[],
+  memberId: string
+): Conversation | undefined {
+  return listChamberThreadsForMember(conversations, memberId)[0];
 }
 
 function buildMemberContextWindow(
@@ -484,7 +493,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   kbDeletingDocumentIds: {},
   kbRetryingIndexDocumentIds: {},
   kbRetryingMetadataDocumentIds: {},
-  chamberByMemberId: {},
   chamberMemoryByConversation: {},
   hallParticipantsByConversation: {},
   roundtableStateByConversation: {},
@@ -517,7 +525,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       themeMode: snapshot.themeMode,
       members: snapshot.members,
       conversations,
-      chamberByMemberId: snapshot.chamberMap,
       chamberMemoryByConversation: {},
       roundtableStateByConversation: {},
       roundtablePreparingByConversation: {},
@@ -994,7 +1001,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createConversation: async (type) => {
     if (type !== 'hall') {
-      throw new Error('Use createChamberForMember for chamber conversations');
+      throw new Error('Use createChamberThread for chamber conversations');
     }
 
     const created = await councilRepository.createHall({
@@ -1014,10 +1021,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     return created;
   },
 
-  renameHallConversation: async (conversationId, title) => {
+  renameConversation: async (conversationId, title) => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const updated = await councilRepository.renameHall(conversationId, trimmed);
+    const updated = await councilRepository.renameConversation(conversationId, trimmed);
     set((state) => ({
       conversations: state.conversations.map((item) =>
         item.id === conversationId ? updated : item
@@ -1025,8 +1032,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
-  archiveHallConversation: async (conversationId) => {
-    await councilRepository.archiveHall(conversationId);
+  archiveConversation: async (conversationId) => {
+    await councilRepository.archiveConversation(conversationId);
     set((state) => {
       const nextConversations = state.conversations.filter((item) => item.id !== conversationId);
       const { [conversationId]: _removed, ...nextParticipants } = state.hallParticipantsByConversation;
@@ -1045,8 +1052,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  createChamberForMember: async (memberId) => {
-    const created = await councilRepository.getOrCreateChamber(memberId);
+  createChamberThread: async (memberId) => {
+    const created = await councilRepository.createChamberThread(memberId);
 
     set((state) => {
       const exists = state.conversations.some((item) => item.id === created.id);
@@ -1054,10 +1061,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         conversations: exists
           ? state.conversations.map((item) => (item.id === created.id ? created : item))
           : [created, ...state.conversations],
-        chamberByMemberId: {
-          ...state.chamberByMemberId,
-          [memberId]: created,
-        },
         selectedConversationId: created.id,
       };
     });
@@ -1065,7 +1068,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     return created;
   },
 
-  getChamberForMember: (memberId) => get().chamberByMemberId[memberId],
+  listChamberThreadsForMember: (memberId) =>
+    listChamberThreadsForMember(get().conversations, memberId),
+  getLatestChamberThreadForMember: (memberId) =>
+    getLatestChamberThreadForMember(get().conversations, memberId),
 
   sendHallDraftMessage: async (
     text,
@@ -1099,7 +1105,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       .then((result) => {
         const nextTitle = result.title?.trim();
         if (!nextTitle || nextTitle.toLowerCase() === 'new hall') return;
-        return get().renameHallConversation(created.id, nextTitle);
+        return get().renameConversation(created.id, nextTitle);
       })
       .catch(() => undefined);
 
@@ -1107,19 +1113,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   sendMessageToChamberMember: async (memberId, text) => {
-    let conversation = get().chamberByMemberId[memberId];
+    let conversation = getLatestChamberThreadForMember(get().conversations, memberId);
     if (!conversation) {
-      conversation = await councilRepository.getOrCreateChamber(memberId);
+      conversation = await councilRepository.createChamberThread(memberId);
       set((state) => {
         const exists = state.conversations.some((item) => item.id === conversation!.id);
         return {
           conversations: exists
             ? state.conversations.map((item) => (item.id === conversation!.id ? conversation! : item))
             : [conversation!, ...state.conversations],
-          chamberByMemberId: {
-            ...state.chamberByMemberId,
-            [memberId]: conversation!,
-          },
           selectedConversationId: conversation!.id,
         };
       });
@@ -1134,6 +1136,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   sendUserMessage: async (conversationId, text, mentionedMemberIds = []) => {
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
+    if (!conversation) return;
+    const shouldAutoTitle =
+      conversation.kind === 'chamber' &&
+      conversation.title.trim().toLowerCase() === 'new thread' &&
+      !conversation.lastMessageAt;
     const nextAdvisoryUserRound =
       state.messages.filter(
         (msg) =>
@@ -1156,7 +1163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     );
     const snapshotRound = state.roundtableStateByConversation[conversationId]?.round.roundNumber ?? 0;
     const hallRoundNumber =
-      conversation?.kind === 'hall'
+      conversation.kind === 'hall'
         ? conversation.hallMode === 'roundtable'
           ? Math.max(0, maxExplicitRound, snapshotRound) + 1
           : Math.max(1, nextAdvisoryUserRound)
@@ -1178,6 +1185,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       conversationId,
       messages: [message],
     });
+
+    if (shouldAutoTitle) {
+      void suggestChamberTitle({ message: text })
+        .then((result) => {
+          const nextTitle = result.title?.trim();
+          if (!nextTitle || nextTitle.toLowerCase() === 'new thread') return;
+          const latest = get().conversations.find((item) => item.id === conversationId);
+          if (!latest || latest.kind !== 'chamber' || latest.deletedAt) return;
+          if (latest.title.trim().toLowerCase() !== 'new thread') return;
+          return get().renameConversation(conversationId, nextTitle);
+        })
+        .catch(() => undefined);
+    }
   },
 
   generateDeterministicReplies: async (
@@ -1653,32 +1673,42 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
-  clearChamberHistory: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
+  clearChamberByMember: async (memberId) => {
+    const targetIds = listChamberThreadsForMember(get().conversations, memberId).map((conversation) => conversation.id);
+    if (targetIds.length === 0) return;
 
-    await councilRepository.clearMessages(conversationId);
-    await councilRepository.clearChamberSummary(conversationId);
+    await councilRepository.clearChamberByMember(memberId);
+    const targetSet = new Set(targetIds);
 
-    set((state) => ({
-      messages: state.messages.filter((message) => message.conversationId !== conversationId),
-      pendingReplyCount: { ...state.pendingReplyCount, [conversationId]: 0 },
-      pendingReplyMemberIds: { ...state.pendingReplyMemberIds, [conversationId]: [] },
-      chamberMemoryByConversation: Object.fromEntries(
-        Object.entries(state.chamberMemoryByConversation).filter(([id]) => id !== conversationId)
-      ),
-      messagePaginationByConversation: {
-        ...state.messagePaginationByConversation,
-        [conversationId]: {
-          oldestLoadedAt: undefined,
-          hasOlder: false,
-          isLoadingOlder: false,
-        },
-      },
-      ...patchConversationEverywhere(state, conversationId, {
-        lastMessageAt: undefined,
-      }),
-    }));
+    set((state) => {
+      const nextConversations = state.conversations.filter((conversation) => !targetSet.has(conversation.id));
+      const nextPendingReplyCount = { ...state.pendingReplyCount };
+      const nextPendingReplyMemberIds = { ...state.pendingReplyMemberIds };
+      const nextCompactionInFlight = { ...state.compactionCheckInFlightByConversation };
+      const nextPagination = { ...state.messagePaginationByConversation };
+
+      for (const id of targetIds) {
+        delete nextPendingReplyCount[id];
+        delete nextPendingReplyMemberIds[id];
+        delete nextCompactionInFlight[id];
+        delete nextPagination[id];
+      }
+
+      return {
+        conversations: nextConversations,
+        messages: state.messages.filter((message) => !targetSet.has(message.conversationId)),
+        pendingReplyCount: nextPendingReplyCount,
+        pendingReplyMemberIds: nextPendingReplyMemberIds,
+        compactionCheckInFlightByConversation: nextCompactionInFlight,
+        chamberMemoryByConversation: Object.fromEntries(
+          Object.entries(state.chamberMemoryByConversation).filter(([id]) => !targetSet.has(id))
+        ),
+        messagePaginationByConversation: nextPagination,
+        selectedConversationId: targetSet.has(state.selectedConversationId)
+          ? (nextConversations[0]?.id ?? '')
+          : state.selectedConversationId,
+      };
+    });
   },
 
   setThemeMode: async (mode) => {

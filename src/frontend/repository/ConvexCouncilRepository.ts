@@ -197,14 +197,13 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async getSnapshot(): Promise<CouncilSnapshot> {
-    const [themeMode, members, conversations, chamberMap] = await Promise.all([
+    const [themeMode, members, conversations] = await Promise.all([
       this.getThemeMode(),
       this.listMembers(true),
       this.listConversations(),
-      this.listChamberMap(),
     ]);
 
-    return { themeMode, members, conversations, chamberMap };
+    return { themeMode, members, conversations };
   }
 
   async getThemeMode(): Promise<ThemeMode> {
@@ -291,6 +290,14 @@ class ConvexCouncilRepository implements CouncilRepository {
     return docs.map(toConversation);
   }
 
+  async listChamberThreadsByMember(memberId: string, includeArchived = false): Promise<Conversation[]> {
+    const docs = await this.clientAny.query('conversations:listChambersByMember', {
+      memberId: memberId as Id<'members'>,
+      includeArchived,
+    });
+    return docs.map(toConversation);
+  }
+
   async createHall(input: CreateHallInput): Promise<Conversation> {
     const payload: Record<string, unknown> = {
       title: input.title,
@@ -320,41 +327,38 @@ class ConvexCouncilRepository implements CouncilRepository {
     }
   }
 
-  async renameHall(conversationId: string, title: string): Promise<Conversation> {
-    const doc = await this.clientAny.mutation('conversations:renameHall', {
+  async renameConversation(conversationId: string, title: string): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:renameConversation', {
       conversationId: conversationId as Id<'conversations'>,
       title,
     });
     return toConversation(doc);
   }
 
-  async archiveHall(conversationId: string): Promise<void> {
-    await this.clientAny.mutation('conversations:archiveHall', {
+  async archiveConversation(conversationId: string): Promise<void> {
+    await this.clientAny.mutation('conversations:archiveConversation', {
       conversationId: conversationId as Id<'conversations'>,
     });
   }
 
-  async getOrCreateChamber(memberId: string): Promise<Conversation> {
-    const doc = await this.clientAny.mutation('conversations:getOrCreateChamber', {
+  async createChamberThread(memberId: string): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:createChamberThread', {
       memberId: memberId as Id<'members'>,
     });
     return toConversation(doc);
   }
 
-  async getChamberByMember(memberId: string): Promise<Conversation | null> {
-    const doc = await this.clientAny.query('conversations:getChamberByMember', {
+  async getLatestChamberThread(memberId: string): Promise<Conversation | null> {
+    const doc = await this.clientAny.query('conversations:getLatestChamberByMember', {
       memberId: memberId as Id<'members'>,
     });
     return doc ? toConversation(doc) : null;
   }
 
-  async listChamberMap(): Promise<Record<string, Conversation>> {
-    const chambers = await this.listChambers();
-    return Object.fromEntries(
-      chambers
-        .filter((conversation) => conversation.chamberMemberId)
-        .map((conversation) => [conversation.chamberMemberId!, conversation])
-    );
+  async clearChamberByMember(memberId: string): Promise<void> {
+    await this.clientAny.mutation('conversations:clearChamberByMember', {
+      memberId: memberId as Id<'members'>,
+    });
   }
 
   async listParticipants(conversationId: string, includeRemoved = false): Promise<ConversationParticipant[]> {
@@ -512,6 +516,13 @@ class ConvexCouncilRepository implements CouncilRepository {
 
   async suggestHallTitle(input: { message: string; model?: string }): Promise<HallTitleResult> {
     return (await this.client.action(api.ai.routing.suggestHallTitle as any, {
+      message: input.message,
+      model: input.model,
+    })) as HallTitleResult;
+  }
+
+  async suggestChamberTitle(input: { message: string; model?: string }): Promise<HallTitleResult> {
+    return (await this.clientAny.action('ai/routing:suggestChamberTitle', {
       message: input.message,
       model: input.model,
     })) as HallTitleResult;

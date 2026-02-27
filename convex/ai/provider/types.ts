@@ -108,6 +108,7 @@ export interface CouncilAiProvider {
   }): Promise<{ chosenMemberIds: string[]; model: string }>;
 
   suggestHallTitle(input: { message: string; model?: string }): Promise<{ title: string; model: string }>;
+  suggestChamberTitle(input: { message: string; model?: string }): Promise<{ title: string; model: string }>;
 
   suggestMemberSpecialties(input: {
     name: string;

@@ -78,6 +78,7 @@ Status: Completed (February 26, 2026)
 - Goal: make introspection/coaching feel continuous and personal, not stateless.
 
 ### 2.4 Chamber Threads with Shared Memory
+Status: Completed (February 27, 2026)
 - Allow multiple chamber threads per member (different subjects/workstreams).
 - Threads must not feel like fresh-start chats every time.
 - Prerequisite: implement durable member identity memory + user memory integration first.
