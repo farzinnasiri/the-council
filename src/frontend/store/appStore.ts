@@ -16,7 +16,7 @@ import {
 import { convexRepository as councilRepository } from '../repository/ConvexCouncilRepository';
 import {
   chatWithMember,
-  chatRoundtableSpeakers,
+  chatRoundtableSpeaker,
   compactConversation,
   createKbDocumentRecord,
   deleteKbDocument,
@@ -65,6 +65,7 @@ interface AppState {
   hallParticipantsByConversation: Record<string, string[]>;
   roundtableStateByConversation: Record<string, RoundtableState | null>;
   roundtablePreparingByConversation: Record<string, boolean>;
+  hallSummaryFailureCountByConversation: Record<string, number>;
   messagePaginationByConversation: Record<
     string,
     {
@@ -236,66 +237,46 @@ function buildHallSystemContext(
   const presentMemberNames = activeParticipants.map((m) => m.name);
   const otherNames = activeParticipants.filter((m) => m.id !== member.id).map((m) => m.name);
 
-  const recentOtherOpinions = rawMessages
+  const latestInteractions = rawMessages
     .filter(
       (msg) =>
         msg.conversationId === conversationId &&
         !msg.compacted &&
-        msg.role === 'member' &&
-        msg.status !== 'error' &&
-        msg.authorMemberId &&
-        msg.authorMemberId !== member.id
+        msg.role !== 'system' &&
+        msg.status !== 'error'
     )
-    .slice(-6)
+    .slice(-10)
     .map((msg) => {
-      const author = activeParticipants.find((m) => m.id === msg.authorMemberId)?.name ?? 'Member';
+      const author =
+        msg.role === 'user'
+          ? 'User'
+          : (activeParticipants.find((m) => m.id === msg.authorMemberId)?.name ?? 'Member');
       return `${author}: ${msg.content}`;
     });
 
-  const modeDescription =
+  const modeLine =
     hallMode === 'roundtable'
-      ? 'This is a roundtable: each round has selected speakers who contribute in turn.'
-      : 'This is an advisory session: multiple members respond directly to the same user turn.';
-  const summaryBlock = roundSummaries.length > 0
-    ? `Prior round summaries:\n${roundSummaries.join('\n\n')}`
-    : 'Prior round summaries: none yet.';
+      ? 'Mode: roundtable (selected speakers contribute each round).'
+      : 'Mode: advisory (multiple members respond to the same user turn).';
 
   return [
-    'You are one member of a live council hall discussion with other members and the user present.',
-    modeDescription,
-    `Present members: ${presentMemberNames.join(', ') || member.name}.`,
+    '[Hall Deliberation Context]',
+    'You are participating in a live council discussion.',
+    modeLine,
+    `Participants: ${presentMemberNames.join(', ') || member.name}.`,
     `Other members currently present: ${otherNames.join(', ') || 'none'}.`,
-    summaryBlock,
-    'You can reference, build on, or challenge other members respectfully as the discussion evolves.',
+    '',
+    '[Completed Round Summaries]',
+    roundSummaries.length > 0 ? roundSummaries.join('\n\n') : '(none yet)',
+    '',
+    '[Latest Interactions]',
+    latestInteractions.length > 0 ? latestInteractions.join('\n') : '(none yet)',
+    '',
+    '[Response Rules]',
+    'Use the context above to align with the ongoing discussion.',
     "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
-    recentOtherOpinions.length > 0
-      ? `Recent member opinions:\n- ${recentOtherOpinions.join('\n- ')}`
-      : 'Recent member opinions: none yet.',
     'Give one concise contribution for this turn unless the user explicitly asks for detailed elaboration.',
   ].join('\n');
-}
-
-function buildHallRoundAssignments(messages: Message[], conversationId: string): Map<string, number> {
-  const assignments = new Map<string, number>();
-  let currentUserRound = 0;
-  const ordered = messages
-    .filter((msg) => msg.conversationId === conversationId && !msg.compacted && msg.status !== 'error')
-    .sort((a, b) => a.createdAt - b.createdAt);
-
-  for (const msg of ordered) {
-    if (msg.role === 'system') continue;
-    if (msg.role === 'user') {
-      currentUserRound += 1;
-      assignments.set(msg.id, currentUserRound);
-      continue;
-    }
-
-    const explicitRound = typeof msg.roundNumber === 'number' ? msg.roundNumber : undefined;
-    const fallbackRound = currentUserRound > 0 ? currentUserRound : 1;
-    assignments.set(msg.id, explicitRound ?? fallbackRound);
-  }
-
-  return assignments;
 }
 
 function stripLeadingSpeakerLabel(text: string, memberName: string): string {
@@ -315,13 +296,69 @@ function stripLeadingSpeakerLabel(text: string, memberName: string): string {
   return text;
 }
 
+function selectOpeningRoundMembers(intents: RoundtableState['intents']): string[] {
+  const nonPass = intents.filter((intent) => intent.intent !== 'pass').map((intent) => intent.memberId);
+  if (nonPass.length > 0) return nonPass;
+  return intents.map((intent) => intent.memberId);
+}
+
+function buildHallRoundAssignments(
+  messages: Message[],
+  conversationId: string,
+  hallMode?: 'advisory' | 'roundtable'
+): Map<string, number> {
+  const ordered = messages
+    .filter((msg) => msg.conversationId === conversationId && !msg.compacted && msg.status !== 'error')
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  if (hallMode === 'roundtable') {
+    const assignments = new Map<string, number>();
+    let fallbackRound = 0;
+
+    for (const msg of ordered) {
+      if (msg.role === 'system') continue;
+      if (typeof msg.roundNumber === 'number') {
+        assignments.set(msg.id, msg.roundNumber);
+        fallbackRound = Math.max(fallbackRound, msg.roundNumber);
+        continue;
+      }
+      if (msg.role === 'user') {
+        fallbackRound += 1;
+        assignments.set(msg.id, Math.max(1, fallbackRound));
+        continue;
+      }
+      assignments.set(msg.id, Math.max(1, fallbackRound || 1));
+    }
+
+    return assignments;
+  }
+
+  const assignments = new Map<string, number>();
+  let currentUserRound = 0;
+  for (const msg of ordered) {
+    if (msg.role === 'system') continue;
+    if (msg.role === 'user') {
+      currentUserRound += 1;
+      assignments.set(msg.id, currentUserRound);
+      continue;
+    }
+
+    const explicitRound = typeof msg.roundNumber === 'number' ? msg.roundNumber : undefined;
+    const fallbackRound = currentUserRound > 0 ? currentUserRound : 1;
+    assignments.set(msg.id, explicitRound ?? fallbackRound);
+  }
+
+  return assignments;
+}
+
 function buildHallRoundAwareContext(options: {
   messages: Message[];
   conversationId: string;
   hallMemoryLogs: ConversationMemoryLog[];
   rawRoundTail: number;
+  hallMode?: 'advisory' | 'roundtable';
 }) {
-  const assignments = buildHallRoundAssignments(options.messages, options.conversationId);
+  const assignments = buildHallRoundAssignments(options.messages, options.conversationId, options.hallMode);
   const maxRound = Math.max(0, ...Array.from(assignments.values()));
   const firstRawRound = Math.max(1, maxRound - Math.max(1, options.rawRoundTail) + 1);
 
@@ -452,6 +489,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   hallParticipantsByConversation: {},
   roundtableStateByConversation: {},
   roundtablePreparingByConversation: {},
+  hallSummaryFailureCountByConversation: {},
   messagePaginationByConversation: {},
   compactionPolicy: COMPACTION_POLICY_DEFAULTS,
 
@@ -781,37 +819,60 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const results = await chatRoundtableSpeakers({
-        conversationId,
-        roundNumber,
-      });
+      const membersById = new Map(get().members.map((member) => [member.id, member]));
+      await Promise.all(
+        selected.map(async (memberId) => {
+          const memberName = membersById.get(memberId)?.name ?? 'Member';
+          let reply: Message;
 
-      const replies = results.map((row) =>
-        buildMessage({
-          conversationId,
-          role: 'member',
-          authorMemberId: row.memberId,
-          content: row.answer,
-          status: row.status,
-          error: row.error,
-          roundNumber,
-          roundIntent: row.intent,
-          roundTargetMemberId: row.targetMemberId,
+          try {
+            const result = await chatRoundtableSpeaker({
+              conversationId,
+              roundNumber,
+              memberId,
+            });
+            reply = buildMessage({
+              conversationId,
+              role: 'member',
+              authorMemberId: memberId,
+              content: stripLeadingSpeakerLabel(result.answer, memberName),
+              status: 'sent',
+              roundNumber,
+              roundIntent: result.intent,
+              roundTargetMemberId: result.targetMemberId,
+            });
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Request failed';
+            reply = buildMessage({
+              conversationId,
+              role: 'member',
+              authorMemberId: memberId,
+              content: `${memberName} could not speak in this round.`,
+              status: 'error',
+              roundNumber,
+              error: errorMessage,
+            });
+          }
+
+          set((state) => ({
+            messages: [...state.messages, reply],
+            ...updateConversationStamp(state, conversationId, true),
+            pendingReplyCount: {
+              ...state.pendingReplyCount,
+              [conversationId]: Math.max(0, (state.pendingReplyCount[conversationId] ?? 1) - 1),
+            },
+            pendingReplyMemberIds: {
+              ...state.pendingReplyMemberIds,
+              [conversationId]: (state.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId),
+            },
+          }));
+
+          await councilRepository.appendMessages({
+            conversationId,
+            messages: [reply],
+          });
         })
       );
-
-      if (replies.length > 0) {
-        set((state) => ({
-          messages: [...state.messages, ...replies],
-          ...updateConversationStamp(state, conversationId, true),
-        }));
-
-        await councilRepository.appendMessages({
-          conversationId,
-          messages: replies,
-        });
-        void get().syncHallRoundSummaries(conversationId);
-      }
 
       await markRoundtableCompleted({
         conversationId,
@@ -823,6 +884,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           [conversationId]: null,
         },
       }));
+      void get().syncHallRoundSummaries(conversationId);
     } catch (error) {
       await get().refreshRoundtableState(conversationId);
     } finally {
@@ -865,7 +927,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       .sort((a, b) => a.createdAt - b.createdAt);
     if (sourceMessages.length === 0) return;
 
-    const assignments = buildHallRoundAssignments(sourceMessages, conversationId);
+    const assignments = buildHallRoundAssignments(
+      sourceMessages,
+      conversationId,
+      conversation.hallMode ?? 'advisory'
+    );
     const maxRound = Math.max(0, ...Array.from(assignments.values()));
     const rawTail = Math.max(1, state.compactionPolicy.hallRawRoundTail);
     const summarizeUntilRound = maxRound - rawTail;
@@ -916,6 +982,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
       } catch {
         // Non-fatal: round context can fall back to raw tail when summary generation fails.
+        set((current) => ({
+          hallSummaryFailureCountByConversation: {
+            ...current.hallSummaryFailureCountByConversation,
+            [conversationId]: (current.hallSummaryFailureCountByConversation[conversationId] ?? 0) + 1,
+          },
+        }));
       }
     }
   },
@@ -1062,7 +1134,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sendUserMessage: async (conversationId, text, mentionedMemberIds = []) => {
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
-    const userRoundCount =
+    const nextAdvisoryUserRound =
       state.messages.filter(
         (msg) =>
           msg.conversationId === conversationId &&
@@ -1070,13 +1142,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           msg.status !== 'error' &&
           !msg.compacted
       ).length + 1;
-    const activeRoundtableRound =
-      conversation?.kind === 'hall' && conversation.hallMode === 'roundtable'
-        ? state.roundtableStateByConversation[conversationId]?.round.roundNumber
-        : undefined;
+    const maxExplicitRound = Math.max(
+      0,
+      ...state.messages
+        .filter(
+          (msg) =>
+            msg.conversationId === conversationId &&
+            msg.status !== 'error' &&
+            !msg.compacted &&
+            typeof msg.roundNumber === 'number'
+        )
+        .map((msg) => msg.roundNumber as number)
+    );
+    const snapshotRound = state.roundtableStateByConversation[conversationId]?.round.roundNumber ?? 0;
     const hallRoundNumber =
       conversation?.kind === 'hall'
-        ? Math.max(1, activeRoundtableRound ?? userRoundCount)
+        ? conversation.hallMode === 'roundtable'
+          ? Math.max(0, maxExplicitRound, snapshotRound) + 1
+          : Math.max(1, nextAdvisoryUserRound)
         : undefined;
     const message = buildMessage({
       conversationId,
@@ -1123,10 +1206,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (conversation.kind === 'hall' && conversation.hallMode === 'roundtable') {
       const membersMap = new Map(state.members.map((m) => [m.id, m]));
       const participantIds = state.hallParticipantsByConversation[conversationId] ?? [];
-      let activeParticipantIds = participantIds;
-      const isFirstRound = activeParticipantIds.length === 0;
+      let activeParticipantIds = participantIds.filter((memberId) => {
+        const member = membersMap.get(memberId);
+        return Boolean(member && !member.deletedAt);
+      });
+      const isOpeningRound = activeParticipantIds.length === 0;
 
-      if (isFirstRound) {
+      if (isOpeningRound) {
         const candidates = state.members.filter((member) => !member.deletedAt);
         let routedIds: string[] = [];
         let routingSource: MessageRouting['source'] = 'fallback';
@@ -1207,101 +1293,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         return;
       }
 
-      if (isFirstRound) {
-        const activeMembers = activeParticipantIds
-          .map((id) => membersMap.get(id))
-          .filter((member): member is Member => Boolean(member && !member.deletedAt));
-
-        set((current) => ({
-          pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: activeParticipantIds.length },
-          pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: activeParticipantIds },
-        }));
-
-        const hallMemoryLogs = await councilRepository.listMemoryLogsByScope(conversationId, 'hall');
-        const contextSourceMessages = get().messages;
-        const hallContextBundle = buildHallRoundAwareContext({
-          messages: contextSourceMessages,
-          conversationId,
-          hallMemoryLogs,
-          rawRoundTail: get().compactionPolicy.hallRawRoundTail,
-        });
-        const replies = await Promise.all(
-          activeParticipantIds.map(async (memberId) => {
-            const member = membersMap.get(memberId);
-            if (!member) {
-              return buildMessage({
-                conversationId,
-                role: 'member',
-                authorMemberId: memberId,
-                content: 'Member unavailable.',
-                status: 'error',
-                error: 'Member not found',
-              });
-            }
-
-            try {
-              const result = await chatWithMember({
-                message: text,
-                memberId: member.id,
-                conversationId,
-                contextMessages: buildMemberContextWindow(
-                  hallContextBundle.rawMessages,
-                  conversationId,
-                  member.id,
-                  conversation.kind,
-                  membersMap
-                ),
-                hallContext: buildHallSystemContext(
-                  member,
-                  activeMembers,
-                  hallContextBundle.rawMessages,
-                  hallContextBundle.roundSummaries,
-                  'roundtable',
-                  conversationId
-                ),
-              });
-
-                return buildMessage({
-                  conversationId,
-                  role: 'member',
-                  authorMemberId: memberId,
-                  content: stripLeadingSpeakerLabel(result.answer, member.name),
-                  status: 'sent',
-                  roundNumber: currentHallRoundNumber,
-                });
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : 'Request failed';
-              return buildMessage({
-                conversationId,
-                role: 'member',
-                authorMemberId: memberId,
-                content: `${member.name} could not speak in this round.`,
-                status: 'error',
-                error: errorMessage,
-              });
-            }
-          })
-        );
-
-        set((current) => ({
-          messages: [...current.messages, ...replies],
-          ...updateConversationStamp(current, conversationId, true),
-          pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
-          pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: [] },
-          roundtableStateByConversation: {
-            ...current.roundtableStateByConversation,
-            [conversationId]: null,
-          },
-        }));
-
-        await councilRepository.appendMessages({
-          conversationId,
-          messages: replies,
-        });
-        await get().syncHallRoundSummaries(conversationId);
-        return;
-      }
-
       set((current) => ({
         roundtablePreparingByConversation: {
           ...current.roundtablePreparingByConversation,
@@ -1315,13 +1306,33 @@ export const useAppStore = create<AppState>((set, get) => ({
           trigger: 'user_message',
           mentionedMemberIds: mentionedMemberIds.filter((memberId) => activeParticipantIds.includes(memberId)),
         });
+        let effectiveRound = nextRound;
+
+        if (isOpeningRound) {
+          const autoSelectedIds = selectOpeningRoundMembers(nextRound.intents);
+          if (autoSelectedIds.length > 0) {
+            effectiveRound = await setRoundtableSelections({
+              conversationId,
+              roundNumber: nextRound.round.roundNumber,
+              selectedMemberIds: autoSelectedIds,
+            });
+          }
+        }
 
         set((current) => ({
           roundtableStateByConversation: {
             ...current.roundtableStateByConversation,
-            [conversationId]: nextRound,
+            [conversationId]: effectiveRound,
           },
         }));
+
+        if (
+          isOpeningRound &&
+          effectiveRound.round.status === 'awaiting_user' &&
+          effectiveRound.intents.some((intent) => intent.selected)
+        ) {
+          void get().startRoundtableRound(conversationId);
+        }
       } finally {
         set((current) => ({
           roundtablePreparingByConversation: {
@@ -1497,6 +1508,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           conversationId,
           hallMemoryLogs: await councilRepository.listMemoryLogsByScope(conversationId, 'hall'),
           rawRoundTail: get().compactionPolicy.hallRawRoundTail,
+          hallMode: conversation.hallMode ?? 'advisory',
         })
         : null;
     const replyTasks = memberIds.map(async (memberId) => {

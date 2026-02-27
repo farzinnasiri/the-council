@@ -19,6 +19,7 @@ import type * as ai_graphs_specialtiesGraph from "../ai/graphs/specialtiesGraph.
 import type * as ai_graphs_summaryGraph from "../ai/graphs/summaryGraph.js";
 import type * as ai_graphs_types from "../ai/graphs/types.js";
 import type * as ai_graphs_utils from "../ai/graphs/utils.js";
+import type * as ai_hallMemoryPolicy from "../ai/hallMemoryPolicy.js";
 import type * as ai_kbIngest from "../ai/kbIngest.js";
 import type * as ai_knowledge from "../ai/knowledge.js";
 import type * as ai_modelConfig from "../ai/modelConfig.js";
@@ -55,6 +56,7 @@ import type * as contexts_hall_contracts from "../contexts/hall/contracts.js";
 import type * as contexts_hall_domain_hallMode from "../contexts/hall/domain/hallMode.js";
 import type * as contexts_hall_domain_hallPrompt from "../contexts/hall/domain/hallPrompt.js";
 import type * as contexts_hall_infrastructure_membersRepo from "../contexts/hall/infrastructure/membersRepo.js";
+import type * as contexts_hall_infrastructure_memoryRepo from "../contexts/hall/infrastructure/memoryRepo.js";
 import type * as contexts_hall_infrastructure_messagesRepo from "../contexts/hall/infrastructure/messagesRepo.js";
 import type * as contexts_hall_infrastructure_participantsRepo from "../contexts/hall/infrastructure/participantsRepo.js";
 import type * as contexts_hall_infrastructure_roundtableRepo from "../contexts/hall/infrastructure/roundtableRepo.js";
@@ -106,6 +108,7 @@ declare const fullApi: ApiFromModules<{
   "ai/graphs/summaryGraph": typeof ai_graphs_summaryGraph;
   "ai/graphs/types": typeof ai_graphs_types;
   "ai/graphs/utils": typeof ai_graphs_utils;
+  "ai/hallMemoryPolicy": typeof ai_hallMemoryPolicy;
   "ai/kbIngest": typeof ai_kbIngest;
   "ai/knowledge": typeof ai_knowledge;
   "ai/modelConfig": typeof ai_modelConfig;
@@ -142,6 +145,7 @@ declare const fullApi: ApiFromModules<{
   "contexts/hall/domain/hallMode": typeof contexts_hall_domain_hallMode;
   "contexts/hall/domain/hallPrompt": typeof contexts_hall_domain_hallPrompt;
   "contexts/hall/infrastructure/membersRepo": typeof contexts_hall_infrastructure_membersRepo;
+  "contexts/hall/infrastructure/memoryRepo": typeof contexts_hall_infrastructure_memoryRepo;
   "contexts/hall/infrastructure/messagesRepo": typeof contexts_hall_infrastructure_messagesRepo;
   "contexts/hall/infrastructure/participantsRepo": typeof contexts_hall_infrastructure_participantsRepo;
   "contexts/hall/infrastructure/roundtableRepo": typeof contexts_hall_infrastructure_roundtableRepo;

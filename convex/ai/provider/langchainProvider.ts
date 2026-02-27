@@ -6,7 +6,7 @@ import { runMemberChatGraph } from '../graphs/memberChatGraph';
 import { runRoundIntentGraph } from '../graphs/roundIntentGraph';
 import { runRouteMembersGraph } from '../graphs/routeMembersGraph';
 import { runSpecialtiesGraph } from '../graphs/specialtiesGraph';
-import { runChamberSummaryGraph, runSummaryGraph } from '../graphs/summaryGraph';
+import { runChamberSummaryGraph, runHallRoundSummaryGraph, runSummaryGraph } from '../graphs/summaryGraph';
 import type {
   CouncilAiProvider,
   CouncilContextMessage,
@@ -71,6 +71,14 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     model?: string;
   }): Promise<string> {
     return await runChamberSummaryGraph(input);
+  }
+
+  async summarizeHallRound(input: {
+    roundNumber: number;
+    messages: Array<{ author: string; content: string }>;
+    model?: string;
+  }): Promise<string> {
+    return await runHallRoundSummaryGraph(input);
   }
 
   async summarizeDocumentDigest(input: {

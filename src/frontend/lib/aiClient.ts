@@ -71,6 +71,33 @@ interface MemberChatResult {
   };
 }
 
+function logCouncilDebug(memberId: string, debug: MemberChatResult['debug'] | undefined) {
+  if (!debug) return;
+  const trace = debug.traceId;
+  console.groupCollapsed(`[Council Debug][${trace}] member:${memberId} (${debug.mode})`);
+  console.log('Raw Debug Payload', debug);
+  if (debug.kbCheck) {
+    console.log('KB Check', debug.kbCheck);
+    if (debug.kbCheck.gateDecision) {
+      console.log('KB Gate Decision', debug.kbCheck.gateDecision);
+    }
+  }
+  if (debug.queryPlan) {
+    console.log('Query Plan', debug.queryPlan);
+  }
+  if (debug.fileSearchStart) {
+    console.log('File Search Request', debug.fileSearchStart);
+  }
+  if (debug.fileSearchResponse) {
+    console.log('File Search Response', debug.fileSearchResponse);
+  }
+  console.log('Chat Model Prompt', debug.answerPrompt);
+  if (debug.reason) {
+    console.log('Fallback Reason', debug.reason);
+  }
+  console.groupEnd();
+}
+
 export async function uploadFileToConvexStorage(
   file: File,
   onProgress?: (payload: { loaded: number; total: number; progress: number }) => void
@@ -249,30 +276,7 @@ export async function chatWithMember(input: {
     hallContext: input.hallContext ?? undefined,
   });
 
-  if (result.debug) {
-    const trace = result.debug.traceId;
-    console.groupCollapsed(`[Council Debug][${trace}] member:${input.memberId} (${result.debug.mode})`);
-    if (result.debug.kbCheck) {
-      console.log('KB Check', result.debug.kbCheck);
-      if (result.debug.kbCheck.gateDecision) {
-        console.log('KB Gate Decision', result.debug.kbCheck.gateDecision);
-      }
-    }
-    if (result.debug.queryPlan) {
-      console.log('Query Plan', result.debug.queryPlan);
-    }
-    if (result.debug.fileSearchStart) {
-      console.log('File Search Request', result.debug.fileSearchStart);
-    }
-    if (result.debug.fileSearchResponse) {
-      console.log('File Search Response', result.debug.fileSearchResponse);
-    }
-    console.log('Chat Model Prompt', result.debug.answerPrompt);
-    if (result.debug.reason) {
-      console.log('Fallback Reason', result.debug.reason);
-    }
-    console.groupEnd();
-  }
+  logCouncilDebug(input.memberId, result.debug);
 
   return result;
 }
@@ -317,7 +321,21 @@ export async function chatRoundtableSpeaker(input: {
   roundNumber: number;
   memberId: string;
 }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
-  return await convexRepository.chatRoundtableSpeaker(input);
+  const result = await convexRepository.chatRoundtableSpeaker(input);
+  if (result.debug) {
+    logCouncilDebug(input.memberId, result.debug);
+  } else {
+    console.groupCollapsed(`[Council Debug][roundtable-no-debug] member:${input.memberId} (roundtable)`);
+    console.log('Roundtable debug payload missing from backend response.');
+    console.log('Raw Roundtable Response', result);
+    console.log('Conversation', input.conversationId);
+    console.log('Round', input.roundNumber);
+    console.log('Intent', result.intent);
+    console.log('Model', result.model);
+    console.log('Retrieval Model', result.retrievalModel);
+    console.groupEnd();
+  }
+  return result;
 }
 
 export async function chatRoundtableSpeakers(input: {

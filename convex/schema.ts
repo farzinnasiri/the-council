@@ -98,7 +98,8 @@ export default defineSchema({
   conversationMemoryLogs: defineTable({
     userId: v.id('users'),
     conversationId: v.id('conversations'),
-    scope: v.literal('chamber'),
+    scope: v.union(v.literal('chamber'), v.literal('hall')),
+    roundNumber: v.optional(v.number()),
     memory: v.optional(v.string()),
     totalMessagesAtRun: v.number(),
     activeMessagesAtRun: v.number(),

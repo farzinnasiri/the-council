@@ -127,6 +127,7 @@ export interface CouncilAiProvider {
     metadataFilter?: string;
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
+    includeConversationContext?: boolean;
     useKnowledgeBase?: boolean;
   }): Promise<ProviderChatResponse>;
 
@@ -141,6 +142,12 @@ export interface CouncilAiProvider {
     previousSummary?: string;
     memberName: string;
     memberSpecialties?: string[];
+    model?: string;
+  }): Promise<string>;
+
+  summarizeHallRound(input: {
+    roundNumber: number;
+    messages: Array<{ author: string; content: string }>;
     model?: string;
   }): Promise<string>;
 

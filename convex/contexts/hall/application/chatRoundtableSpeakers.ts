@@ -4,7 +4,7 @@ import type { Id } from '../../../_generated/dataModel';
 import { ensureMemberStore } from '../../../ai/kbIngest';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
 import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
-import { createAiProvider, createKnowledgeRetriever, toKBDigestHints } from '../../shared/convexGateway';
+import { createAiProvider, createKnowledgeRetriever, toKBDigestHints, withTimeout } from '../../shared/convexGateway';
 import type { MemberListRow, MessageRow, RoundIntentRow, RoundtableSpeakerResult } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
 import { buildContextMessages, buildHallSystemPrompt } from '../domain/hallPrompt';
@@ -29,6 +29,15 @@ interface RunRoundtableSpeakerOptions {
   retrievalModel?: string;
   chatModel?: string;
 }
+
+export interface RoundtableSpeakerContribution extends RoundtableSpeakerResult {
+  debug?: unknown;
+  model?: string;
+  retrievalModel?: string;
+  usedKnowledgeBase?: boolean;
+}
+
+const ROUND_SPEAKER_TIMEOUT_MS = 45_000;
 
 function stripLeadingSpeakerLabel(text: string, memberName: string): string {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -91,7 +100,7 @@ export function buildRoundtableHallContext(options: {
 
 export async function runRoundtableSpeakerContribution(
   options: RunRoundtableSpeakerOptions
-): Promise<RoundtableSpeakerResult> {
+): Promise<RoundtableSpeakerContribution> {
   const ensured = await ensureMemberStore(options.ctx, options.memberId);
   const member = ensured.member;
   const effectiveStoreName = ensured.storeName;
@@ -128,30 +137,35 @@ export async function runRoundtableSpeakerContribution(
 
   try {
     const provider = createAiProvider();
-    const result = await provider.chatMember({
-      query: roundPrompt,
-      storeName: effectiveStoreName,
-      knowledgeRetriever: createKnowledgeRetriever(options.ctx, options.memberId),
-      memoryHint: undefined,
-      kbDigests: toKBDigestHints(kbDigests),
-      responseModel: options.chatModel,
-      retrievalModel: options.retrievalModel,
-      temperature: 0.35,
-      personaPrompt: buildHallSystemPrompt({
-        member,
-        participants: options.activeMembers,
-        hallMode: 'roundtable',
-        roundSummaries: options.roundSummaries,
-        rawMessages: options.rawContextMessages,
-        conversationId: options.conversationId,
+    const result = await withTimeout(
+      provider.chatMember({
+        query: roundPrompt,
+        storeName: effectiveStoreName,
+        knowledgeRetriever: createKnowledgeRetriever(options.ctx, options.memberId),
+        memoryHint: undefined,
+        kbDigests: toKBDigestHints(kbDigests),
+        responseModel: options.chatModel,
+        retrievalModel: options.retrievalModel,
+        temperature: 0.35,
+        personaPrompt: buildHallSystemPrompt({
+          member,
+          participants: options.activeMembers,
+          hallMode: 'roundtable',
+          roundSummaries: options.roundSummaries,
+          rawMessages: options.rawContextMessages,
+          conversationId: options.conversationId,
+        }),
+        contextMessages: buildContextMessages({
+          messages: options.rawContextMessages,
+          membersById: options.membersById,
+          selfMemberId: options.memberId,
+          omitLatestUserMessage: true,
+        }),
+        includeConversationContext: false,
+        useKnowledgeBase: true,
       }),
-      contextMessages: buildContextMessages({
-        messages: options.rawContextMessages,
-        membersById: options.membersById,
-        selfMemberId: options.memberId,
-      }),
-      useKnowledgeBase: true,
-    });
+      ROUND_SPEAKER_TIMEOUT_MS,
+    );
 
     return {
       memberId: options.memberId,
@@ -159,6 +173,10 @@ export async function runRoundtableSpeakerContribution(
       answer: stripLeadingSpeakerLabel(result.answer, member.name),
       intent: effectiveIntent,
       targetMemberId: options.intentRow.targetMemberId,
+      debug: result.debug,
+      model: result.model,
+      retrievalModel: result.retrievalModel,
+      usedKnowledgeBase: result.usedKnowledgeBase,
       error: undefined,
     };
   } catch (error) {
@@ -249,5 +267,14 @@ export async function chatRoundtableSpeakersUseCase(
     )
   );
 
-  return { results };
+  return {
+    results: results.map((result) => ({
+      memberId: result.memberId,
+      status: result.status,
+      answer: result.answer,
+      intent: result.intent,
+      targetMemberId: result.targetMemberId,
+      error: result.error,
+    })),
+  };
 }

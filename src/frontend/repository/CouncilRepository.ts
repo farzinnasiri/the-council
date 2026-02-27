@@ -180,6 +180,16 @@ export interface CouncilRepository {
   ): Promise<{ messages: Message[]; hasMore: boolean }>;
   getMessageCounts(conversationId: string): Promise<{ totalNonSystem: number; activeNonSystem: number }>;
   getLatestChamberMemoryLog(conversationId: string): Promise<ConversationMemoryLog | null>;
+  listMemoryLogsByScope(conversationId: string, scope: 'chamber' | 'hall'): Promise<ConversationMemoryLog[]>;
+  upsertHallRoundSummary(input: {
+    conversationId: string;
+    roundNumber: number;
+    memory: string;
+    recentRawTail: number;
+    totalMessagesAtRun: number;
+    activeMessagesAtRun: number;
+    compactedMessageCount: number;
+  }): Promise<void>;
   getCompactionPolicy(): Promise<CompactionPolicyConfig>;
   appendMessages(input: AppendMessagesInput): Promise<void>;
   clearMessages(conversationId: string): Promise<void>;
@@ -266,6 +276,12 @@ export interface CouncilRepository {
       memberName: string;
       memberSpecialties: string[];
     };
+  }): Promise<{ summary: string }>;
+  summarizeHallRound(input: {
+    conversationId: string;
+    roundNumber: number;
+    messages: Array<{ author: string; content: string }>;
+    model?: string;
   }): Promise<{ summary: string }>;
   ensureMemberStore(input: { memberId: string }): Promise<{ storeName: string; created: boolean }>;
   createKbDocumentRecord(input: {

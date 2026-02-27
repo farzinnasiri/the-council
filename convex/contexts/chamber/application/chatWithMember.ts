@@ -18,11 +18,19 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     throw new Error('Member does not match chamber conversation');
   }
 
-  const summaryBlock = args.previousSummary?.trim()
-    ? `\n\n---\nConversation summary so far:\n${args.previousSummary.trim()}\n---`
+  const hallBlock = args.hallContext?.trim()
+    ? `[Hall Context Addendum]\n${args.hallContext.trim()}`
     : '';
-  const hallBlock = args.hallContext?.trim() ? `${args.hallContext.trim()}\n\n` : '';
-  const effectiveSystemPrompt = hallBlock + member.systemPrompt + summaryBlock;
+  const summaryBlock = args.previousSummary?.trim()
+    ? `[Conversation Memory]\n${args.previousSummary.trim()}`
+    : '';
+  const effectiveSystemPrompt = [
+    member.systemPrompt.trim(),
+    hallBlock,
+    summaryBlock,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const kbDigests = member.deletedAt ? [] : await listMemberDigests(ctx, args.memberId);
 
@@ -38,5 +46,6 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     temperature: 0.35,
     personaPrompt: effectiveSystemPrompt,
     contextMessages: (args.contextMessages ?? []).slice(-12),
+    includeConversationContext: args.hallContext?.trim() ? false : true,
   });
 }

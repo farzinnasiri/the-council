@@ -72,6 +72,12 @@ export function HallPage() {
 
   const roundtableState = roundtableStateByConversation[conversation.id] ?? null;
   const isPreRoundPreparing = roundtablePreparingByConversation[conversation.id] ?? false;
+  const pendingRoundNumber =
+    conversation.hallMode === 'roundtable' &&
+      roundtableState &&
+      (roundtableState.round.status === 'awaiting_user' || roundtableState.round.status === 'in_progress')
+      ? roundtableState.round.roundNumber
+      : undefined;
   const roundtablePanel =
     conversation.hallMode === 'roundtable' ? (
       <RoundtablePanel
@@ -90,6 +96,9 @@ export function HallPage() {
   return (
     <ChatScreen
       messages={messages}
+      conversationKind="hall"
+      hallMode={conversation.hallMode ?? 'advisory'}
+      pendingRoundNumber={pendingRoundNumber}
       isRouting={isRouting && routingConversationId === conversation.id}
       typingMembers={typingMembers}
       isSending={isSending}

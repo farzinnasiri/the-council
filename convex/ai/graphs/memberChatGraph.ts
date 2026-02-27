@@ -48,6 +48,7 @@ export interface MemberChatInput {
   metadataFilter?: string;
   personaPrompt?: string;
   contextMessages?: ContextMessage[];
+  includeConversationContext?: boolean;
   useKnowledgeBase?: boolean;
 }
 
@@ -317,7 +318,7 @@ async function rewriteKnowledgeQuery(state: MemberChatState): Promise<QueryRewri
     `Original user question: ${state.input.query}`,
     '',
     'Recent conversation:',
-    contextBlock || '(none)',
+    state.input.includeConversationContext === false ? '(omitted by caller)' : (contextBlock || '(none)'),
     '',
     'Chamber memory hint:',
     state.input.memoryHint?.slice(0, 500) || '(none)',
@@ -472,9 +473,9 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
 
       const answerPrompt = [
         personaPrompt,
-        '',
-        'Conversation so far:',
-        formatContextMessages(state.input.contextMessages ?? [], 10) || '(none)',
+        ...(state.input.includeConversationContext === false
+          ? []
+          : ['', 'Conversation so far:', formatContextMessages(state.input.contextMessages ?? [], 10) || '(none)']),
         '',
         `Current user question: ${state.input.query}`,
         '',
@@ -502,9 +503,9 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
 
       const answerPrompt = [
         personaPrompt,
-        '',
-        'Conversation so far:',
-        formatContextMessages(state.input.contextMessages ?? [], 10) || '(none)',
+        ...(state.input.includeConversationContext === false
+          ? []
+          : ['', 'Conversation so far:', formatContextMessages(state.input.contextMessages ?? [], 10) || '(none)']),
         '',
         `User question: ${state.input.query}`,
       ].join('\n');

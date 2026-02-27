@@ -21,6 +21,8 @@ export function HallDraftPage() {
   return (
     <ChatScreen
       messages={[]}
+      conversationKind="hall"
+      hallMode={hallMode}
       isRouting={false}
       typingMembers={[]}
       placeholder="Ask the Hall..."

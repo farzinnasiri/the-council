@@ -21,6 +21,7 @@ interface TypingMember {
 export function MessageList({
   messages,
   conversationKind,
+  hallMode,
   pendingRoundNumber,
   isRouting,
   typingMembers,
@@ -31,6 +32,7 @@ export function MessageList({
 }: {
   messages: Message[];
   conversationKind?: 'hall' | 'chamber';
+  hallMode?: 'advisory' | 'roundtable';
   pendingRoundNumber?: number;
   isRouting: boolean;
   typingMembers: TypingMember[];
@@ -134,14 +136,31 @@ export function MessageList({
 
     for (const message of messages) {
       let roundNumber: number | null = null;
-      if (typeof message.roundNumber === 'number') {
-        roundNumber = message.roundNumber;
-        lastSeenRound = Math.max(lastSeenRound, message.roundNumber);
-      } else if (message.role === 'user') {
-        roundNumber = lastSeenRound + 1;
-        lastSeenRound = roundNumber;
-      } else if (message.role === 'member') {
-        roundNumber = lastSeenRound > 0 ? lastSeenRound : (pendingRoundNumber && pendingRoundNumber > 0 ? pendingRoundNumber : 1);
+
+      if (hallMode === 'roundtable') {
+        if (typeof message.roundNumber === 'number') {
+          roundNumber = message.roundNumber;
+          lastSeenRound = Math.max(lastSeenRound, message.roundNumber);
+        } else if (message.role === 'user') {
+          // Legacy fallback for older rows that do not have roundNumber.
+          roundNumber = Math.max(1, lastSeenRound + 1);
+          lastSeenRound = roundNumber;
+        } else if (message.role === 'member') {
+          roundNumber = lastSeenRound > 0 ? lastSeenRound : null;
+        }
+      } else {
+        if (typeof message.roundNumber === 'number') {
+          roundNumber = message.roundNumber;
+          lastSeenRound = Math.max(lastSeenRound, message.roundNumber);
+        } else if (message.role === 'user') {
+          roundNumber = lastSeenRound + 1;
+          lastSeenRound = roundNumber;
+        } else if (message.role === 'member') {
+          roundNumber =
+            lastSeenRound > 0
+              ? lastSeenRound
+              : (pendingRoundNumber && pendingRoundNumber > 0 ? pendingRoundNumber : 1);
+        }
       }
 
       if (roundNumber && roundNumber !== renderedRound) {
@@ -161,7 +180,7 @@ export function MessageList({
     }
 
     return items;
-  }, [conversationKind, messages, pendingRoundNumber]);
+  }, [conversationKind, hallMode, messages, pendingRoundNumber]);
 
   return (
     <div

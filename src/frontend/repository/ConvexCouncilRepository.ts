@@ -135,6 +135,7 @@ function toMemoryLog(doc: ConvexMessageDoc): ConversationMemoryLog {
     id: doc._id,
     conversationId: doc.conversationId,
     scope: doc.scope,
+    roundNumber: doc.roundNumber,
     memory: doc.memory,
     totalMessagesAtRun: doc.totalMessagesAtRun,
     activeMessagesAtRun: doc.activeMessagesAtRun,
@@ -413,15 +414,48 @@ class ConvexCouncilRepository implements CouncilRepository {
     return doc ? toMemoryLog(doc) : null;
   }
 
+  async listMemoryLogsByScope(
+    conversationId: string,
+    scope: 'chamber' | 'hall'
+  ): Promise<ConversationMemoryLog[]> {
+    const docs = await this.clientAny.query('memoryLogs:listByConversationScope', {
+      conversationId: conversationId as Id<'conversations'>,
+      scope,
+    });
+    return docs.map(toMemoryLog);
+  }
+
+  async upsertHallRoundSummary(input: {
+    conversationId: string;
+    roundNumber: number;
+    memory: string;
+    recentRawTail: number;
+    totalMessagesAtRun: number;
+    activeMessagesAtRun: number;
+    compactedMessageCount: number;
+  }): Promise<void> {
+    await this.clientAny.mutation('memoryLogs:upsertHallRoundSummary', {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+      memory: input.memory,
+      recentRawTail: input.recentRawTail,
+      totalMessagesAtRun: input.totalMessagesAtRun,
+      activeMessagesAtRun: input.activeMessagesAtRun,
+      compactedMessageCount: input.compactedMessageCount,
+    });
+  }
+
   async getCompactionPolicy(): Promise<CompactionPolicy> {
-    const [thresholdRaw, recentRawTailRaw] = await Promise.all([
+    const [thresholdRaw, recentRawTailRaw, hallRawRoundTailRaw] = await Promise.all([
       this.client.query(api.settings.get, { key: COMPACTION_POLICY_KEYS.threshold }),
       this.client.query(api.settings.get, { key: COMPACTION_POLICY_KEYS.recentRawTail }),
+      this.client.query(api.settings.get, { key: COMPACTION_POLICY_KEYS.hallRawRoundTail }),
     ]);
 
     return {
       threshold: normalizePolicyNumber(thresholdRaw, COMPACTION_POLICY_DEFAULTS.threshold, 1),
       recentRawTail: normalizePolicyNumber(recentRawTailRaw, COMPACTION_POLICY_DEFAULTS.recentRawTail, 1),
+      hallRawRoundTail: normalizePolicyNumber(hallRawRoundTailRaw, COMPACTION_POLICY_DEFAULTS.hallRawRoundTail, 1),
     };
   }
 
@@ -443,6 +477,10 @@ class ConvexCouncilRepository implements CouncilRepository {
         inReplyToMessageId: message.inReplyToMessageId as Id<'messages'> | undefined,
         originConversationId: message.originConversationId as Id<'conversations'> | undefined,
         originMessageId: message.originMessageId as Id<'messages'> | undefined,
+        mentionedMemberIds: message.mentionedMemberIds as Id<'members'>[] | undefined,
+        roundNumber: message.roundNumber,
+        roundIntent: message.roundIntent,
+        roundTargetMemberId: message.roundTargetMemberId as Id<'members'> | undefined,
         error: message.error,
       })),
     });
@@ -624,6 +662,20 @@ class ConvexCouncilRepository implements CouncilRepository {
       messageIds: input.messageIds as Id<'messages'>[],
       memoryScope: input.memoryScope,
       memoryContext: input.memoryContext,
+    })) as { summary: string };
+  }
+
+  async summarizeHallRound(input: {
+    conversationId: string;
+    roundNumber: number;
+    messages: Array<{ author: string; content: string }>;
+    model?: string;
+  }): Promise<{ summary: string }> {
+    return (await this.client.action(api.ai.chat.summarizeHallRound as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+      messages: input.messages,
+      model: input.model,
     })) as { summary: string };
   }
 

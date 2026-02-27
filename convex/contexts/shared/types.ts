@@ -49,6 +49,7 @@ export interface MessageRow {
   content: string;
   status: 'sent' | 'error';
   compacted: boolean;
+  roundNumber?: number;
   deletedAt?: number;
 }
 

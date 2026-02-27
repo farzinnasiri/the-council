@@ -1,14 +1,16 @@
 'use node';
 
 import { resolveModel } from '../../../ai/modelConfig';
+import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
 import { requireAuthUser, requireOwnedConversation, requireOwnedMember } from '../../shared/auth';
 import { normalizeHallMode } from '../domain/hallMode';
 import type { ChatRoundtableSpeakerInput, RoundtableSingleSpeakerResponse } from '../contracts';
+import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
 import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages, listAllMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
 import { getRoundtableState } from '../infrastructure/roundtableRepo';
-import { runRoundtableSpeakerContribution } from './chatRoundtableSpeakers';
+import { buildRoundtableHallContext, runRoundtableSpeakerContribution } from './chatRoundtableSpeakers';
 
 export async function chatRoundtableSpeakerUseCase(
   ctx: any,
@@ -44,11 +46,13 @@ export async function chatRoundtableSpeakerUseCase(
     throw new Error('Member is not selected for this round');
   }
 
-  const [participants, membersById, activeMessages, allMessages] = await Promise.all([
+  const [participants, membersById, activeMessages, allMessages, hallSummaryRows, rawRoundTail] = await Promise.all([
     listActiveParticipants(ctx, args.conversationId),
     loadActiveMembersMap(ctx),
     listActiveMessages(ctx, args.conversationId),
     listAllMessages(ctx, args.conversationId),
+    listHallRoundSummaries(ctx, args.conversationId),
+    resolveHallRawRoundTail(ctx),
   ]);
 
   const activeMembers = participants
@@ -58,6 +62,12 @@ export async function chatRoundtableSpeakerUseCase(
   const latestUserMessage = [...allMessages]
     .reverse()
     .find((message) => message.role === 'user' && message.status !== 'error');
+  const { rawContextMessages, roundSummaries } = buildRoundtableHallContext({
+    activeMessages,
+    hallSummaryRows,
+    roundNumber: args.roundNumber,
+    rawRoundTail,
+  });
 
   const single = await runRoundtableSpeakerContribution({
     ctx,
@@ -66,7 +76,8 @@ export async function chatRoundtableSpeakerUseCase(
     memberId: args.memberId,
     intentRow,
     membersById,
-    activeMessages,
+    rawContextMessages,
+    roundSummaries,
     latestUserMessage,
     activeMembers,
     retrievalModel: args.retrievalModel,
@@ -81,9 +92,10 @@ export async function chatRoundtableSpeakerUseCase(
     answer: single.answer,
     grounded: false,
     citations: [],
-    model: resolveModel('chatResponse', args.chatModel),
-    retrievalModel: resolveModel('retrieval', args.retrievalModel),
-    usedKnowledgeBase: true,
+    model: single.model ?? resolveModel('chatResponse', args.chatModel),
+    retrievalModel: single.retrievalModel ?? resolveModel('retrieval', args.retrievalModel),
+    usedKnowledgeBase: typeof single.usedKnowledgeBase === 'boolean' ? single.usedKnowledgeBase : true,
+    debug: single.debug,
     intent: single.intent,
     targetMemberId: single.targetMemberId,
   };

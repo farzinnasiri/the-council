@@ -8,10 +8,15 @@ export function buildContextMessages(options: {
   messages: MessageRow[];
   membersById: Map<string, MemberListRow>;
   selfMemberId: Id<'members'>;
+  omitLatestUserMessage?: boolean;
 }): CouncilContextMessage[] {
-  return options.messages
-    .filter((message) => message.role !== 'system' && message.status !== 'error')
-    .slice(-12)
+  const sourceMessages = options.messages.filter((message) => message.role !== 'system' && message.status !== 'error');
+  const latestUserMessageId = options.omitLatestUserMessage
+    ? [...sourceMessages].reverse().find((message) => message.role === 'user')?._id
+    : undefined;
+
+  return sourceMessages
+    .filter((message) => !(latestUserMessageId && message._id === latestUserMessageId))
     .map((message) => {
       if (message.role === 'user') {
         return {
@@ -35,7 +40,9 @@ export function buildContextMessages(options: {
 export function buildHallSystemPrompt(options: {
   member: MemberListRow;
   participants: MemberListRow[];
-  messages: MessageRow[];
+  hallMode: 'advisory' | 'roundtable';
+  roundSummaries: string[];
+  rawMessages: MessageRow[];
   conversationId: Id<'conversations'>;
 }): string {
   const presentMemberNames = options.participants.map((member) => member.name);
@@ -43,28 +50,45 @@ export function buildHallSystemPrompt(options: {
     .filter((member) => member._id !== options.member._id)
     .map((member) => member.name);
 
-  const recentOtherOpinions = options.messages
+  const latestInteractions = options.rawMessages
     .filter(
       (message) =>
         message.conversationId === options.conversationId &&
-        message.role === 'member' &&
-        message.status !== 'error' &&
-        message.authorMemberId &&
-        message.authorMemberId !== options.member._id
+        message.role !== 'system' &&
+        message.status !== 'error'
     )
-    .slice(-6)
+    .slice(-10)
     .map((message) => {
-      const author = options.participants.find((item) => item._id === message.authorMemberId)?.name ?? 'Member';
+      const author =
+        message.role === 'user'
+          ? 'User'
+          : (options.participants.find((item) => item._id === message.authorMemberId)?.name ?? 'Member');
       return `${author}: ${message.content}`;
     });
 
-  return [
-    `Hall context: You are ${options.member.name}, one council member in a live hall conversation.`,
-    `Present members: ${presentMemberNames.join(', ') || options.member.name}.`,
+  const modeLine =
+    options.hallMode === 'roundtable'
+      ? 'Mode: roundtable (selected speakers contribute each round).'
+      : 'Mode: advisory (multiple members respond to the same user turn).';
+
+  const hallAddendum = [
+    '[Hall Deliberation Context]',
+    'You are participating in a live council discussion.',
+    modeLine,
+    `Participants: ${presentMemberNames.join(', ') || options.member.name}.`,
     `Other members currently present: ${otherNames.join(', ') || 'none'}.`,
-    'You can reference, build on, or challenge other members respectfully.',
-    recentOtherOpinions.length > 0
-      ? `Recent member opinions:\n- ${recentOtherOpinions.join('\n- ')}`
-      : 'Recent member opinions: none yet.',
+    '',
+    '[Completed Round Summaries]',
+    options.roundSummaries.length > 0 ? options.roundSummaries.join('\n\n') : '(none yet)',
+    '',
+    '[Latest Interactions]',
+    latestInteractions.length > 0 ? latestInteractions.join('\n') : '(none yet)',
+    '',
+    '[Response Rules]',
+    'Use the context above to align with the ongoing discussion.',
+    "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
+    'Give one concise contribution unless the user explicitly asks for detailed elaboration.',
   ].join('\n');
+
+  return [options.member.systemPrompt.trim(), hallAddendum].filter(Boolean).join('\n\n');
 }

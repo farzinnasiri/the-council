@@ -16,6 +16,9 @@ interface TypingMember {
 
 interface ChatScreenProps {
   messages: Message[];
+  conversationKind?: 'hall' | 'chamber';
+  hallMode?: 'advisory' | 'roundtable';
+  pendingRoundNumber?: number;
   isRouting?: boolean;
   typingMembers?: TypingMember[];
   isSending?: boolean;
@@ -36,6 +39,9 @@ interface ChatScreenProps {
 
 export function ChatScreen({
   messages,
+  conversationKind,
+  hallMode,
+  pendingRoundNumber,
   isRouting = false,
   typingMembers = [],
   isSending = false,
@@ -54,6 +60,9 @@ export function ChatScreen({
     <div className="flex h-full min-h-0 flex-col">
       <MessageList
         messages={messages}
+        conversationKind={conversationKind}
+        hallMode={hallMode}
+        pendingRoundNumber={pendingRoundNumber}
         isRouting={isRouting}
         typingMembers={typingMembers}
         hasOlderMessages={hasOlderMessages}

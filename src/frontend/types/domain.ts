@@ -53,7 +53,8 @@ export interface ConversationParticipant {
 export interface ConversationMemoryLog {
   id: string;
   conversationId: string;
-  scope: 'chamber';
+  scope: 'chamber' | 'hall';
+  roundNumber?: number;
   memory?: string;
   totalMessagesAtRun: number;
   activeMessagesAtRun: number;

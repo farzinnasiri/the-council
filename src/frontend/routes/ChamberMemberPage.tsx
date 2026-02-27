@@ -55,6 +55,7 @@ export function ChamberMemberPage() {
   return (
     <ChatScreen
       messages={messages}
+      conversationKind="chamber"
       isRouting={false}
       typingMembers={typingMembers}
       isSending={isSending}

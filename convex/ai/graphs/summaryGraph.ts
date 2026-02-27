@@ -102,3 +102,36 @@ export async function runChamberSummaryGraph(input: {
   const result = (await graph.invoke(input)) as unknown as SummaryState;
   return result.output ?? input.previousSummary ?? '';
 }
+
+export async function runHallRoundSummaryGraph(input: {
+  roundNumber: number;
+  messages: Array<{ author: string; content: string }>;
+  model?: string;
+}): Promise<string> {
+  const target = modelRegistry.resolve('hallMemory', input.model);
+  const model = createChatModel(target, { temperature: 0.1 });
+  const roundTranscript = input.messages
+    .map((item) => `${item.author}: ${item.content}`)
+    .join('\n')
+    .slice(0, 12000);
+
+  const prompt = [
+    'You summarize one completed council hall round.',
+    'Output plain text only (no JSON, no markdown fences).',
+    'Keep it concise and factual.',
+    'Use this exact shape:',
+    `Round ${input.roundNumber}:`,
+    'Member Name: one-line summary of what they argued or changed',
+    'Include disagreement/support signals when present.',
+    'Do not include members who did not speak.',
+    '',
+    'Round transcript:',
+    roundTranscript || '(no transcript)',
+    '',
+    'Write the final round summary now.',
+  ].join('\n');
+
+  const output = await invokeText(model, prompt);
+  const fallback = `Round ${input.roundNumber}:\nMember: (summary unavailable)`;
+  return (output || '').trim() || fallback;
+}
