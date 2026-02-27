@@ -20,6 +20,8 @@ interface TypingMember {
 
 export function MessageList({
   messages,
+  conversationKind,
+  pendingRoundNumber,
   isRouting,
   typingMembers,
   hasOlderMessages,
@@ -28,6 +30,8 @@ export function MessageList({
   emptyState,
 }: {
   messages: Message[];
+  conversationKind?: 'hall' | 'chamber';
+  pendingRoundNumber?: number;
   isRouting: boolean;
   typingMembers: TypingMember[];
   hasOlderMessages?: boolean;
@@ -116,6 +120,49 @@ export function MessageList({
     void onLoadOlder();
   };
 
+  const renderedItems = useMemo(() => {
+    if (conversationKind !== 'hall') {
+      return messages.map((message) => ({ kind: 'message' as const, message }));
+    }
+
+    const items: Array<
+      | { kind: 'message'; message: Message }
+      | { kind: 'round'; roundNumber: number }
+    > = [];
+    let lastSeenRound = 0;
+    let renderedRound: number | null = null;
+
+    for (const message of messages) {
+      let roundNumber: number | null = null;
+      if (typeof message.roundNumber === 'number') {
+        roundNumber = message.roundNumber;
+        lastSeenRound = Math.max(lastSeenRound, message.roundNumber);
+      } else if (message.role === 'user') {
+        roundNumber = lastSeenRound + 1;
+        lastSeenRound = roundNumber;
+      } else if (message.role === 'member') {
+        roundNumber = lastSeenRound > 0 ? lastSeenRound : (pendingRoundNumber && pendingRoundNumber > 0 ? pendingRoundNumber : 1);
+      }
+
+      if (roundNumber && roundNumber !== renderedRound) {
+        items.push({ kind: 'round', roundNumber });
+        renderedRound = roundNumber;
+      }
+
+      items.push({ kind: 'message', message });
+    }
+
+    if (
+      typeof pendingRoundNumber === 'number' &&
+      pendingRoundNumber > 0 &&
+      pendingRoundNumber !== renderedRound
+    ) {
+      items.push({ kind: 'round', roundNumber: pendingRoundNumber });
+    }
+
+    return items;
+  }, [conversationKind, messages, pendingRoundNumber]);
+
   return (
     <div
       ref={containerRef}
@@ -138,9 +185,12 @@ export function MessageList({
           </div>
         ) : null}
 
-        {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
-        ))}
+        {renderedItems.map((item, index) => {
+          if (item.kind === 'round') {
+            return <RoundSeparator key={`round-${item.roundNumber}-${index}`} roundNumber={item.roundNumber} />;
+          }
+          return <MessageBubble key={item.message.id} message={item.message} />;
+        })}
 
         {isRouting ? (
           <div className="mx-auto flex max-w-[88%] items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground animate-fade-in-up">
@@ -180,6 +230,15 @@ export function MessageList({
 
         <div ref={bottomRef} />
       </div>
+    </div>
+  );
+}
+
+function RoundSeparator({ roundNumber }: { roundNumber: number }) {
+  return (
+    <div className="mx-auto flex max-w-[88%] items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground animate-fade-in-up">
+      <span className="h-2 w-2 rounded-full bg-primary" />
+      <span>Round {roundNumber}</span>
     </div>
   );
 }

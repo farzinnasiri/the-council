@@ -2,12 +2,14 @@
 
 import type { Id } from '../../../_generated/dataModel';
 import { ensureMemberStore } from '../../../ai/kbIngest';
+import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
 import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, createKnowledgeRetriever, toKBDigestHints } from '../../shared/convexGateway';
 import type { MemberListRow, MessageRow, RoundIntentRow, RoundtableSpeakerResult } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
 import { buildContextMessages, buildHallSystemPrompt } from '../domain/hallPrompt';
 import type { ChatRoundtableSpeakersInput } from '../contracts';
+import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
 import { listMemberKBDigests, loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages, listAllMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
@@ -20,11 +22,71 @@ interface RunRoundtableSpeakerOptions {
   memberId: Id<'members'>;
   intentRow: RoundIntentRow;
   membersById: Map<string, MemberListRow>;
-  activeMessages: MessageRow[];
+  rawContextMessages: MessageRow[];
+  roundSummaries: string[];
   latestUserMessage?: MessageRow;
   activeMembers: MemberListRow[];
   retrievalModel?: string;
   chatModel?: string;
+}
+
+function stripLeadingSpeakerLabel(text: string, memberName: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const first = (lines[0] ?? '').trim();
+  const normalized = memberName.trim().toLowerCase();
+  const firstLower = first.toLowerCase();
+  if (
+    normalized &&
+    (firstLower === `${normalized}:` ||
+      firstLower === `${normalized} -` ||
+      firstLower === `${normalized} —`)
+  ) {
+    const rest = lines.slice(1).join('\n').trim();
+    return rest || text;
+  }
+  return text;
+}
+
+export function buildRoundtableHallContext(options: {
+  activeMessages: MessageRow[];
+  hallSummaryRows: Array<{ roundNumber?: number; memory?: string }>;
+  roundNumber: number;
+  rawRoundTail: number;
+}): { rawContextMessages: MessageRow[]; roundSummaries: string[] } {
+  const hasRoundNumbers = options.activeMessages.some(
+    (message) => message.role === 'member' && message.status !== 'error' && typeof message.roundNumber === 'number'
+  );
+  const firstRawRound = Math.max(1, options.roundNumber - options.rawRoundTail);
+  const roundSummaries = hasRoundNumbers
+    ? options.hallSummaryRows
+        .filter((row) => typeof row.roundNumber === 'number' && row.roundNumber < firstRawRound)
+        .sort((a, b) => (a.roundNumber ?? 0) - (b.roundNumber ?? 0))
+        .map((row) => row.memory?.trim())
+        .filter((row): row is string => Boolean(row))
+    : [];
+
+  const allowedRecentUserIds = new Set(
+    options.activeMessages
+      .filter((message) => message.role === 'user' && message.status !== 'error')
+      .slice(-options.rawRoundTail)
+      .map((message) => message._id)
+  );
+
+  const rawContextMessages = hasRoundNumbers
+    ? options.activeMessages.filter((message) => {
+        if (message.role === 'system' || message.status === 'error') return false;
+        if (message.role === 'member') {
+          if (typeof message.roundNumber !== 'number') return false;
+          return message.roundNumber >= firstRawRound;
+        }
+        return allowedRecentUserIds.has(message._id);
+      })
+    : options.activeMessages.filter((message) => message.role !== 'system' && message.status !== 'error').slice(-12);
+
+  return {
+    rawContextMessages,
+    roundSummaries,
+  };
 }
 
 export async function runRoundtableSpeakerContribution(
@@ -78,11 +140,13 @@ export async function runRoundtableSpeakerContribution(
       personaPrompt: buildHallSystemPrompt({
         member,
         participants: options.activeMembers,
-        messages: options.activeMessages,
+        hallMode: 'roundtable',
+        roundSummaries: options.roundSummaries,
+        rawMessages: options.rawContextMessages,
         conversationId: options.conversationId,
       }),
       contextMessages: buildContextMessages({
-        messages: options.activeMessages,
+        messages: options.rawContextMessages,
         membersById: options.membersById,
         selfMemberId: options.memberId,
       }),
@@ -92,7 +156,7 @@ export async function runRoundtableSpeakerContribution(
     return {
       memberId: options.memberId,
       status: 'sent',
-      answer: result.answer,
+      answer: stripLeadingSpeakerLabel(result.answer, member.name),
       intent: effectiveIntent,
       targetMemberId: options.intentRow.targetMemberId,
       error: undefined,
@@ -142,11 +206,13 @@ export async function chatRoundtableSpeakersUseCase(
     return { results: [] };
   }
 
-  const [participants, membersById, activeMessages, allMessages] = await Promise.all([
+  const [participants, membersById, activeMessages, allMessages, hallSummaryRows, rawRoundTail] = await Promise.all([
     listActiveParticipants(ctx, args.conversationId),
     loadActiveMembersMap(ctx),
     listActiveMessages(ctx, args.conversationId),
     listAllMessages(ctx, args.conversationId),
+    listHallRoundSummaries(ctx, args.conversationId),
+    resolveHallRawRoundTail(ctx),
   ]);
 
   const activeMembers = participants
@@ -157,6 +223,13 @@ export async function chatRoundtableSpeakersUseCase(
     .reverse()
     .find((message) => message.role === 'user' && message.status !== 'error');
 
+  const { rawContextMessages, roundSummaries } = buildRoundtableHallContext({
+    activeMessages,
+    hallSummaryRows,
+    roundNumber: args.roundNumber,
+    rawRoundTail,
+  });
+
   const results = await Promise.all(
     selectedRows.map((intentRow) =>
       runRoundtableSpeakerContribution({
@@ -166,7 +239,8 @@ export async function chatRoundtableSpeakersUseCase(
         memberId: intentRow.memberId,
         intentRow,
         membersById,
-        activeMessages,
+        rawContextMessages,
+        roundSummaries,
         latestUserMessage,
         activeMembers,
         retrievalModel: args.retrievalModel,

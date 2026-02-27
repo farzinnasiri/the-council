@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   Conversation,
+  ConversationMemoryLog,
   ConversationType,
   Member,
   Message,
@@ -80,6 +81,7 @@ interface AppState {
   loadMessages: (conversationId: string) => Promise<void>;
   loadOlderMessages: (conversationId: string) => Promise<void>;
   refreshHallParticipants: (conversationId: string) => Promise<void>;
+  syncHallRoundSummaries: (conversationId: string) => Promise<void>;
   evaluateChamberCompactionOnLoad: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
   renameHallConversation: (conversationId: string, title: string) => Promise<void>;
@@ -183,7 +185,7 @@ function buildMemberContextWindow(
   conversationKind: Conversation['kind'],
   membersById: Map<string, Member>
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
-  return messages
+  const filtered = messages
     .filter((msg) => {
       if (msg.conversationId !== conversationId) return false;
       if (msg.compacted) return false;
@@ -194,8 +196,11 @@ function buildMemberContextWindow(
         return true;
       }
       return false;
-    })
-    .slice(-12)
+    });
+
+  const scoped = conversationKind === 'hall' ? filtered : filtered.slice(-12);
+
+  return scoped
     .map((msg) => {
       if (msg.role === 'user') {
         return {
@@ -223,13 +228,15 @@ function buildMemberContextWindow(
 function buildHallSystemContext(
   member: Member,
   activeParticipants: Member[],
-  messages: Message[],
-  conversationId: string
+  rawMessages: Message[],
+  roundSummaries: string[],
+  hallMode: 'advisory' | 'roundtable',
+  conversationId: string,
 ): string {
   const presentMemberNames = activeParticipants.map((m) => m.name);
   const otherNames = activeParticipants.filter((m) => m.id !== member.id).map((m) => m.name);
 
-  const recentOtherOpinions = messages
+  const recentOtherOpinions = rawMessages
     .filter(
       (msg) =>
         msg.conversationId === conversationId &&
@@ -245,15 +252,100 @@ function buildHallSystemContext(
       return `${author}: ${msg.content}`;
     });
 
+  const modeDescription =
+    hallMode === 'roundtable'
+      ? 'This is a roundtable: each round has selected speakers who contribute in turn.'
+      : 'This is an advisory session: multiple members respond directly to the same user turn.';
+  const summaryBlock = roundSummaries.length > 0
+    ? `Prior round summaries:\n${roundSummaries.join('\n\n')}`
+    : 'Prior round summaries: none yet.';
+
   return [
-    `Hall context: You are ${member.name}, one council member in a live hall conversation.`,
+    'You are one member of a live council hall discussion with other members and the user present.',
+    modeDescription,
     `Present members: ${presentMemberNames.join(', ') || member.name}.`,
     `Other members currently present: ${otherNames.join(', ') || 'none'}.`,
-    'You can reference, build on, or challenge other members respectfully.',
+    summaryBlock,
+    'You can reference, build on, or challenge other members respectfully as the discussion evolves.',
+    "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
     recentOtherOpinions.length > 0
       ? `Recent member opinions:\n- ${recentOtherOpinions.join('\n- ')}`
       : 'Recent member opinions: none yet.',
+    'Give one concise contribution for this turn unless the user explicitly asks for detailed elaboration.',
   ].join('\n');
+}
+
+function buildHallRoundAssignments(messages: Message[], conversationId: string): Map<string, number> {
+  const assignments = new Map<string, number>();
+  let currentUserRound = 0;
+  const ordered = messages
+    .filter((msg) => msg.conversationId === conversationId && !msg.compacted && msg.status !== 'error')
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  for (const msg of ordered) {
+    if (msg.role === 'system') continue;
+    if (msg.role === 'user') {
+      currentUserRound += 1;
+      assignments.set(msg.id, currentUserRound);
+      continue;
+    }
+
+    const explicitRound = typeof msg.roundNumber === 'number' ? msg.roundNumber : undefined;
+    const fallbackRound = currentUserRound > 0 ? currentUserRound : 1;
+    assignments.set(msg.id, explicitRound ?? fallbackRound);
+  }
+
+  return assignments;
+}
+
+function stripLeadingSpeakerLabel(text: string, memberName: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const first = (lines[0] ?? '').trim();
+  const normalized = memberName.trim().toLowerCase();
+  const firstLower = first.toLowerCase();
+  if (
+    normalized &&
+    (firstLower === `${normalized}:` ||
+      firstLower === `${normalized} -` ||
+      firstLower === `${normalized} —`)
+  ) {
+    const rest = lines.slice(1).join('\n').trim();
+    return rest || text;
+  }
+  return text;
+}
+
+function buildHallRoundAwareContext(options: {
+  messages: Message[];
+  conversationId: string;
+  hallMemoryLogs: ConversationMemoryLog[];
+  rawRoundTail: number;
+}) {
+  const assignments = buildHallRoundAssignments(options.messages, options.conversationId);
+  const maxRound = Math.max(0, ...Array.from(assignments.values()));
+  const firstRawRound = Math.max(1, maxRound - Math.max(1, options.rawRoundTail) + 1);
+
+  const rawMessages = options.messages.filter((msg) => {
+    if (msg.conversationId !== options.conversationId) return false;
+    if (msg.compacted || msg.status === 'error' || msg.role === 'system') return false;
+    const round = assignments.get(msg.id);
+    if (typeof round !== 'number') return true;
+    return round >= firstRawRound;
+  });
+
+  const roundSummaries = options.hallMemoryLogs
+    .filter((row) => row.scope === 'hall' && typeof row.roundNumber === 'number' && row.roundNumber < firstRawRound)
+    .sort((a, b) => (a.roundNumber ?? 0) - (b.roundNumber ?? 0))
+    .map((row) => row.memory?.trim())
+    .filter((row): row is string => Boolean(row));
+
+  return {
+    roundAssignments: assignments,
+    maxRound,
+    firstRawRound,
+    rawMessages,
+    roundSummaries,
+  };
 }
 
 async function maybeCompact(
@@ -718,19 +810,21 @@ export const useAppStore = create<AppState>((set, get) => ({
           conversationId,
           messages: replies,
         });
+        void get().syncHallRoundSummaries(conversationId);
       }
 
-      const completed = await markRoundtableCompleted({
+      await markRoundtableCompleted({
         conversationId,
         roundNumber,
       });
-
       set((state) => ({
         roundtableStateByConversation: {
           ...state.roundtableStateByConversation,
           [conversationId]: null,
         },
       }));
+    } catch (error) {
+      await get().refreshRoundtableState(conversationId);
     } finally {
       set((state) => ({
         pendingReplyCount: {
@@ -753,6 +847,77 @@ export const useAppStore = create<AppState>((set, get) => ({
         [conversationId]: participants.map((participant) => participant.memberId),
       },
     }));
+  },
+
+  syncHallRoundSummaries: async (conversationId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'hall') return;
+
+    const state = get();
+    const sourceMessages = state.messages
+      .filter(
+        (message) =>
+          message.conversationId === conversationId &&
+          !message.compacted &&
+          message.status !== 'error' &&
+          message.role !== 'system'
+      )
+      .sort((a, b) => a.createdAt - b.createdAt);
+    if (sourceMessages.length === 0) return;
+
+    const assignments = buildHallRoundAssignments(sourceMessages, conversationId);
+    const maxRound = Math.max(0, ...Array.from(assignments.values()));
+    const rawTail = Math.max(1, state.compactionPolicy.hallRawRoundTail);
+    const summarizeUntilRound = maxRound - rawTail;
+    if (summarizeUntilRound <= 0) return;
+
+    const [existingLogs, counts] = await Promise.all([
+      councilRepository.listMemoryLogsByScope(conversationId, 'hall'),
+      councilRepository.getMessageCounts(conversationId),
+    ]);
+
+    const existingRounds = new Set(
+      existingLogs
+        .filter((row) => typeof row.roundNumber === 'number' && row.memory)
+        .map((row) => row.roundNumber as number)
+    );
+    const membersById = new Map(get().members.map((member) => [member.id, member]));
+
+    for (let roundNumber = 1; roundNumber <= summarizeUntilRound; roundNumber += 1) {
+      if (existingRounds.has(roundNumber)) continue;
+
+      const roundMessages = sourceMessages.filter((message) => assignments.get(message.id) === roundNumber);
+      const speakerMessages = roundMessages.filter((message) => message.role === 'member');
+      if (speakerMessages.length === 0) continue;
+
+      const transcript = roundMessages.map((message) => ({
+        author:
+          message.role === 'user'
+            ? 'User'
+            : (membersById.get(message.authorMemberId ?? '')?.name ?? 'Member'),
+        content: message.content,
+      }));
+
+      try {
+        const summarized = await councilRepository.summarizeHallRound({
+          conversationId,
+          roundNumber,
+          messages: transcript,
+        });
+
+        await councilRepository.upsertHallRoundSummary({
+          conversationId,
+          roundNumber,
+          memory: summarized.summary,
+          recentRawTail: rawTail,
+          totalMessagesAtRun: counts.totalNonSystem,
+          activeMessagesAtRun: counts.activeNonSystem,
+          compactedMessageCount: roundMessages.length,
+        });
+      } catch {
+        // Non-fatal: round context can fall back to raw tail when summary generation fails.
+      }
+    }
   },
 
   createConversation: async (type) => {
@@ -895,11 +1060,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   sendUserMessage: async (conversationId, text, mentionedMemberIds = []) => {
+    const state = get();
+    const conversation = state.conversations.find((item) => item.id === conversationId);
+    const userRoundCount =
+      state.messages.filter(
+        (msg) =>
+          msg.conversationId === conversationId &&
+          msg.role === 'user' &&
+          msg.status !== 'error' &&
+          !msg.compacted
+      ).length + 1;
+    const activeRoundtableRound =
+      conversation?.kind === 'hall' && conversation.hallMode === 'roundtable'
+        ? state.roundtableStateByConversation[conversationId]?.round.roundNumber
+        : undefined;
+    const hallRoundNumber =
+      conversation?.kind === 'hall'
+        ? Math.max(1, activeRoundtableRound ?? userRoundCount)
+        : undefined;
     const message = buildMessage({
       conversationId,
       role: 'user',
       content: text,
       status: 'sent',
+      roundNumber: hallRoundNumber,
     });
 
     set((state) => ({
@@ -922,6 +1106,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
+    const currentHallRoundNumber =
+      conversation.kind === 'hall'
+        ? Math.max(
+          1,
+          state.messages.filter(
+            (message) =>
+              message.conversationId === conversationId &&
+              message.role === 'user' &&
+              message.status !== 'error' &&
+              !message.compacted
+          ).length
+        )
+        : undefined;
 
     if (conversation.kind === 'hall' && conversation.hallMode === 'roundtable') {
       const membersMap = new Map(state.members.map((m) => [m.id, m]));
@@ -1020,7 +1217,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: activeParticipantIds },
         }));
 
+        const hallMemoryLogs = await councilRepository.listMemoryLogsByScope(conversationId, 'hall');
         const contextSourceMessages = get().messages;
+        const hallContextBundle = buildHallRoundAwareContext({
+          messages: contextSourceMessages,
+          conversationId,
+          hallMemoryLogs,
+          rawRoundTail: get().compactionPolicy.hallRawRoundTail,
+        });
         const replies = await Promise.all(
           activeParticipantIds.map(async (memberId) => {
             const member = membersMap.get(memberId);
@@ -1041,22 +1245,30 @@ export const useAppStore = create<AppState>((set, get) => ({
                 memberId: member.id,
                 conversationId,
                 contextMessages: buildMemberContextWindow(
-                  contextSourceMessages,
+                  hallContextBundle.rawMessages,
                   conversationId,
                   member.id,
                   conversation.kind,
                   membersMap
                 ),
-                hallContext: buildHallSystemContext(member, activeMembers, contextSourceMessages, conversationId),
+                hallContext: buildHallSystemContext(
+                  member,
+                  activeMembers,
+                  hallContextBundle.rawMessages,
+                  hallContextBundle.roundSummaries,
+                  'roundtable',
+                  conversationId
+                ),
               });
 
-              return buildMessage({
-                conversationId,
-                role: 'member',
-                authorMemberId: memberId,
-                content: result.answer,
-                status: 'sent',
-              });
+                return buildMessage({
+                  conversationId,
+                  role: 'member',
+                  authorMemberId: memberId,
+                  content: stripLeadingSpeakerLabel(result.answer, member.name),
+                  status: 'sent',
+                  roundNumber: currentHallRoundNumber,
+                });
             } catch (error) {
               const errorMessage = error instanceof Error ? error.message : 'Request failed';
               return buildMessage({
@@ -1086,6 +1298,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           conversationId,
           messages: replies,
         });
+        await get().syncHallRoundSummaries(conversationId);
         return;
       }
 
@@ -1277,7 +1490,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           .map((id) => membersMap.get(id))
           .filter((member): member is Member => Boolean(member && !member.deletedAt))
       : [];
-
+    const hallContextBundle =
+      conversation.kind === 'hall'
+        ? buildHallRoundAwareContext({
+          messages: get().messages,
+          conversationId,
+          hallMemoryLogs: await councilRepository.listMemoryLogsByScope(conversationId, 'hall'),
+          rawRoundTail: get().compactionPolicy.hallRawRoundTail,
+        })
+        : null;
     const replyTasks = memberIds.map(async (memberId) => {
       const member = membersMap.get(memberId);
       let reply: Message;
@@ -1299,7 +1520,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             conversationId,
             previousSummary: conversation.kind === 'chamber' ? chamberMemory : undefined,
             contextMessages: buildMemberContextWindow(
-              get().messages,
+              conversation.kind === 'hall' ? (hallContextBundle?.rawMessages ?? get().messages) : get().messages,
               conversationId,
               member.id,
               conversation.kind,
@@ -1307,7 +1528,14 @@ export const useAppStore = create<AppState>((set, get) => ({
             ),
             hallContext:
               conversation.kind === 'hall'
-                ? buildHallSystemContext(member, hallParticipants, get().messages, conversationId)
+                ? buildHallSystemContext(
+                  member,
+                  hallParticipants,
+                  hallContextBundle?.rawMessages ?? [],
+                  hallContextBundle?.roundSummaries ?? [],
+                  conversation.hallMode ?? 'advisory',
+                  conversationId,
+                )
                 : undefined,
           });
 
@@ -1315,8 +1543,11 @@ export const useAppStore = create<AppState>((set, get) => ({
             conversationId,
             role: 'member',
             authorMemberId: memberId,
-            content: result.answer,
+            content: conversation.kind === 'hall'
+              ? stripLeadingSpeakerLabel(result.answer, member.name)
+              : result.answer,
             status: 'sent',
+            roundNumber: currentHallRoundNumber,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Request failed';
@@ -1348,6 +1579,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     await Promise.all(replyTasks);
+    if (conversation.kind === 'hall') {
+      await get().syncHallRoundSummaries(conversationId);
+    }
 
     try {
       const chamberMemoryContext = conversation.kind === 'chamber' && conversation.chamberMemberId
