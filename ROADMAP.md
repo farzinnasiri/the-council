@@ -18,6 +18,7 @@ Status: Completed (February 26, 2026)
 - Add backend + UI confirmation and post-delete state refresh.
 
 ### 1.3 Hall UX Improvements
+Status: In Progress (as of February 27, 2026)
 - Improve Hall layout and interaction design for clarity and speed.
 - Reduce friction in multi-member conversations (readability, action affordances, composer flow).
 
@@ -165,8 +166,10 @@ Status: Completed (February 26, 2026, single-plan + fallback phase)
 - Priority: high.
 
 ### 3.5 Voice Features
-- Implement voice-to-text feature (planned provider: Google speech stack).
-- Clarify/confirm final provider and API surface (speech-to-text vs text-to-speech naming).
+Status: Completed (March 5, 2026)
+- Implemented voice-to-text in the shared chat composer (Hall, Hall Draft, Chamber).
+- Finalized provider and API surface with Convex storage upload + Gemini transcription action (`ai/voice:transcribeAudioFromStorage`).
+- Added live recording waveform UX, mic state handling, and transcript append-to-draft behavior.
 
 ### 3.6 Member Image Capability
 - Add image capability to members (input and/or generation flow to be finalized).
