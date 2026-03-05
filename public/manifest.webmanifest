@@ -4,8 +4,8 @@
   "description": "Hall and Chamber advice chat with your council personas",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#111113",
-  "theme_color": "#111113",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "icons": [
     {
       "src": "/icons/icon-192.svg",

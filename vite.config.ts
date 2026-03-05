@@ -12,8 +12,8 @@ export default defineConfig({
         name: 'The Council',
         short_name: 'Council',
         description: 'Hall and Chamber advice chat with your council personas.',
-        theme_color: '#111113',
-        background_color: '#111113',
+        theme_color: '#000000',
+        background_color: '#000000',
         display: 'standalone',
         start_url: '/',
         icons: [
