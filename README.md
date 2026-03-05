@@ -127,6 +127,7 @@ make vercel-deploy
 - `ai/routing:suggestMemberSpecialties`
 - `ai/chat:chatWithMember`
 - `ai/chat:compactConversation`
+- `ai/voice:transcribeAudioFromStorage`
 - `ai/roundtable:prepareRoundtableRound`
 - `ai/roundtable:chatRoundtableSpeakers`
 - `ai/roundtable:chatRoundtableSpeaker`

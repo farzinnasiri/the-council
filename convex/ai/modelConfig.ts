@@ -1,5 +1,6 @@
 export type ModelSlot =
   | 'chatResponse'
+  | 'transcription'
   | 'retrieval'
   | 'router'
   | 'hallTitle'
@@ -20,6 +21,7 @@ export interface ModelTarget {
 
 const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   chatResponse: 'AI_MODEL_CHAT_RESPONSE',
+  transcription: 'AI_MODEL_TRANSCRIPTION',
   retrieval: 'AI_MODEL_RETRIEVAL',
   router: 'AI_MODEL_ROUTER',
   hallTitle: 'AI_MODEL_HALL_TITLE',
@@ -34,6 +36,7 @@ const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
 
 const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
   chatResponse: ['GEMINI_CHAT_MODEL', 'GEMINI_MODEL'],
+  transcription: ['GEMINI_TRANSCRIPTION_MODEL', 'GEMINI_MODEL'],
   retrieval: ['GEMINI_RETRIEVAL_MODEL', 'GEMINI_MODEL'],
   router: ['GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   hallTitle: ['GEMINI_HALL_TITLE_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
@@ -48,6 +51,7 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
 
 const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   chatResponse: { provider: 'openai', model: 'gpt-5.3-chat-latest' },
+  transcription: { provider: 'google', model: 'gemini-2.5-flash' },
   retrieval: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   router: { provider: 'google', model: 'gemini-2.5-flash' },
   hallTitle: { provider: 'google', model: 'gemini-2.5-flash-lite' },
@@ -105,6 +109,7 @@ export function resolveModelTarget(slot: ModelSlot, override?: string): ModelTar
 
 export const MODEL_IDS: Record<ModelSlot, string> = {
   chatResponse: resolveModelTarget('chatResponse').model,
+  transcription: resolveModelTarget('transcription').model,
   retrieval: resolveModelTarget('retrieval').model,
   router: resolveModelTarget('router').model,
   hallTitle: resolveModelTarget('hallTitle').model,

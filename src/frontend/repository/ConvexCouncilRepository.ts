@@ -514,6 +514,16 @@ class ConvexCouncilRepository implements CouncilRepository {
     })) as RouteResult;
   }
 
+  async transcribeAudioFromStorage(input: {
+    storageId: string;
+    mimeType?: string;
+  }): Promise<{ transcript: string; model: string }> {
+    return (await this.client.action(api.ai.voice.transcribeAudioFromStorage as any, {
+      storageId: input.storageId as Id<'_storage'>,
+      mimeType: input.mimeType,
+    })) as { transcript: string; model: string };
+  }
+
   async suggestHallTitle(input: { message: string; model?: string }): Promise<HallTitleResult> {
     return (await this.client.action(api.ai.routing.suggestHallTitle as any, {
       message: input.message,

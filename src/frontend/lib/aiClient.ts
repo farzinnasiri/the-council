@@ -18,6 +18,12 @@ export interface MemberSpecialtiesResult {
   model: string;
 }
 
+interface UploadToConvexStorageResult {
+  storageId: string;
+  mimeType?: string;
+  sizeBytes: number;
+}
+
 interface MemberChatResult {
   answer: string;
   grounded: boolean;
@@ -152,6 +158,45 @@ export async function uploadFileToConvexStorage(
     mimeType: file.type || undefined,
     sizeBytes: file.size,
   };
+}
+
+export async function uploadBlobToConvexStorage(
+  blob: Blob,
+  mimeType?: string
+): Promise<UploadToConvexStorageResult> {
+  const uploadUrl = await convexRepository.generateUploadUrl();
+  const contentType = mimeType?.trim() || blob.type || 'application/octet-stream';
+  const payload = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': contentType },
+    body: blob,
+  });
+
+  if (!payload.ok) {
+    throw new Error(`Audio upload failed (${payload.status})`);
+  }
+
+  const body = (await payload.json()) as { storageId?: string };
+  if (!body.storageId) {
+    throw new Error('Upload did not return a storageId');
+  }
+
+  return {
+    storageId: body.storageId,
+    mimeType: contentType,
+    sizeBytes: blob.size,
+  };
+}
+
+export async function transcribeRecordedAudio(
+  blob: Blob,
+  mimeType?: string
+): Promise<{ transcript: string; model: string }> {
+  const uploaded = await uploadBlobToConvexStorage(blob, mimeType);
+  return await convexRepository.transcribeAudioFromStorage({
+    storageId: uploaded.storageId,
+    mimeType: uploaded.mimeType,
+  });
 }
 
 export async function routeHallMembers(input: {

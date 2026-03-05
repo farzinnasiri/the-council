@@ -41,6 +41,7 @@ import type * as ai_runtime_modelRegistry from "../ai/runtime/modelRegistry.js";
 import type * as ai_runtime_structured from "../ai/runtime/structured.js";
 import type * as ai_runtime_tracing from "../ai/runtime/tracing.js";
 import type * as ai_runtime_types from "../ai/runtime/types.js";
+import type * as ai_voice from "../ai/voice.js";
 import type * as auth from "../auth.js";
 import type * as contexts_chamber_application_chatWithMember from "../contexts/chamber/application/chatWithMember.js";
 import type * as contexts_chamber_application_compactConversation from "../contexts/chamber/application/compactConversation.js";
@@ -131,6 +132,7 @@ declare const fullApi: ApiFromModules<{
   "ai/runtime/structured": typeof ai_runtime_structured;
   "ai/runtime/tracing": typeof ai_runtime_tracing;
   "ai/runtime/types": typeof ai_runtime_types;
+  "ai/voice": typeof ai_voice;
   auth: typeof auth;
   "contexts/chamber/application/chatWithMember": typeof contexts_chamber_application_chatWithMember;
   "contexts/chamber/application/compactConversation": typeof contexts_chamber_application_compactConversation;

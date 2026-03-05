@@ -210,6 +210,10 @@ export interface CouncilRepository {
     message: string;
     maxSelections?: number;
   }): Promise<RouteResult>;
+  transcribeAudioFromStorage(input: {
+    storageId: string;
+    mimeType?: string;
+  }): Promise<{ transcript: string; model: string }>;
   suggestHallTitle(input: {
     message: string;
     model?: string;
