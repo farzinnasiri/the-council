@@ -47,7 +47,7 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
 };
 
 const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
-  chatResponse: { provider: 'openai', model: 'gpt-5.2-chat-latest' },
+  chatResponse: { provider: 'openai', model: 'gpt-5.3-chat-latest' },
   retrieval: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   router: { provider: 'google', model: 'gemini-2.5-flash' },
   hallTitle: { provider: 'google', model: 'gemini-2.5-flash-lite' },
