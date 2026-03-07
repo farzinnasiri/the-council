@@ -39,10 +39,7 @@ export function ConversationNotebookEditor({
             <NotebookPen className="h-4 w-4 text-muted-foreground" />
             <h2 className="truncate text-sm font-semibold">{title}</h2>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {detail ? `${detail} · ` : ''}
-            Private to this conversation
-          </p>
+          {detail ? <p className="mt-1 text-xs text-muted-foreground">{detail}</p> : null}
         </div>
         <div className="flex items-center gap-2">
           <span className={cn('text-xs text-muted-foreground', saveState === 'error' && 'text-destructive')}>

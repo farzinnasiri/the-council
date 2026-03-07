@@ -60,7 +60,11 @@ export function MessageBubble({ message }: { message: Message }) {
   };
 
   const addToNotebook = async () => {
-    await appendMessageToNotebook(message.conversationId, message.content);
+    await appendMessageToNotebook(
+      message.conversationId,
+      message.content,
+      isUser ? undefined : label
+    );
   };
 
   return (

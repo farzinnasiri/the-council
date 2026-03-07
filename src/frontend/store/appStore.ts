@@ -144,7 +144,7 @@ interface AppState {
   loadActiveNotebooks: (force?: boolean) => Promise<void>;
   setNotebookDraft: (conversationId: string, content: string) => void;
   saveNotebook: (conversationId: string) => Promise<void>;
-  appendMessageToNotebook: (conversationId: string, text: string) => Promise<void>;
+  appendMessageToNotebook: (conversationId: string, text: string, authorName?: string) => Promise<void>;
   showToast: (message: string) => void;
   dismissToast: (toastId: string) => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -702,10 +702,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  appendMessageToNotebook: async (conversationId, text) => {
+  appendMessageToNotebook: async (conversationId, text, authorName) => {
     await get().ensureNotebookLoaded(conversationId);
     const current = get().notebookDraftByConversation[conversationId] ?? '';
-    const appended = current.trim().length > 0 ? `${current}\n\n${text}` : text;
+    const block = authorName ? `${authorName}\n${text}` : text;
+    const appended = current.trim().length > 0 ? `${current}\n\n${block}` : block;
     get().setNotebookDraft(conversationId, appended);
     get().showToast('Added to Notebook');
     void get().saveNotebook(conversationId);
