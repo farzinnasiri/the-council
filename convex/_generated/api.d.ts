@@ -90,6 +90,7 @@ import type * as members from "../members.js";
 import type * as memoryLogs from "../memoryLogs.js";
 import type * as messages from "../messages.js";
 import type * as migrations from "../migrations.js";
+import type * as notebooks from "../notebooks.js";
 import type * as personalArchive from "../personalArchive.js";
 import type * as personalArchiveChunks from "../personalArchiveChunks.js";
 import type * as personalArchiveShared from "../personalArchiveShared.js";
@@ -187,6 +188,7 @@ declare const fullApi: ApiFromModules<{
   memoryLogs: typeof memoryLogs;
   messages: typeof messages;
   migrations: typeof migrations;
+  notebooks: typeof notebooks;
   personalArchive: typeof personalArchive;
   personalArchiveChunks: typeof personalArchiveChunks;
   personalArchiveShared: typeof personalArchiveShared;

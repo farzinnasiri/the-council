@@ -5,6 +5,10 @@ import { Sheet, SheetContent } from '../components/ui/sheet';
 import { useAppStore } from '../store/appStore';
 import { TopBar } from '../components/header/TopBar';
 import { cn } from '../lib/utils';
+import { ConversationNotebookEditor } from '../features/notebook/ConversationNotebookEditor';
+import { MobileNotebookSheet } from '../features/notebook/MobileNotebookSheet';
+import { getConversationNotebookMeta } from '../features/notebook/notebookMeta';
+import { ToastHost } from '../components/ui/ToastHost';
 
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -14,6 +18,10 @@ export function AppShell() {
   const navigate = useNavigate();
   const conversations = useAppStore((state) => state.conversations);
   const members = useAppStore((state) => state.members);
+  const notebookOpen = useAppStore((state) => state.notebookOpen);
+  const setNotebookOpen = useAppStore((state) => state.setNotebookOpen);
+  const notebookMobileSnap = useAppStore((state) => state.notebookMobileSnap);
+  const setNotebookMobileSnap = useAppStore((state) => state.setNotebookMobileSnap);
   const anyUploadInProgress = useAppStore((state) =>
     Object.values(state.kbUploadProgressByMember).some((rows) => rows.length > 0)
   );
@@ -88,6 +96,14 @@ export function AppShell() {
       };
     }
 
+    if (location.pathname.startsWith('/notebooks')) {
+      return {
+        title: 'Notebooks',
+        subtitle: '',
+        showParticipants: false,
+      };
+    }
+
     if (location.pathname.startsWith('/settings')) {
       return {
         title: 'Settings',
@@ -142,6 +158,22 @@ export function AppShell() {
       setMobileOpen(false);
     }
   }, [isMobile]);
+
+  const canShowNotebook =
+    Boolean(activeConversation) &&
+    (
+      (location.pathname.startsWith('/hall/') && !location.pathname.startsWith('/hall/new')) ||
+      (location.pathname.startsWith('/chamber/') && !location.pathname.startsWith('/chamber/member/'))
+    );
+  const desktopNotebookVisible = Boolean(canShowNotebook && notebookOpen && !isMobile && activeConversation);
+  const mobileNotebookVisible = Boolean(canShowNotebook && notebookOpen && isMobile && activeConversation);
+  const notebookMeta = getConversationNotebookMeta(activeConversation);
+
+  useEffect(() => {
+    if (!canShowNotebook && notebookOpen) {
+      setNotebookOpen(false);
+    }
+  }, [canShowNotebook, notebookOpen, setNotebookOpen]);
 
   useEffect(() => {
     if (!anyUploadInProgress) return;
@@ -213,6 +245,9 @@ export function AppShell() {
             title={headerMeta.title}
             subtitle={headerMeta.subtitle}
             showParticipants={headerMeta.showParticipants}
+            showNotebookToggle={canShowNotebook}
+            notebookOpen={notebookOpen}
+            onToggleNotebook={() => setNotebookOpen(!notebookOpen)}
             onToggleSidebar={() => {
               if (isMobile) {
                 setMobileOpen((current) => !current);
@@ -221,8 +256,40 @@ export function AppShell() {
               setDesktopCollapsed((current) => !current);
             }}
           />
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <Outlet />
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div
+              className={cn(
+                'grid h-full min-h-0',
+                desktopNotebookVisible ? 'md:grid-cols-[minmax(0,1fr)_400px]' : 'grid-cols-[minmax(0,1fr)]'
+              )}
+            >
+              <div className="min-h-0 min-w-0">
+                <Outlet />
+              </div>
+              {desktopNotebookVisible && activeConversation ? (
+                <div className="hidden min-h-0 border-l border-border md:flex">
+                  <ConversationNotebookEditor
+                    conversationId={activeConversation.id}
+                    title={notebookMeta.title}
+                    detail={notebookMeta.detail}
+                    variant="panel"
+                    onClose={() => setNotebookOpen(false)}
+                  />
+                </div>
+              ) : null}
+            </div>
+            {mobileNotebookVisible && activeConversation ? (
+              <MobileNotebookSheet
+                open={mobileNotebookVisible}
+                conversationId={activeConversation.id}
+                title={notebookMeta.title}
+                detail={notebookMeta.detail}
+                snap={notebookMobileSnap}
+                onSnapChange={setNotebookMobileSnap}
+                onClose={() => setNotebookOpen(false)}
+              />
+            ) : null}
+            <ToastHost />
           </div>
         </div>
       </div>

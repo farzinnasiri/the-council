@@ -1,4 +1,4 @@
-import { Menu, Plus, UserCircle2, X } from 'lucide-react';
+import { Menu, NotebookPen, Plus, UserCircle2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -22,9 +22,21 @@ interface TopBarProps {
   subtitle: string;
   showParticipants: boolean;
   onToggleSidebar: () => void;
+  showNotebookToggle?: boolean;
+  notebookOpen?: boolean;
+  onToggleNotebook?: () => void;
 }
 
-export function TopBar({ conversation, title, subtitle, showParticipants, onToggleSidebar }: TopBarProps) {
+export function TopBar({
+  conversation,
+  title,
+  subtitle,
+  showParticipants,
+  onToggleSidebar,
+  showNotebookToggle = false,
+  notebookOpen = false,
+  onToggleNotebook,
+}: TopBarProps) {
   const addMemberToConversation = useAppStore((state) => state.addMemberToConversation);
   const removeMemberFromConversation = useAppStore((state) => state.removeMemberFromConversation);
   const members = useAppStore((state) => state.members);
@@ -149,6 +161,18 @@ export function TopBar({ conversation, title, subtitle, showParticipants, onTogg
       </div>
 
       <div className="flex items-center gap-2">
+        {showNotebookToggle && onToggleNotebook ? (
+          <Button
+            type="button"
+            size="icon"
+            variant={notebookOpen ? 'outline' : 'ghost'}
+            className="h-9 w-9"
+            onClick={onToggleNotebook}
+            aria-label={notebookOpen ? 'Close notebook' : 'Open notebook'}
+          >
+            <NotebookPen className="h-4 w-4" />
+          </Button>
+        ) : null}
         {isChamber ? (
           <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-foreground">
             <span

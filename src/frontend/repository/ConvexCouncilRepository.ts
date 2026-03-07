@@ -4,6 +4,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import type {
   Conversation,
   ConversationMemoryLog,
+  ConversationNotebook,
   ConversationParticipant,
   RoundtableState,
   Member,
@@ -154,6 +155,17 @@ function toMemoryLog(doc: ConvexMessageDoc): ConversationMemoryLog {
     recentRawTail: doc.recentRawTail,
     deletedAt: doc.deletedAt,
     createdAt: doc._creationTime,
+  };
+}
+
+function toConversationNotebook(doc: any): ConversationNotebook {
+  return {
+    id: doc._id,
+    conversationId: doc.conversationId,
+    content: doc.content,
+    updatedAt: doc.updatedAt,
+    createdAt: doc._creationTime,
+    archivedAt: doc.archivedAt,
   };
 }
 
@@ -387,6 +399,32 @@ class ConvexCouncilRepository implements CouncilRepository {
   async deletePersonalArchiveEntry(entryId: string): Promise<void> {
     await this.client.action(api.ai.archive.deleteEntry as any, {
       entryId: entryId as Id<'personalArchiveEntries'>,
+    });
+  }
+
+  async getConversationNotebook(conversationId: string): Promise<ConversationNotebook | null> {
+    const doc = await this.clientAny.query('notebooks:getNotebookByConversation', {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return doc ? toConversationNotebook(doc) : null;
+  }
+
+  async listActiveConversationNotebooks(): Promise<ConversationNotebook[]> {
+    const docs = await this.clientAny.query('notebooks:listActiveNotebooks', {});
+    return docs.map(toConversationNotebook);
+  }
+
+  async saveConversationNotebook(conversationId: string, content: string): Promise<ConversationNotebook | null> {
+    const doc = await this.clientAny.mutation('notebooks:upsertNotebookContent', {
+      conversationId: conversationId as Id<'conversations'>,
+      content,
+    });
+    return doc ? toConversationNotebook(doc) : null;
+  }
+
+  async archiveConversationNotebook(conversationId: string): Promise<void> {
+    await this.clientAny.mutation('notebooks:archiveNotebookByConversation', {
+      conversationId: conversationId as Id<'conversations'>,
     });
   }
 

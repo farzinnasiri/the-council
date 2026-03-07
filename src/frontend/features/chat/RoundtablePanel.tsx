@@ -1,4 +1,5 @@
-import { CheckCircle2, CirclePause, Hand, Loader2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, CirclePause, Hand, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { Member, RoundtableState } from '../../types/domain';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../lib/utils';
@@ -78,7 +79,16 @@ export function RoundtablePanel({
   isRunning,
   isPreparing = false,
 }: RoundtablePanelProps) {
+  const [collapsed, setCollapsed] = useState(false);
   const membersById = new Map(members.map((member) => [member.id, member]));
+
+  useEffect(() => {
+    if (!state) {
+      setCollapsed(false);
+      return;
+    }
+    setCollapsed(false);
+  }, [state?.round.roundNumber, state?.round.status]);
 
   if (!state) {
     const isBusy = isPreparing || isRunning;
@@ -136,6 +146,16 @@ export function RoundtablePanel({
             <p className="text-xs text-muted-foreground">Pass {passCount}</p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              onClick={() => setCollapsed((current) => !current)}
+              aria-label={collapsed ? 'Expand speakers' : 'Collapse speakers'}
+              title={collapsed ? 'Expand speakers' : 'Collapse speakers'}
+            >
+              <ChevronDown className={cn('h-4 w-4 transition-transform', collapsed && '-rotate-90')} />
+            </Button>
             {canPrepareNext ? (
               <Button size="sm" variant="outline" onClick={onContinueRound} disabled={isPreparing || isRunning}>
                 Prepare round
@@ -158,34 +178,40 @@ export function RoundtablePanel({
 
         {allPass ? <p className="mt-2 text-xs text-muted-foreground">No raised hands for this round.</p> : null}
 
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
-          {state.intents.map((intent) => {
-            const member = membersById.get(intent.memberId);
-            const selected = selectedSet.has(intent.memberId);
-            const disabled = !canEdit || (!selected && selectedIds.length >= cap);
-            return (
-              <button
-                key={intent.id}
-                type="button"
-                onClick={() => toggle(intent.memberId)}
-                disabled={disabled}
-                className={cn(
-                  'rounded-lg border p-2 text-left transition',
-                  selected ? 'border-primary/60 bg-primary/10' : 'border-border hover:border-foreground/30',
-                  disabled && !selected ? 'opacity-60' : ''
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">{member?.name ?? intent.memberId}</p>
-                  <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    {intent.intent === 'pass' ? <CirclePause className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
-                    {intent.intent}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        {!collapsed ? (
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {state.intents.map((intent) => {
+              const member = membersById.get(intent.memberId);
+              const selected = selectedSet.has(intent.memberId);
+              const disabled = !canEdit || (!selected && selectedIds.length >= cap);
+              return (
+                <button
+                  key={intent.id}
+                  type="button"
+                  onClick={() => toggle(intent.memberId)}
+                  disabled={disabled}
+                  className={cn(
+                    'rounded-lg border p-2 text-left transition',
+                    selected ? 'border-primary/60 bg-primary/10' : 'border-border hover:border-foreground/30',
+                    disabled && !selected ? 'opacity-60' : ''
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{member?.name ?? intent.memberId}</p>
+                    <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      {intent.intent === 'pass' ? <CirclePause className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
+                      {intent.intent}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Speakers collapsed.
+          </p>
+        )}
       </div>
     </div>
   );

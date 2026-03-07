@@ -152,6 +152,16 @@ export default defineSchema({
     .index('by_conversation_parent', ['conversationId', 'inReplyToMessageId'])
     .index('by_origin', ['originConversationId', 'originMessageId']),
 
+  conversationNotebooks: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    content: v.string(),
+    updatedAt: v.number(),
+    archivedAt: v.optional(v.number()),
+  })
+    .index('by_conversation', ['conversationId'])
+    .index('by_user_updated', ['userId', 'updatedAt']),
+
   appConfig: defineTable({
     userId: v.optional(v.id('users')),
     key: v.string(),

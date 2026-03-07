@@ -1,6 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import { archiveNotebookForConversation } from './notebooks';
 
 const conversationDoc = v.object({
   _id: v.id('conversations'),
@@ -81,10 +82,14 @@ async function renameConversationDoc(ctx: any, conversationId: any, title: strin
 
 async function archiveConversationDoc(ctx: any, conversationId: any) {
   const now = Date.now();
+  const conversation = await ctx.db.get(conversationId);
   await ctx.db.patch(conversationId, {
     deletedAt: now,
     updatedAt: now,
   });
+  if (conversation?.userId) {
+    await archiveNotebookForConversation(ctx, conversation.userId, conversationId, now);
+  }
 }
 
 export const list = query({
@@ -276,6 +281,7 @@ export const clearChamberByMember = mutation({
         updatedAt: now,
         lastMessageAt: undefined,
       });
+      await archiveNotebookForConversation(ctx, userId, conversation._id, now);
 
       const rows = await ctx.db
         .query('messages')

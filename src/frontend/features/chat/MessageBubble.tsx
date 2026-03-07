@@ -1,4 +1,4 @@
-import { Check, Copy, MessageCircle, Reply, UserCircle2 } from 'lucide-react';
+import { Check, Copy, MessageCircle, NotebookPen, Reply, UserCircle2 } from 'lucide-react';
 import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import type { Message } from '../../types/domain';
@@ -33,6 +33,7 @@ export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const members = useAppStore((state) => state.members);
   const conversations = useAppStore((state) => state.conversations);
+  const appendMessageToNotebook = useAppStore((state) => state.appendMessageToNotebook);
 
   if (message.role === 'system') {
     const isManual = message.content.toLowerCase().startsWith('manually routed');
@@ -58,6 +59,10 @@ export function MessageBubble({ message }: { message: Message }) {
     }
   };
 
+  const addToNotebook = async () => {
+    await appendMessageToNotebook(message.conversationId, message.content);
+  };
+
   return (
     <div className={`flex items-start gap-3 ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
       {!isUser && member ? (
@@ -77,7 +82,10 @@ export function MessageBubble({ message }: { message: Message }) {
           {!isUser ? (
             <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
               {isChamber ? (
-                <div className="flex items-center">
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
+                    <NotebookPen className="h-3 w-3" />
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                     {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   </Button>
@@ -86,6 +94,9 @@ export function MessageBubble({ message }: { message: Message }) {
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><Reply className="h-3 w-3" /></Button>
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><MessageCircle className="h-3 w-3" /></Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
+                    <NotebookPen className="h-3 w-3" />
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                     {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                   </Button>
@@ -96,6 +107,9 @@ export function MessageBubble({ message }: { message: Message }) {
           ) : (
             <div className="mt-2 flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
               <span className="text-[10px] text-background/70">{timeLabel}</span>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
+                <NotebookPen className="h-3 w-3" />
+              </Button>
               <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
               </Button>

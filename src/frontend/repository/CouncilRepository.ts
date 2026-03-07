@@ -1,6 +1,7 @@
 import type {
   Conversation,
   ConversationMemoryLog,
+  ConversationNotebook,
   ConversationParticipant,
   HallMode,
   Member,
@@ -259,6 +260,10 @@ export interface CouncilRepository {
   }): Promise<void>;
   archivePersonalArchiveEntry(entryId: string): Promise<void>;
   deletePersonalArchiveEntry(entryId: string): Promise<void>;
+  getConversationNotebook(conversationId: string): Promise<ConversationNotebook | null>;
+  listActiveConversationNotebooks(): Promise<ConversationNotebook[]>;
+  saveConversationNotebook(conversationId: string, content: string): Promise<ConversationNotebook | null>;
+  archiveConversationNotebook(conversationId: string): Promise<void>;
 
   routeHallMembers(input: {
     conversationId: string;

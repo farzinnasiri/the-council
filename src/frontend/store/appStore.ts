@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type {
   Conversation,
   ConversationMemoryLog,
+  ConversationNotebook,
   ConversationType,
   Member,
   Message,
@@ -45,6 +46,13 @@ interface CreateMemberPayload {
   personalArchiveAccess?: PersonalArchiveAccess;
 }
 
+type NotebookSaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+interface AppToast {
+  id: string;
+  message: string;
+}
+
 interface AppState {
   hydrated: boolean;
   isRouting: boolean;
@@ -68,6 +76,15 @@ interface AppState {
   roundtableStateByConversation: Record<string, RoundtableState | null>;
   roundtablePreparingByConversation: Record<string, boolean>;
   hallSummaryFailureCountByConversation: Record<string, number>;
+  conversationNotebooksByConversation: Record<string, ConversationNotebook>;
+  notebookDraftByConversation: Record<string, string>;
+  notebookSaveStateByConversation: Record<string, NotebookSaveState>;
+  notebookErrorByConversation: Record<string, string | undefined>;
+  notebookLoadedByConversation: Record<string, boolean>;
+  notebookListLoaded: boolean;
+  notebookOpen: boolean;
+  notebookMobileSnap: 0.3 | 0.5 | 1;
+  toasts: AppToast[];
   messagePaginationByConversation: Record<
     string,
     {
@@ -120,6 +137,16 @@ interface AppState {
   addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
   removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
   clearChamberByMember: (memberId: string) => Promise<void>;
+  setNotebookOpen: (open: boolean) => void;
+  toggleNotebookOpen: () => void;
+  setNotebookMobileSnap: (snap: 0.3 | 0.5 | 1) => void;
+  ensureNotebookLoaded: (conversationId: string, force?: boolean) => Promise<void>;
+  loadActiveNotebooks: (force?: boolean) => Promise<void>;
+  setNotebookDraft: (conversationId: string, content: string) => void;
+  saveNotebook: (conversationId: string) => Promise<void>;
+  appendMessageToNotebook: (conversationId: string, text: string) => Promise<void>;
+  showToast: (message: string) => void;
+  dismissToast: (toastId: string) => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
@@ -135,6 +162,19 @@ interface AppState {
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
 type ConversationPatch = Partial<Conversation> | ((conversation: Conversation) => Conversation);
 type ConversationStateSlice = Pick<AppState, 'conversations'>;
+
+function mapNotebooksByConversation(notebooks: ConversationNotebook[]) {
+  return Object.fromEntries(notebooks.map((notebook) => [notebook.conversationId, notebook])) as Record<
+    string,
+    ConversationNotebook
+  >;
+}
+
+function removeKey<T>(record: Record<string, T>, key: string) {
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
 
 function buildMessage(input: BuildMessageInput): Message {
   return {
@@ -500,6 +540,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   roundtableStateByConversation: {},
   roundtablePreparingByConversation: {},
   hallSummaryFailureCountByConversation: {},
+  conversationNotebooksByConversation: {},
+  notebookDraftByConversation: {},
+  notebookSaveStateByConversation: {},
+  notebookErrorByConversation: {},
+  notebookLoadedByConversation: {},
+  notebookListLoaded: false,
+  notebookOpen: false,
+  notebookMobileSnap: 0.5,
+  toasts: [],
   messagePaginationByConversation: {},
   compactionPolicy: COMPACTION_POLICY_DEFAULTS,
 
@@ -507,6 +556,175 @@ export const useAppStore = create<AppState>((set, get) => ({
     const policy = await councilRepository.getCompactionPolicy();
     set({ compactionPolicy: policy });
     return policy;
+  },
+
+  setNotebookOpen: (open) => {
+    set({ notebookOpen: open });
+  },
+
+  toggleNotebookOpen: () => {
+    set((state) => ({ notebookOpen: !state.notebookOpen }));
+  },
+
+  setNotebookMobileSnap: (snap) => {
+    set({ notebookMobileSnap: snap });
+  },
+
+  ensureNotebookLoaded: async (conversationId, force = false) => {
+    if (!force && get().notebookLoadedByConversation[conversationId]) {
+      return;
+    }
+
+    const notebook = await councilRepository.getConversationNotebook(conversationId);
+    set((state) => ({
+      conversationNotebooksByConversation: notebook
+        ? {
+            ...state.conversationNotebooksByConversation,
+            [conversationId]: notebook,
+          }
+        : removeKey(state.conversationNotebooksByConversation, conversationId),
+      notebookDraftByConversation:
+        force || !(conversationId in state.notebookDraftByConversation)
+          ? {
+              ...state.notebookDraftByConversation,
+              [conversationId]: notebook?.content ?? '',
+            }
+          : state.notebookDraftByConversation,
+      notebookSaveStateByConversation: {
+        ...state.notebookSaveStateByConversation,
+        [conversationId]: 'idle',
+      },
+      notebookErrorByConversation: {
+        ...state.notebookErrorByConversation,
+        [conversationId]: undefined,
+      },
+      notebookLoadedByConversation: {
+        ...state.notebookLoadedByConversation,
+        [conversationId]: true,
+      },
+    }));
+  },
+
+  loadActiveNotebooks: async (force = false) => {
+    if (!force && get().notebookListLoaded) {
+      return;
+    }
+
+    const notebooks = await councilRepository.listActiveConversationNotebooks();
+    const byConversation = mapNotebooksByConversation(notebooks);
+    set((state) => ({
+      conversationNotebooksByConversation: byConversation,
+      notebookDraftByConversation: {
+        ...state.notebookDraftByConversation,
+        ...Object.fromEntries(
+          Object.entries(byConversation).map(([conversationId, notebook]) => [
+            conversationId,
+            state.notebookDraftByConversation[conversationId] ?? notebook.content,
+          ])
+        ),
+      },
+      notebookLoadedByConversation: {
+        ...state.notebookLoadedByConversation,
+        ...Object.fromEntries(notebooks.map((notebook) => [notebook.conversationId, true])),
+      },
+      notebookListLoaded: true,
+    }));
+  },
+
+  setNotebookDraft: (conversationId, content) => {
+    set((state) => ({
+      notebookDraftByConversation: {
+        ...state.notebookDraftByConversation,
+        [conversationId]: content,
+      },
+      notebookSaveStateByConversation: {
+        ...state.notebookSaveStateByConversation,
+        [conversationId]: 'idle',
+      },
+      notebookErrorByConversation: {
+        ...state.notebookErrorByConversation,
+        [conversationId]: undefined,
+      },
+    }));
+  },
+
+  saveNotebook: async (conversationId) => {
+    const content = get().notebookDraftByConversation[conversationId] ?? '';
+    set((state) => ({
+      notebookSaveStateByConversation: {
+        ...state.notebookSaveStateByConversation,
+        [conversationId]: 'saving',
+      },
+      notebookErrorByConversation: {
+        ...state.notebookErrorByConversation,
+        [conversationId]: undefined,
+      },
+    }));
+
+    try {
+      const notebook = await councilRepository.saveConversationNotebook(conversationId, content);
+      set((state) => ({
+        conversationNotebooksByConversation: notebook
+          ? {
+              ...state.conversationNotebooksByConversation,
+              [conversationId]: notebook,
+            }
+          : removeKey(state.conversationNotebooksByConversation, conversationId),
+        notebookDraftByConversation: {
+          ...state.notebookDraftByConversation,
+          [conversationId]: notebook?.content ?? '',
+        },
+        notebookSaveStateByConversation: {
+          ...state.notebookSaveStateByConversation,
+          [conversationId]: 'saved',
+        },
+        notebookErrorByConversation: {
+          ...state.notebookErrorByConversation,
+          [conversationId]: undefined,
+        },
+        notebookLoadedByConversation: {
+          ...state.notebookLoadedByConversation,
+          [conversationId]: true,
+        },
+      }));
+    } catch (error) {
+      set((state) => ({
+        notebookSaveStateByConversation: {
+          ...state.notebookSaveStateByConversation,
+          [conversationId]: 'error',
+        },
+        notebookErrorByConversation: {
+          ...state.notebookErrorByConversation,
+          [conversationId]: error instanceof Error ? error.message : 'Could not save notebook.',
+        },
+      }));
+      throw error;
+    }
+  },
+
+  appendMessageToNotebook: async (conversationId, text) => {
+    await get().ensureNotebookLoaded(conversationId);
+    const current = get().notebookDraftByConversation[conversationId] ?? '';
+    const appended = current.trim().length > 0 ? `${current}\n\n${text}` : text;
+    get().setNotebookDraft(conversationId, appended);
+    get().showToast('Added to Notebook');
+    void get().saveNotebook(conversationId);
+  },
+
+  showToast: (message) => {
+    const toastId = crypto.randomUUID();
+    set((state) => ({
+      toasts: [...state.toasts, { id: toastId, message }],
+    }));
+    window.setTimeout(() => {
+      get().dismissToast(toastId);
+    }, 1800);
+  },
+
+  dismissToast: (toastId) => {
+    set((state) => ({
+      toasts: state.toasts.filter((toast) => toast.id !== toastId),
+    }));
   },
 
   initializeApp: async () => {
@@ -1046,6 +1264,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         hallParticipantsByConversation: nextParticipants,
         roundtableStateByConversation: nextRoundtable,
         roundtablePreparingByConversation: nextPreparing,
+        conversationNotebooksByConversation: removeKey(state.conversationNotebooksByConversation, conversationId),
+        notebookDraftByConversation: removeKey(state.notebookDraftByConversation, conversationId),
+        notebookSaveStateByConversation: removeKey(state.notebookSaveStateByConversation, conversationId),
+        notebookErrorByConversation: removeKey(state.notebookErrorByConversation, conversationId),
+        notebookLoadedByConversation: removeKey(state.notebookLoadedByConversation, conversationId),
         selectedConversationId:
           state.selectedConversationId === conversationId
             ? (nextConversations[0]?.id ?? '')
@@ -1688,12 +1911,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       const nextPendingReplyMemberIds = { ...state.pendingReplyMemberIds };
       const nextCompactionInFlight = { ...state.compactionCheckInFlightByConversation };
       const nextPagination = { ...state.messagePaginationByConversation };
+      const nextNotebooks = { ...state.conversationNotebooksByConversation };
+      const nextNotebookDrafts = { ...state.notebookDraftByConversation };
+      const nextNotebookSaveStates = { ...state.notebookSaveStateByConversation };
+      const nextNotebookErrors = { ...state.notebookErrorByConversation };
+      const nextNotebookLoaded = { ...state.notebookLoadedByConversation };
 
       for (const id of targetIds) {
         delete nextPendingReplyCount[id];
         delete nextPendingReplyMemberIds[id];
         delete nextCompactionInFlight[id];
         delete nextPagination[id];
+        delete nextNotebooks[id];
+        delete nextNotebookDrafts[id];
+        delete nextNotebookSaveStates[id];
+        delete nextNotebookErrors[id];
+        delete nextNotebookLoaded[id];
       }
 
       return {
@@ -1705,6 +1938,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         chamberMemoryByConversation: Object.fromEntries(
           Object.entries(state.chamberMemoryByConversation).filter(([id]) => !targetSet.has(id))
         ),
+        conversationNotebooksByConversation: nextNotebooks,
+        notebookDraftByConversation: nextNotebookDrafts,
+        notebookSaveStateByConversation: nextNotebookSaveStates,
+        notebookErrorByConversation: nextNotebookErrors,
+        notebookLoadedByConversation: nextNotebookLoaded,
         messagePaginationByConversation: nextPagination,
         selectedConversationId: targetSet.has(state.selectedConversationId)
           ? (nextConversations[0]?.id ?? '')

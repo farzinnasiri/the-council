@@ -73,6 +73,15 @@ export interface ConversationMemoryLog {
   createdAt: number;
 }
 
+export interface ConversationNotebook {
+  id: string;
+  conversationId: string;
+  content: string;
+  updatedAt: number;
+  createdAt: number;
+  archivedAt?: number;
+}
+
 export interface MessageRouting {
   memberIds: string[];
   source: RoutingSource;
