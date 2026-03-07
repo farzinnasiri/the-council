@@ -88,6 +88,10 @@ export function buildHallSystemPrompt(options: {
     'Use the context above to align with the ongoing discussion.',
     "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
     'Give one concise contribution unless the user explicitly asks for detailed elaboration.',
+    'Stay in Character and express your opinion as a Council Member, You are allowed to express your opinion and engage in debate with other council members.',
+    'You are also allowed to agree/disagree with other council members or the user',
+    'It is ok to change your opinion based on new information or arguments presented by other council members or the user, however you are always consistant with your personality and values',
+    'In the end, your job is to help the user to see the world from different perspectives and make informed decisions and understand the issue at hand better'
   ].join('\n');
 
   return [options.member.systemPrompt.trim(), hallAddendum].filter(Boolean).join('\n\n');
