@@ -5,6 +5,10 @@ import type {
   HallMode,
   Member,
   Message,
+  PersonalArchiveAccess,
+  PersonalArchiveCapturePreview,
+  PersonalArchiveEntry,
+  PersonalArchiveProfile,
   RoundtableState,
   ThemeMode,
 } from '../types/domain';
@@ -14,12 +18,14 @@ export interface CreateMemberInput {
   name: string;
   systemPrompt: string;
   specialties?: string[];
+  personalArchiveAccess?: PersonalArchiveAccess;
 }
 
 export interface UpdateMemberPatch {
   name?: string;
   systemPrompt?: string;
   specialties?: string[];
+  personalArchiveAccess?: PersonalArchiveAccess;
   kbStoreName?: string | null;
   deletedAt?: number;
 }
@@ -64,10 +70,17 @@ export interface MemberChatResult {
   model: string;
   retrievalModel: string;
   usedKnowledgeBase: boolean;
+  usedPersonalArchive?: boolean;
   debug?: {
     traceId: string;
-    mode: 'with-kb' | 'prompt-only';
+    mode: 'with-context' | 'prompt-only';
     reason?: string;
+    contextPlanner?: {
+      requestedSources: string[];
+      availableKnowledgeDocs: number;
+      availableArchiveBuckets: string[];
+      decisionReason: string;
+    };
     kbCheck?: {
       requestedStoreName: string | null;
       docsCount: number;
@@ -80,6 +93,11 @@ export interface MemberChatResult {
         decision?: 'required' | 'helpful' | 'unnecessary';
         confidence?: number;
       };
+    };
+    personalArchiveCheck?: {
+      availableBuckets: string[];
+      totalEntries: number;
+      used: boolean;
     };
     queryPlan?: {
       originalQuery: string;
@@ -105,6 +123,15 @@ export interface MemberChatResult {
       snippets: string[];
       queryUsed?: string;
       usedAlternateQuery?: boolean;
+    };
+    personalArchiveSearchResponse?: {
+      grounded: boolean;
+      citationsCount: number;
+      snippetsCount: number;
+      retrievalText: string;
+      citations: Array<{ title: string; uri?: string }>;
+      snippets: string[];
+      queryUsed?: string;
     };
     answerPrompt: string;
   };
@@ -204,6 +231,34 @@ export interface CouncilRepository {
   setToken(token: string | null): void;
   generateUploadUrl(): Promise<string>;
   setMemberAvatar(memberId: string, storageId: string): Promise<Member>;
+  getPersonalArchiveProfile(): Promise<PersonalArchiveProfile | null>;
+  updatePersonalArchiveIdentity(identity: string): Promise<PersonalArchiveProfile>;
+  previewPersonalArchiveCapture(input: {
+    sourceType: 'text' | 'audio' | 'file' | 'import';
+    rawText?: string;
+    storageId?: string;
+    originalLabel?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    forcedBucket?: PersonalArchiveEntry['bucket'];
+  }): Promise<PersonalArchiveCapturePreview>;
+  commitPersonalArchiveCapture(input: {
+    captureId: string;
+    entries: Array<{
+      bucket: PersonalArchiveEntry['bucket'];
+      title?: string;
+      content: string;
+    }>;
+  }): Promise<void>;
+  listPersonalArchiveEntries(includeArchived?: boolean): Promise<PersonalArchiveEntry[]>;
+  updatePersonalArchiveEntry(input: {
+    entryId: string;
+    bucket: PersonalArchiveEntry['bucket'];
+    title?: string;
+    content: string;
+  }): Promise<void>;
+  archivePersonalArchiveEntry(entryId: string): Promise<void>;
+  deletePersonalArchiveEntry(entryId: string): Promise<void>;
 
   routeHallMembers(input: {
     conversationId: string;

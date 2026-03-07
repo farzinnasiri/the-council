@@ -8,6 +8,10 @@ import type {
   RoundtableState,
   Member,
   Message,
+  PersonalArchiveAccess,
+  PersonalArchiveCapturePreview,
+  PersonalArchiveEntry,
+  PersonalArchiveProfile,
   ThemeMode,
   User,
 } from '../types/domain';
@@ -40,6 +44,12 @@ type ConvexParticipantDoc = any;
 type ConvexMessageDoc = any;
 
 function toMember(doc: ConvexMemberDoc): Member {
+  const personalArchiveAccess: PersonalArchiveAccess = {
+    reflection: Boolean(doc.personalArchiveAccess?.reflection),
+    cookieJar: Boolean(doc.personalArchiveAccess?.cookieJar),
+    accountability: Boolean(doc.personalArchiveAccess?.accountability),
+    worldModel: Boolean(doc.personalArchiveAccess?.worldModel),
+  };
   return {
     id: doc._id,
     name: doc.name,
@@ -47,6 +57,7 @@ function toMember(doc: ConvexMemberDoc): Member {
     specialties: doc.specialties,
     systemPrompt: doc.systemPrompt,
     kbStoreName: doc.kbStoreName,
+    personalArchiveAccess,
     deletedAt: doc.deletedAt,
     createdAt: doc._creationTime,
     updatedAt: doc.updatedAt,
@@ -173,6 +184,27 @@ function toKbDocumentLifecycle(doc: any): KbDocumentLifecycle {
   };
 }
 
+function toPersonalArchiveProfile(doc: any): PersonalArchiveProfile {
+  return {
+    id: doc._id,
+    identity: doc.identity ?? '',
+    updatedAt: doc.updatedAt ?? doc._creationTime,
+  };
+}
+
+function toPersonalArchiveEntry(doc: any): PersonalArchiveEntry {
+  return {
+    id: doc._id,
+    captureId: doc.captureId,
+    bucket: doc.bucket,
+    title: doc.title,
+    content: doc.content,
+    archivedAt: doc.archivedAt,
+    updatedAt: doc.updatedAt,
+    createdAt: doc._creationTime,
+  };
+}
+
 class ConvexCouncilRepository implements CouncilRepository {
   private client: ConvexHttpClient;
 
@@ -237,6 +269,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       name: input.name,
       systemPrompt: input.systemPrompt,
       specialties: input.specialties,
+      personalArchiveAccess: input.personalArchiveAccess,
     } as any);
     return toMember(doc as any);
   }
@@ -273,6 +306,88 @@ class ConvexCouncilRepository implements CouncilRepository {
       avatarId: storageId as Id<'_storage'>,
     });
     return toMember(doc as any);
+  }
+
+  async getPersonalArchiveProfile(): Promise<PersonalArchiveProfile | null> {
+    const doc = await this.client.query(api.personalArchive.getProfile, {});
+    return doc ? toPersonalArchiveProfile(doc) : null;
+  }
+
+  async updatePersonalArchiveIdentity(identity: string): Promise<PersonalArchiveProfile> {
+    const doc = await this.client.mutation(api.personalArchive.upsertProfile, { identity });
+    return toPersonalArchiveProfile(doc);
+  }
+
+  async previewPersonalArchiveCapture(input: {
+    sourceType: 'text' | 'audio' | 'file' | 'import';
+    rawText?: string;
+    storageId?: string;
+    originalLabel?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    forcedBucket?: PersonalArchiveEntry['bucket'];
+  }): Promise<PersonalArchiveCapturePreview> {
+    const doc = await this.client.action(api.ai.archive.previewCapture as any, {
+      sourceType: input.sourceType,
+      rawText: input.rawText,
+      storageId: input.storageId as Id<'_storage'> | undefined,
+      originalLabel: input.originalLabel,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      forcedBucket: input.forcedBucket,
+    });
+    return {
+      captureId: doc.captureId,
+      parseStatus: doc.parseStatus,
+      parseError: doc.parseError,
+      rawText: doc.rawText,
+      proposedEntries: doc.proposedEntries,
+    };
+  }
+
+  async commitPersonalArchiveCapture(input: {
+    captureId: string;
+    entries: Array<{
+      bucket: PersonalArchiveEntry['bucket'];
+      title?: string;
+      content: string;
+    }>;
+  }): Promise<void> {
+    await this.client.action(api.ai.archive.commitCaptureEntries as any, {
+      captureId: input.captureId as Id<'personalArchiveCaptures'>,
+      entries: input.entries,
+    });
+  }
+
+  async listPersonalArchiveEntries(includeArchived = false): Promise<PersonalArchiveEntry[]> {
+    const docs = await this.client.query(api.personalArchive.listEntries, { includeArchived });
+    return docs.map(toPersonalArchiveEntry);
+  }
+
+  async updatePersonalArchiveEntry(input: {
+    entryId: string;
+    bucket: PersonalArchiveEntry['bucket'];
+    title?: string;
+    content: string;
+  }): Promise<void> {
+    await this.client.action(api.ai.archive.updateEntry as any, {
+      entryId: input.entryId as Id<'personalArchiveEntries'>,
+      bucket: input.bucket,
+      title: input.title,
+      content: input.content,
+    });
+  }
+
+  async archivePersonalArchiveEntry(entryId: string): Promise<void> {
+    await this.client.action(api.ai.archive.archiveEntry as any, {
+      entryId: entryId as Id<'personalArchiveEntries'>,
+    });
+  }
+
+  async deletePersonalArchiveEntry(entryId: string): Promise<void> {
+    await this.client.action(api.ai.archive.deleteEntry as any, {
+      entryId: entryId as Id<'personalArchiveEntries'>,
+    });
   }
 
   async listConversations(includeArchived = false): Promise<Conversation[]> {

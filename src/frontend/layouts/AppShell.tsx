@@ -64,9 +64,25 @@ export function AppShell() {
       };
     }
 
+    if (location.pathname.startsWith('/start')) {
+      return {
+        title: 'Quick Start',
+        subtitle: '',
+        showParticipants: false,
+      };
+    }
+
     if (location.pathname.startsWith('/kb-query')) {
       return {
         title: 'KB Query',
+        subtitle: '',
+        showParticipants: false,
+      };
+    }
+
+    if (location.pathname.startsWith('/archive')) {
+      return {
+        title: 'Personal Archive',
         subtitle: '',
         showParticipants: false,
       };

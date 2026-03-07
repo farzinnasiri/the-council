@@ -1,6 +1,8 @@
 import {
+  Archive,
   ArrowLeft,
   ChevronRight,
+  House,
   MessageCirclePlus,
   MessagesSquare,
   MoreVertical,
@@ -350,6 +352,20 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               </div>
             </div>
 
+            <NavLink
+              to="/start"
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                cn(
+                  'mb-2 flex h-10 w-full items-center justify-start gap-2 rounded-lg px-2 text-sm text-foreground/90 transition hover:bg-background/60',
+                  isActive && 'bg-muted text-foreground'
+                )
+              }
+            >
+              <House className="h-4 w-4" />
+              Quick Start
+            </NavLink>
+
             <Button
               variant="ghost"
               className="h-10 w-full justify-start gap-2 rounded-lg px-2 text-sm text-foreground/90 hover:bg-background/60"
@@ -558,6 +574,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       <div className="shrink-0 p-3">
         <nav className="grid gap-1">
           <NavItem to="/members" icon={<Users2 className="h-4 w-4" />} label="Members" onNavigate={onNavigate} />
+          <NavItem to="/archive" icon={<Archive className="h-4 w-4" />} label="Personal Archive" onNavigate={onNavigate} />
           <NavItem to="/kb-query" icon={<Search className="h-4 w-4" />} label="KB Query" onNavigate={onNavigate} />
           <NavItem
             to="/settings"

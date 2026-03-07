@@ -22,6 +22,39 @@ export interface CouncilKBDocumentDigestHint {
   digestSummary: string;
 }
 
+export interface CouncilPersonalArchiveAccess {
+  reflection: boolean;
+  cookieJar: boolean;
+  accountability: boolean;
+  worldModel: boolean;
+}
+
+export type CouncilPersonalArchiveBucket =
+  | 'reflection'
+  | 'cookie_jar'
+  | 'accountability'
+  | 'world_model';
+
+export interface CouncilPersonalArchiveRetriever {
+  listSources(input: {
+    access: CouncilPersonalArchiveAccess;
+  }): Promise<{
+    availableBuckets: CouncilPersonalArchiveBucket[];
+    totalEntries: number;
+  }>;
+  retrieve(input: {
+    query: string;
+    buckets: CouncilPersonalArchiveBucket[];
+    limit?: number;
+    traceId: string;
+  }): Promise<{
+    retrievalText: string;
+    citations: Array<{ title: string; uri?: string }>;
+    snippets: Array<{ text: string; citationIndices: number[] }>;
+    grounded: boolean;
+  }>;
+}
+
 export interface RoundIntentProposal {
   intent: RoundIntent;
   targetMemberId?: string;
@@ -53,10 +86,17 @@ export interface ProviderChatResponse {
   retrievalModel: string;
   grounded: boolean;
   usedKnowledgeBase?: boolean;
+  usedPersonalArchive?: boolean;
   debug?: {
     traceId: string;
-    mode: 'with-kb' | 'prompt-only';
+    mode: 'with-context' | 'prompt-only';
     reason?: string;
+    contextPlanner?: {
+      requestedSources: string[];
+      availableKnowledgeDocs: number;
+      availableArchiveBuckets: string[];
+      decisionReason: string;
+    };
     kbCheck?: {
       requestedStoreName: string | null;
       docsCount: number;
@@ -69,6 +109,11 @@ export interface ProviderChatResponse {
         decision?: 'required' | 'helpful' | 'unnecessary';
         confidence?: number;
       };
+    };
+    personalArchiveCheck?: {
+      availableBuckets: string[];
+      totalEntries: number;
+      used: boolean;
     };
     queryPlan?: {
       originalQuery: string;
@@ -95,6 +140,15 @@ export interface ProviderChatResponse {
       queryUsed?: string;
       usedAlternateQuery?: boolean;
     };
+    personalArchiveSearchResponse?: {
+      grounded: boolean;
+      citationsCount: number;
+      snippetsCount: number;
+      retrievalText: string;
+      citations: Array<{ title: string; uri?: string }>;
+      snippets: string[];
+      queryUsed?: string;
+    };
     answerPrompt: string;
   };
 }
@@ -120,6 +174,9 @@ export interface CouncilAiProvider {
     query: string;
     storeName?: string | null;
     knowledgeRetriever?: CouncilKnowledgeRetriever;
+    personalArchiveRetriever?: CouncilPersonalArchiveRetriever;
+    personalArchiveAccess?: CouncilPersonalArchiveAccess;
+    identityContext?: string;
     memoryHint?: string;
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;

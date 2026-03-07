@@ -2,8 +2,12 @@
 
 import type { Id } from '../../_generated/dataModel';
 import { createCouncilAiProvider } from '../../ai/provider/factory';
-import type { CouncilKBDocumentDigestHint } from '../../ai/provider/types';
+import type {
+  CouncilKBDocumentDigestHint,
+  CouncilPersonalArchiveAccess,
+} from '../../ai/provider/types';
 import { listMemberChunkDocuments, searchMemberChunks } from '../../ai/ragStore';
+import { searchPersonalArchiveChunks } from '../../ai/personalArchiveStore';
 import type { ActionCtxLike, KBDigestRow } from './types';
 
 export async function runApiQuery<TResult>(
@@ -63,6 +67,34 @@ export function createKnowledgeRetriever(ctx: ActionCtxLike, memberId: Id<'membe
       await searchMemberChunks(ctx, {
         memberId,
         query,
+        limit,
+      }),
+  };
+}
+
+export function createPersonalArchiveRetriever(ctx: ActionCtxLike & { vectorSearch?: any }, userId: Id<'users'>) {
+  return {
+    listSources: async ({ access }: { access: CouncilPersonalArchiveAccess }) =>
+      await runNamedQuery<{ availableBuckets: Array<'reflection' | 'cookie_jar' | 'accountability' | 'world_model'>; totalEntries: number }>(
+        ctx,
+        'personalArchive:getAccessibleSummary',
+        { access },
+      ),
+    retrieve: async ({
+      query,
+      buckets,
+      limit,
+      traceId: _traceId,
+    }: {
+      query: string;
+      buckets: Array<'reflection' | 'cookie_jar' | 'accountability' | 'world_model'>;
+      limit?: number;
+      traceId: string;
+    }) =>
+      await searchPersonalArchiveChunks(ctx, {
+        userId,
+        query,
+        allowedBuckets: buckets,
         limit,
       }),
   };

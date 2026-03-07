@@ -7,6 +7,14 @@ export type MessageStatus = 'sent' | 'error';
 export type RoutingSource = 'llm' | 'fallback' | 'chamber-fixed';
 export type RoundtableIntent = 'speak' | 'challenge' | 'support' | 'pass';
 export type RoundtableRoundStatus = 'awaiting_user' | 'in_progress' | 'completed' | 'superseded';
+export type PersonalArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
+
+export interface PersonalArchiveAccess {
+  reflection: boolean;
+  cookieJar: boolean;
+  accountability: boolean;
+  worldModel: boolean;
+}
 
 export interface User {
   id: string;
@@ -23,6 +31,7 @@ export interface Member {
   specialties: string[];
   systemPrompt: string;
   kbStoreName?: string;
+  personalArchiveAccess: PersonalArchiveAccess;
   deletedAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -124,4 +133,33 @@ export interface KnowledgeDocument {
   name?: string;
   displayName?: string;
   uploadedAt?: string;
+}
+
+export interface PersonalArchiveProfile {
+  id: string;
+  identity: string;
+  updatedAt: number;
+}
+
+export interface PersonalArchiveCapturePreview {
+  captureId: string;
+  parseStatus: 'ready' | 'failed';
+  parseError?: string;
+  rawText: string;
+  proposedEntries: Array<{
+    bucket: PersonalArchiveBucket;
+    title?: string;
+    content: string;
+  }>;
+}
+
+export interface PersonalArchiveEntry {
+  id: string;
+  captureId?: string;
+  bucket: PersonalArchiveBucket;
+  title?: string;
+  content: string;
+  archivedAt?: number;
+  updatedAt: number;
+  createdAt: number;
 }

@@ -21,7 +21,10 @@ function resolveGeminiKey(): string {
   return key;
 }
 
-export function createChatModel(target: ModelTarget, options?: { temperature?: number }): BaseChatModel {
+export function createChatModel(
+  target: ModelTarget,
+  options?: { temperature?: number; thinkingBudget?: number }
+): BaseChatModel {
   const temperature = options?.temperature;
   if (target.provider === 'openai') {
     // GPT-5.2 chat models in this project deployment currently reject custom temperature values.
@@ -36,5 +39,8 @@ export function createChatModel(target: ModelTarget, options?: { temperature?: n
     apiKey: resolveGeminiKey(),
     model: target.model,
     temperature,
+    ...(typeof options?.thinkingBudget === 'number'
+      ? { thinkingConfig: { thinkingBudget: options.thinkingBudget } }
+      : {}),
   });
 }

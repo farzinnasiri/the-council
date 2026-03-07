@@ -10,7 +10,7 @@ export interface CouncilContextMessage {
 
 export interface TraceState {
   traceId: string;
-  mode: 'with-kb' | 'prompt-only';
+  mode: 'with-context' | 'prompt-only';
   reason?: string;
   answerPrompt: string;
 }

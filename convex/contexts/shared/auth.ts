@@ -10,6 +10,12 @@ export interface OwnedMember {
   specialties: string[];
   systemPrompt: string;
   kbStoreName?: string;
+  personalArchiveAccess?: {
+    reflection: boolean;
+    cookieJar: boolean;
+    accountability: boolean;
+    worldModel: boolean;
+  };
   deletedAt?: number;
 }
 

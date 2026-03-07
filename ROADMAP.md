@@ -46,7 +46,7 @@ Status: In Progress (as of February 27, 2026)
 ### 1.7 Conversation Scratchpad Notes (Hall + Chamber)
 - Add per-conversation user notes/receipts as a built-in scratchpad in both Hall and Chamber.
 - Goal: preserve chat flow while letting users quickly capture/copy/paste/edit supporting info.
-- Keep editing lightweight (quick add, inline edit, simple formatting only).
+- Keep editing lightweight (quick add, directly adding a whole response, inline edit, simple formatting only).
 - UX requirement: first-class support on both mobile and desktop (layout, keyboard behavior, easy open/close).
 - Scope boundary: notes are conversation-scoped (not global memory) and should not block chatting.
 

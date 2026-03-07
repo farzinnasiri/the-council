@@ -7,12 +7,14 @@ import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
 import type { KBDigestMetadata } from '../repository/CouncilRepository';
+import type { PersonalArchiveAccess } from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
 
 interface MemberFormState {
   name: string;
   specialties: string;
   systemPrompt: string;
+  personalArchiveAccess: PersonalArchiveAccess;
 }
 
 interface DigestEditorState {
@@ -30,6 +32,12 @@ const emptyForm: MemberFormState = {
   name: '',
   specialties: '',
   systemPrompt: '',
+  personalArchiveAccess: {
+    reflection: false,
+    cookieJar: false,
+    accountability: false,
+    worldModel: false,
+  },
 };
 
 export function MembersPage() {
@@ -155,6 +163,7 @@ export function MembersPage() {
       name: member.name,
       specialties: member.specialties.join(', '),
       systemPrompt: member.systemPrompt,
+      personalArchiveAccess: member.personalArchiveAccess,
     });
     setIsCreating(false);
     setPendingAvatarBlob(null);
@@ -207,6 +216,7 @@ export function MembersPage() {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean),
+      personalArchiveAccess: form.personalArchiveAccess,
     };
 
     if (editingMemberId) {
@@ -223,6 +233,7 @@ export function MembersPage() {
         name: created.name,
         specialties: created.specialties.join(', '),
         systemPrompt: created.systemPrompt,
+        personalArchiveAccess: created.personalArchiveAccess,
       });
       return;
     }
@@ -419,6 +430,16 @@ export function MembersPage() {
     return 'border-border bg-muted/40 text-muted-foreground';
   };
 
+  const toggleArchiveAccess = (key: keyof PersonalArchiveAccess) => {
+    setForm((current) => ({
+      ...current,
+      personalArchiveAccess: {
+        ...current.personalArchiveAccess,
+        [key]: !current.personalArchiveAccess[key],
+      },
+    }));
+  };
+
   return (
     <div className="h-full overflow-y-auto px-4 py-5 md:px-8 md:py-8">
       <div className={`mx-auto grid w-full gap-6 ${isFormActive ? 'max-w-6xl lg:grid-cols-[1.2fr_1fr]' : 'max-w-2xl grid-cols-1'}`}>
@@ -533,6 +554,45 @@ export function MembersPage() {
                   placeholder="Direct instructions for this member..."
                 />
               </label>
+
+              <section className="rounded-md border border-border bg-background/50 p-3">
+                <div className="mb-2">
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Personal Archive Access
+                  </p>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                    Identity is always on. These toggles control searchable archive buckets for this member.
+                  </p>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    ['reflection', 'Reflection'],
+                    ['cookieJar', 'Cookie Jar'],
+                    ['accountability', 'Accountability'],
+                    ['worldModel', 'World Model'],
+                  ].map(([key, label]) => {
+                    const typedKey = key as keyof PersonalArchiveAccess;
+                    const enabled = form.personalArchiveAccess[typedKey];
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => toggleArchiveAccess(typedKey)}
+                        className={`flex items-center justify-between rounded-md border px-3 py-2 text-left font-mono text-xs transition-colors ${
+                          enabled
+                            ? 'border-foreground/30 bg-foreground text-background'
+                            : 'border-border bg-transparent text-foreground hover:border-foreground/20 hover:bg-muted/40'
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <span className="text-[10px] uppercase tracking-[0.14em]">
+                          {enabled ? 'On' : 'Off'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
 
               <div className="mt-2 flex items-center gap-2">
                 <Button className="h-8 gap-2 rounded-md text-xs" onClick={() => void save()} disabled={!form.name.trim() || !form.systemPrompt.trim()}>

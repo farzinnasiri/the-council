@@ -31,10 +31,17 @@ interface MemberChatResult {
   model: string;
   retrievalModel: string;
   usedKnowledgeBase: boolean;
+  usedPersonalArchive?: boolean;
   debug?: {
     traceId: string;
-    mode: 'with-kb' | 'prompt-only';
+    mode: 'with-context' | 'prompt-only';
     reason?: string;
+    contextPlanner?: {
+      requestedSources: string[];
+      availableKnowledgeDocs: number;
+      availableArchiveBuckets: string[];
+      decisionReason: string;
+    };
     kbCheck?: {
       requestedStoreName: string | null;
       docsCount: number;
@@ -47,6 +54,11 @@ interface MemberChatResult {
         decision?: 'required' | 'helpful' | 'unnecessary';
         confidence?: number;
       };
+    };
+    personalArchiveCheck?: {
+      availableBuckets: string[];
+      totalEntries: number;
+      used: boolean;
     };
     queryPlan?: {
       originalQuery: string;
@@ -73,6 +85,15 @@ interface MemberChatResult {
       queryUsed?: string;
       usedAlternateQuery?: boolean;
     };
+    personalArchiveSearchResponse?: {
+      grounded: boolean;
+      citationsCount: number;
+      snippetsCount: number;
+      retrievalText: string;
+      citations: Array<{ title: string; uri?: string }>;
+      snippets: string[];
+      queryUsed?: string;
+    };
     answerPrompt: string;
   };
 }
@@ -91,11 +112,17 @@ function logCouncilDebug(memberId: string, debug: MemberChatResult['debug'] | un
   if (debug.queryPlan) {
     console.log('Query Plan', debug.queryPlan);
   }
+  if (debug.contextPlanner) {
+    console.log('Context Planner', debug.contextPlanner);
+  }
   if (debug.fileSearchStart) {
     console.log('File Search Request', debug.fileSearchStart);
   }
   if (debug.fileSearchResponse) {
     console.log('File Search Response', debug.fileSearchResponse);
+  }
+  if (debug.personalArchiveSearchResponse) {
+    console.log('Personal Archive Response', debug.personalArchiveSearchResponse);
   }
   console.log('Chat Model Prompt', debug.answerPrompt);
   if (debug.reason) {

@@ -3,6 +3,7 @@ export type ModelSlot =
   | 'transcription'
   | 'retrieval'
   | 'router'
+  | 'archiveParse'
   | 'hallTitle'
   | 'hallMemory'
   | 'specialties'
@@ -24,6 +25,7 @@ const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   transcription: 'AI_MODEL_TRANSCRIPTION',
   retrieval: 'AI_MODEL_RETRIEVAL',
   router: 'AI_MODEL_ROUTER',
+  archiveParse: 'AI_MODEL_ARCHIVE_PARSE',
   hallTitle: 'AI_MODEL_HALL_TITLE',
   hallMemory: 'AI_MODEL_HALL_MEMORY',
   specialties: 'AI_MODEL_SPECIALTIES',
@@ -39,6 +41,7 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
   transcription: ['GEMINI_TRANSCRIPTION_MODEL', 'GEMINI_MODEL'],
   retrieval: ['GEMINI_RETRIEVAL_MODEL', 'GEMINI_MODEL'],
   router: ['GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
+  archiveParse: ['GEMINI_ARCHIVE_PARSE_MODEL', 'GEMINI_MODEL'],
   hallTitle: ['GEMINI_HALL_TITLE_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   hallMemory: ['GEMINI_HALL_MEMORY_MODEL', 'GEMINI_MODEL'],
   specialties: ['GEMINI_SPECIALTIES_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
@@ -54,6 +57,7 @@ const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   transcription: { provider: 'google', model: 'gemini-2.5-flash' },
   retrieval: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   router: { provider: 'google', model: 'gemini-2.5-flash' },
+  archiveParse: { provider: 'google', model: 'gemini-3-flash-preview' },
   hallTitle: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   hallMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
   specialties: { provider: 'google', model: 'gemini-2.5-flash-lite' },
@@ -112,6 +116,7 @@ export const MODEL_IDS: Record<ModelSlot, string> = {
   transcription: resolveModelTarget('transcription').model,
   retrieval: resolveModelTarget('retrieval').model,
   router: resolveModelTarget('router').model,
+  archiveParse: resolveModelTarget('archiveParse').model,
   hallTitle: resolveModelTarget('hallTitle').model,
   hallMemory: resolveModelTarget('hallMemory').model,
   specialties: resolveModelTarget('specialties').model,

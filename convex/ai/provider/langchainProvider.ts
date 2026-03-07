@@ -12,6 +12,8 @@ import type {
   CouncilContextMessage,
   CouncilKBDocumentDigestHint,
   CouncilKnowledgeRetriever,
+  CouncilPersonalArchiveAccess,
+  CouncilPersonalArchiveRetriever,
   CouncilRouteMemberCandidate,
   RoundIntentProposal,
 } from './types';
@@ -46,6 +48,9 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     query: string;
     storeName?: string | null;
     knowledgeRetriever?: CouncilKnowledgeRetriever;
+    personalArchiveRetriever?: CouncilPersonalArchiveRetriever;
+    personalArchiveAccess?: CouncilPersonalArchiveAccess;
+    identityContext?: string;
     memoryHint?: string;
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;
@@ -54,6 +59,7 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     metadataFilter?: string;
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
+    includeConversationContext?: boolean;
     useKnowledgeBase?: boolean;
   }) {
     return await runMemberChatGraph(input);

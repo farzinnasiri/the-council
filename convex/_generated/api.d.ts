@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as ai_archive from "../ai/archive.js";
 import type * as ai_chat from "../ai/chat.js";
 import type * as ai_graphs_fallbacks from "../ai/graphs/fallbacks.js";
 import type * as ai_graphs_hallTitleGraph from "../ai/graphs/hallTitleGraph.js";
@@ -26,6 +27,7 @@ import type * as ai_modelConfig from "../ai/modelConfig.js";
 import type * as ai_openaiEmbeddings from "../ai/openaiEmbeddings.js";
 import type * as ai_orchestration_advisoryHall from "../ai/orchestration/advisoryHall.js";
 import type * as ai_orchestration_roundtableHall from "../ai/orchestration/roundtableHall.js";
+import type * as ai_personalArchiveStore from "../ai/personalArchiveStore.js";
 import type * as ai_provider_factory from "../ai/provider/factory.js";
 import type * as ai_provider_langchainProvider from "../ai/provider/langchainProvider.js";
 import type * as ai_provider_types from "../ai/provider/types.js";
@@ -72,6 +74,7 @@ import type * as contexts_knowledge_application_uploadMemberDocuments from "../c
 import type * as contexts_knowledge_contracts from "../contexts/knowledge/contracts.js";
 import type * as contexts_knowledge_infrastructure_knowledgeIngestGateway from "../contexts/knowledge/infrastructure/knowledgeIngestGateway.js";
 import type * as contexts_knowledge_infrastructure_knowledgeRepo from "../contexts/knowledge/infrastructure/knowledgeRepo.js";
+import type * as contexts_personalArchive_infrastructure_archiveRepo from "../contexts/personalArchive/infrastructure/archiveRepo.js";
 import type * as contexts_shared_auth from "../contexts/shared/auth.js";
 import type * as contexts_shared_contracts from "../contexts/shared/contracts.js";
 import type * as contexts_shared_convexGateway from "../contexts/shared/convexGateway.js";
@@ -87,6 +90,9 @@ import type * as members from "../members.js";
 import type * as memoryLogs from "../memoryLogs.js";
 import type * as messages from "../messages.js";
 import type * as migrations from "../migrations.js";
+import type * as personalArchive from "../personalArchive.js";
+import type * as personalArchiveChunks from "../personalArchiveChunks.js";
+import type * as personalArchiveShared from "../personalArchiveShared.js";
 import type * as seed from "../seed.js";
 import type * as settings from "../settings.js";
 import type * as upload from "../upload.js";
@@ -99,6 +105,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "ai/archive": typeof ai_archive;
   "ai/chat": typeof ai_chat;
   "ai/graphs/fallbacks": typeof ai_graphs_fallbacks;
   "ai/graphs/hallTitleGraph": typeof ai_graphs_hallTitleGraph;
@@ -117,6 +124,7 @@ declare const fullApi: ApiFromModules<{
   "ai/openaiEmbeddings": typeof ai_openaiEmbeddings;
   "ai/orchestration/advisoryHall": typeof ai_orchestration_advisoryHall;
   "ai/orchestration/roundtableHall": typeof ai_orchestration_roundtableHall;
+  "ai/personalArchiveStore": typeof ai_personalArchiveStore;
   "ai/provider/factory": typeof ai_provider_factory;
   "ai/provider/langchainProvider": typeof ai_provider_langchainProvider;
   "ai/provider/types": typeof ai_provider_types;
@@ -163,6 +171,7 @@ declare const fullApi: ApiFromModules<{
   "contexts/knowledge/contracts": typeof contexts_knowledge_contracts;
   "contexts/knowledge/infrastructure/knowledgeIngestGateway": typeof contexts_knowledge_infrastructure_knowledgeIngestGateway;
   "contexts/knowledge/infrastructure/knowledgeRepo": typeof contexts_knowledge_infrastructure_knowledgeRepo;
+  "contexts/personalArchive/infrastructure/archiveRepo": typeof contexts_personalArchive_infrastructure_archiveRepo;
   "contexts/shared/auth": typeof contexts_shared_auth;
   "contexts/shared/contracts": typeof contexts_shared_contracts;
   "contexts/shared/convexGateway": typeof contexts_shared_convexGateway;
@@ -178,6 +187,9 @@ declare const fullApi: ApiFromModules<{
   memoryLogs: typeof memoryLogs;
   messages: typeof messages;
   migrations: typeof migrations;
+  personalArchive: typeof personalArchive;
+  personalArchiveChunks: typeof personalArchiveChunks;
+  personalArchiveShared: typeof personalArchiveShared;
   seed: typeof seed;
   settings: typeof settings;
   upload: typeof upload;

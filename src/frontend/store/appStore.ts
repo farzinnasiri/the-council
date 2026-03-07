@@ -6,6 +6,7 @@ import type {
   Member,
   Message,
   MessageRouting,
+  PersonalArchiveAccess,
   RoundtableState,
   ThemeMode,
 } from '../types/domain';
@@ -41,6 +42,7 @@ interface CreateMemberPayload {
   name: string;
   systemPrompt: string;
   specialties?: string[];
+  personalArchiveAccess?: PersonalArchiveAccess;
 }
 
 interface AppState {

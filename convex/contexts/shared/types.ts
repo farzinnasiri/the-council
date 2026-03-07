@@ -24,6 +24,12 @@ export interface MemberListRow {
   specialties?: string[];
   systemPrompt: string;
   kbStoreName?: string;
+  personalArchiveAccess?: {
+    reflection: boolean;
+    cookieJar: boolean;
+    accountability: boolean;
+    worldModel: boolean;
+  };
   deletedAt?: number;
   avatarUrl?: string | null;
 }

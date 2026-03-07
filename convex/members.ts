@@ -1,6 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import { defaultPersonalArchiveAccess, personalArchiveAccessValidator } from './personalArchiveShared';
 
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -54,6 +55,7 @@ export const create = mutation({
     name: v.string(),
     specialties: v.optional(v.array(v.string())),
     systemPrompt: v.string(),
+    personalArchiveAccess: v.optional(personalArchiveAccessValidator),
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
@@ -62,6 +64,7 @@ export const create = mutation({
       name: args.name,
       specialties: args.specialties ?? [],
       systemPrompt: args.systemPrompt,
+      personalArchiveAccess: args.personalArchiveAccess ?? defaultPersonalArchiveAccess(),
       updatedAt: Date.now(),
     });
     const doc = (await ctx.db.get(id))!;
@@ -77,6 +80,7 @@ export const update = mutation({
     systemPrompt: v.optional(v.string()),
     avatarId: v.optional(v.id('_storage')),
     kbStoreName: v.optional(v.string()),
+    personalArchiveAccess: v.optional(personalArchiveAccessValidator),
     deletedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {

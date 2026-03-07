@@ -1,6 +1,13 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { authTables } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
+import {
+  personalArchiveAccessValidator,
+  personalArchiveBucketValidator,
+  personalArchiveCaptureStatusValidator,
+  personalArchiveProposedEntryValidator,
+  personalArchiveSourceTypeValidator,
+} from './personalArchiveShared';
 
 export default defineSchema({
   ...authTables,
@@ -20,6 +27,7 @@ export default defineSchema({
     specialties: v.array(v.string()),
     systemPrompt: v.string(),
     kbStoreName: v.optional(v.string()),
+    personalArchiveAccess: v.optional(personalArchiveAccessValidator),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
     status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
     deletedAt: v.optional(v.number()),
@@ -245,5 +253,58 @@ export default defineSchema({
       vectorField: 'embedding',
       dimensions: 1536,
       filterFields: ['userId', 'memberId', 'kbStoreName'],
+    }),
+
+  personalArchiveProfiles: defineTable({
+    userId: v.id('users'),
+    identity: v.string(),
+    updatedAt: v.number(),
+  }).index('by_user', ['userId']),
+
+  personalArchiveCaptures: defineTable({
+    userId: v.id('users'),
+    sourceType: personalArchiveSourceTypeValidator,
+    rawText: v.optional(v.string()),
+    storageId: v.optional(v.id('_storage')),
+    originalLabel: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    sizeBytes: v.optional(v.number()),
+    parseStatus: personalArchiveCaptureStatusValidator,
+    parseError: v.optional(v.string()),
+    proposedEntries: v.array(personalArchiveProposedEntryValidator),
+    updatedAt: v.number(),
+    committedAt: v.optional(v.number()),
+  })
+    .index('by_user_updated', ['userId', 'updatedAt']),
+
+  personalArchiveEntries: defineTable({
+    userId: v.id('users'),
+    captureId: v.optional(v.id('personalArchiveCaptures')),
+    bucket: personalArchiveBucketValidator,
+    title: v.optional(v.string()),
+    content: v.string(),
+    archivedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+  })
+    .index('by_user_updated', ['userId', 'updatedAt'])
+    .index('by_user_bucket', ['userId', 'bucket']),
+
+  personalArchiveChunks: defineTable({
+    userId: v.id('users'),
+    entryId: v.id('personalArchiveEntries'),
+    bucket: personalArchiveBucketValidator,
+    title: v.optional(v.string()),
+    chunkIndex: v.number(),
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    createdAt: v.number(),
+  })
+    .index('by_entry', ['entryId'])
+    .index('by_user_bucket_createdAt', ['userId', 'bucket', 'createdAt'])
+    .vectorIndex('by_embedding', {
+      vectorField: 'embedding',
+      dimensions: 1536,
+      filterFields: ['userId', 'bucket'],
     }),
 });
