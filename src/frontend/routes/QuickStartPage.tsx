@@ -716,17 +716,17 @@ function QuickStartCard({
       disabled={disabled}
       variant="outline"
       className={cn(
-        'h-28 justify-start rounded-none border-border bg-card p-0 text-left text-foreground sm:h-auto sm:aspect-square',
+        'h-28 justify-start rounded-none border-border bg-card p-0 text-left text-foreground sm:h-auto sm:aspect-square lg:h-[320px] lg:aspect-auto',
         'hover:bg-muted/20 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-55',
       )}
     >
       <div className="flex h-full w-full items-center justify-center px-4 py-4 md:px-6 md:py-6">
-        <div className="flex min-w-0 flex-col items-center justify-center text-center">
-          <div className="font-display text-[clamp(1.3rem,4vw,3.2rem)] leading-[0.95] tracking-tight">
+        <div className="flex min-w-0 max-w-[16ch] flex-col items-center justify-center text-center">
+          <div className="text-balance font-display text-[clamp(1.3rem,3vw,3rem)] leading-[0.95] tracking-tight break-words">
             {title}
           </div>
           {meta ? (
-            <div className="mt-2 text-[11px] leading-tight text-muted-foreground md:mt-3 md:text-sm">
+            <div className="mt-2 max-w-[26ch] text-balance text-[11px] leading-tight text-muted-foreground md:mt-3 md:text-sm">
               {meta}
             </div>
           ) : null}
