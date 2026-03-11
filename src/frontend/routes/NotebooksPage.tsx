@@ -115,11 +115,11 @@ export function NotebooksPage() {
               detail={selectedMeta.detail}
               variant="page"
             />
-          ) : (
+          ) : !isMobile ? (
             <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
               Select a notebook from the list.
             </div>
-          )}
+          ) : null}
         </section>
       </div>
     </div>

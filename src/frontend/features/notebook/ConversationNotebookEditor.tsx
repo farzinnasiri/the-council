@@ -33,13 +33,13 @@ export function ConversationNotebookEditor({
 
   return (
     <section className={cn('flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background', className)}>
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <NotebookPen className="h-4 w-4 text-muted-foreground" />
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
+            <h2 className="m-0 truncate text-sm font-semibold leading-5">{title}</h2>
           </div>
-          {detail ? <p className="mt-1 text-xs text-muted-foreground">{detail}</p> : null}
+          {detail ? <p className="m-0 mt-1 text-xs leading-5 text-muted-foreground">{detail}</p> : null}
         </div>
         <div className="flex items-center gap-2">
           <span className={cn('text-xs text-muted-foreground', saveState === 'error' && 'text-destructive')}>
