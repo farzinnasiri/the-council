@@ -6,7 +6,7 @@ import { runMemberChatGraph } from '../graphs/memberChatGraph';
 import { runRoundIntentGraph } from '../graphs/roundIntentGraph';
 import { runRouteMembersGraph } from '../graphs/routeMembersGraph';
 import { runSpecialtiesGraph } from '../graphs/specialtiesGraph';
-import { runChamberSummaryGraph, runHallRoundSummaryGraph, runSummaryGraph } from '../graphs/summaryGraph';
+import { runChamberSummaryGraph, runHallFollowUpSeedGraph, runHallRoundSummaryGraph, runSummaryGraph } from '../graphs/summaryGraph';
 import type {
   CouncilAiProvider,
   CouncilContextMessage,
@@ -92,6 +92,19 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     model?: string;
   }): Promise<string> {
     return await runHallRoundSummaryGraph(input);
+  }
+
+  async summarizeHallFollowUpThread(input: {
+    memberName: string;
+    hallMode: 'advisory' | 'roundtable';
+    participants: string[];
+    roundSummaries: string[];
+    transcript: Array<{ author: string; content: string }>;
+    pairedUserMessage?: string;
+    anchorMemberMessage: string;
+    model?: string;
+  }): Promise<string> {
+    return await runHallFollowUpSeedGraph(input);
   }
 
   async summarizeDocumentDigest(input: {

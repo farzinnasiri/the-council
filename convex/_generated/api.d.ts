@@ -47,6 +47,7 @@ import type * as ai_voice from "../ai/voice.js";
 import type * as auth from "../auth.js";
 import type * as contexts_chamber_application_chatWithMember from "../contexts/chamber/application/chatWithMember.js";
 import type * as contexts_chamber_application_compactConversation from "../contexts/chamber/application/compactConversation.js";
+import type * as contexts_chamber_application_startHallFollowUpThread from "../contexts/chamber/application/startHallFollowUpThread.js";
 import type * as contexts_chamber_application_suggestChamberTitle from "../contexts/chamber/application/suggestChamberTitle.js";
 import type * as contexts_chamber_contracts from "../contexts/chamber/contracts.js";
 import type * as contexts_chamber_infrastructure_chamberRepo from "../contexts/chamber/infrastructure/chamberRepo.js";
@@ -145,6 +146,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   "contexts/chamber/application/chatWithMember": typeof contexts_chamber_application_chatWithMember;
   "contexts/chamber/application/compactConversation": typeof contexts_chamber_application_compactConversation;
+  "contexts/chamber/application/startHallFollowUpThread": typeof contexts_chamber_application_startHallFollowUpThread;
   "contexts/chamber/application/suggestChamberTitle": typeof contexts_chamber_application_suggestChamberTitle;
   "contexts/chamber/contracts": typeof contexts_chamber_contracts;
   "contexts/chamber/infrastructure/chamberRepo": typeof contexts_chamber_infrastructure_chamberRepo;

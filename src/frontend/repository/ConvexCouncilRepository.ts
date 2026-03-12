@@ -98,6 +98,7 @@ function toMessage(doc: ConvexMessageDoc): Message {
     id: doc._id,
     conversationId: doc.conversationId,
     role: doc.role,
+    systemKind: doc.systemKind,
     authorMemberId: doc.authorMemberId,
     content: doc.content,
     status: doc.status,
@@ -509,6 +510,25 @@ class ConvexCouncilRepository implements CouncilRepository {
     return toConversation(doc);
   }
 
+  async startHallFollowUpThread(input: {
+    hallConversationId: string;
+    hallMessageId: string;
+  }): Promise<{
+    conversation: Conversation;
+    messages: Message[];
+    memory: string;
+  }> {
+    const result = await this.client.action(api.ai.chat.startHallFollowUpThread as any, {
+      hallConversationId: input.hallConversationId as Id<'conversations'>,
+      hallMessageId: input.hallMessageId as Id<'messages'>,
+    });
+    return {
+      conversation: toConversation(result.conversation),
+      messages: result.messages.map(toMessage),
+      memory: result.memory,
+    };
+  }
+
   async getLatestChamberThread(memberId: string): Promise<Conversation | null> {
     const doc = await this.clientAny.query('conversations:getLatestChamberByMember', {
       memberId: memberId as Id<'members'>,
@@ -638,6 +658,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       messages: input.messages.map((message) => ({
         conversationId,
         role: message.role,
+        systemKind: message.systemKind,
         authorMemberId: message.authorMemberId as Id<'members'> | undefined,
         content: message.content,
         status: message.status,
@@ -674,6 +695,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       replacement: {
         conversationId: input.replacement.conversationId as Id<'conversations'>,
         role: input.replacement.role,
+        systemKind: input.replacement.systemKind,
         authorMemberId: input.replacement.authorMemberId as Id<'members'> | undefined,
         content: input.replacement.content,
         status: input.replacement.status,
@@ -714,6 +736,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       reply: {
         conversationId: input.reply.conversationId as Id<'conversations'>,
         role: input.reply.role,
+        systemKind: input.reply.systemKind,
         authorMemberId: input.reply.authorMemberId as Id<'members'> | undefined,
         content: input.reply.content,
         status: input.reply.status,

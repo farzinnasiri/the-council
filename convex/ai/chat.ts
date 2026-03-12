@@ -5,6 +5,8 @@ import { v } from 'convex/values';
 import { contextMessageValidator } from '../contexts/shared/contracts';
 import { chatWithMemberUseCase } from '../contexts/chamber/application/chatWithMember';
 import { compactConversationUseCase } from '../contexts/chamber/application/compactConversation';
+import type { StartHallFollowUpThreadResult } from '../contexts/chamber/contracts';
+import { startHallFollowUpThreadUseCase } from '../contexts/chamber/application/startHallFollowUpThread';
 import { createAiProvider } from '../contexts/shared/convexGateway';
 import { requireAuthUser, requireOwnedConversation } from '../contexts/shared/auth';
 
@@ -72,4 +74,13 @@ export const summarizeHallRound = action({
     });
     return { summary };
   },
+});
+
+export const startHallFollowUpThread = action({
+  args: {
+    hallConversationId: v.id('conversations'),
+    hallMessageId: v.id('messages'),
+  },
+  handler: async (ctx, args): Promise<StartHallFollowUpThreadResult> =>
+    await startHallFollowUpThreadUseCase(ctx, args),
 });

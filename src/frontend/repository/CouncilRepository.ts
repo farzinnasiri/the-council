@@ -203,6 +203,14 @@ export interface CouncilRepository {
   listChamberThreadsByMember(memberId: string, includeArchived?: boolean): Promise<Conversation[]>;
   createHall(input: CreateHallInput): Promise<Conversation>;
   createChamberThread(memberId: string): Promise<Conversation>;
+  startHallFollowUpThread(input: {
+    hallConversationId: string;
+    hallMessageId: string;
+  }): Promise<{
+    conversation: Conversation;
+    messages: Message[];
+    memory: string;
+  }>;
   getLatestChamberThread(memberId: string): Promise<Conversation | null>;
   setChamberResponseMode(conversationId: string, mode: ChamberResponseMode): Promise<Conversation>;
   renameConversation(conversationId: string, title: string): Promise<Conversation>;

@@ -110,6 +110,10 @@ interface AppState {
   renameConversation: (conversationId: string, title: string) => Promise<void>;
   archiveConversation: (conversationId: string) => Promise<void>;
   createChamberThread: (memberId: string) => Promise<Conversation>;
+  startHallFollowUpThread: (
+    hallConversationId: string,
+    hallMessageId: string
+  ) => Promise<Conversation>;
   listChamberThreadsForMember: (memberId: string) => Conversation[];
   getLatestChamberThreadForMember: (memberId: string) => Conversation | undefined;
   sendHallDraftMessage: (
@@ -1371,6 +1375,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     return created;
   },
 
+  startHallFollowUpThread: async (hallConversationId, hallMessageId) => {
+    const result = await councilRepository.startHallFollowUpThread({
+      hallConversationId,
+      hallMessageId,
+    });
+
+    set((state) => {
+      const conversation = result.conversation;
+      const exists = state.conversations.some((item) => item.id === conversation.id);
+      return {
+        conversations: exists
+          ? state.conversations.map((item) => (item.id === conversation.id ? conversation : item))
+          : [conversation, ...state.conversations],
+        messages: [
+          ...state.messages.filter((message) => message.conversationId !== conversation.id),
+          ...result.messages,
+        ],
+        chamberMemoryByConversation: {
+          ...state.chamberMemoryByConversation,
+          [conversation.id]: result.memory,
+        },
+        selectedConversationId: conversation.id,
+      };
+    });
+
+    return result.conversation;
+  },
+
   listChamberThreadsForMember: (memberId) =>
     listChamberThreadsForMember(get().conversations, memberId),
   getLatestChamberThreadForMember: (memberId) =>
@@ -1440,10 +1472,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
+    const hasUserMessages = state.messages.some(
+      (message) =>
+        message.conversationId === conversationId &&
+        message.role === 'user' &&
+        !message.deletedAt
+    );
     const shouldAutoTitle =
       conversation.kind === 'chamber' &&
       conversation.title.trim().toLowerCase() === 'new thread' &&
-      !conversation.lastMessageAt;
+      !hasUserMessages;
     const nextAdvisoryUserRound =
       state.messages.filter(
         (msg) =>

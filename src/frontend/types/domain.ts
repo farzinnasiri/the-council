@@ -9,6 +9,7 @@ export type RoutingSource = 'llm' | 'fallback' | 'chamber-fixed';
 export type RoundtableIntent = 'speak' | 'challenge' | 'support' | 'pass';
 export type RoundtableRoundStatus = 'awaiting_user' | 'in_progress' | 'completed' | 'superseded';
 export type PersonalArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
+export type SystemMessageKind = 'routing' | 'hall_followup_context';
 
 export interface PersonalArchiveAccess {
   reflection: boolean;
@@ -93,6 +94,7 @@ export interface Message {
   id: string;
   conversationId: string;
   role: MessageRole;
+  systemKind?: SystemMessageKind;
   authorMemberId?: string;
   content: string;
   status: MessageStatus;

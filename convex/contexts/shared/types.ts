@@ -51,12 +51,15 @@ export interface MessageRow {
   userId: Id<'users'>;
   conversationId: Id<'conversations'>;
   role: 'user' | 'member' | 'system';
+  systemKind?: 'routing' | 'hall_followup_context';
   authorMemberId?: Id<'members'>;
   content: string;
   status: 'sent' | 'error';
   compacted: boolean;
   roundNumber?: number;
   deletedAt?: number;
+  originConversationId?: Id<'conversations'>;
+  originMessageId?: Id<'messages'>;
 }
 
 export interface KBDigestRow {

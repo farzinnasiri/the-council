@@ -17,6 +17,7 @@ const messageDoc = v.object({
   userId: v.id('users'),
   conversationId: v.id('conversations'),
   role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
+  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
   authorMemberId: v.optional(v.id('members')),
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
@@ -50,6 +51,7 @@ const messageDoc = v.object({
 const messageInputValidator = v.object({
   conversationId: v.id('conversations'),
   role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
+  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
   authorMemberId: v.optional(v.id('members')),
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
@@ -274,6 +276,7 @@ export const appendMany = mutation({
       await ctx.db.insert('messages', {
         userId,
         ...msg,
+        systemKind: msg.role === 'system' ? msg.systemKind ?? (msg.routing ? 'routing' : undefined) : undefined,
         compacted: false,
       });
     }

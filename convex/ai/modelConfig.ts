@@ -7,6 +7,7 @@ export type ModelSlot =
   | 'archiveParse'
   | 'hallTitle'
   | 'hallMemory'
+  | 'hallThreadSeed'
   | 'specialties'
   | 'summary'
   | 'chamberMemory'
@@ -30,6 +31,7 @@ const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   archiveParse: 'AI_MODEL_ARCHIVE_PARSE',
   hallTitle: 'AI_MODEL_HALL_TITLE',
   hallMemory: 'AI_MODEL_HALL_MEMORY',
+  hallThreadSeed: 'AI_MODEL_HALL_THREAD_SEED',
   specialties: 'AI_MODEL_SPECIALTIES',
   summary: 'AI_MODEL_SUMMARY',
   chamberMemory: 'AI_MODEL_CHAMBER_MEMORY',
@@ -47,6 +49,7 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
   archiveParse: ['GEMINI_ARCHIVE_PARSE_MODEL', 'GEMINI_MODEL'],
   hallTitle: ['GEMINI_HALL_TITLE_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   hallMemory: ['GEMINI_HALL_MEMORY_MODEL', 'GEMINI_MODEL'],
+  hallThreadSeed: ['GEMINI_HALL_THREAD_SEED_MODEL', 'GEMINI_HALL_MEMORY_MODEL', 'GEMINI_MODEL'],
   specialties: ['GEMINI_SPECIALTIES_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   summary: ['GEMINI_SUMMARY_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   chamberMemory: ['GEMINI_CHAMBER_MEMORY_MODEL', 'GEMINI_MODEL'],
@@ -64,6 +67,7 @@ const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   archiveParse: { provider: 'google', model: 'gemini-3-flash-preview' },
   hallTitle: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   hallMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
+  hallThreadSeed: { provider: 'google', model: 'gemini-3-flash-preview' },
   specialties: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   summary: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   chamberMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
@@ -124,6 +128,7 @@ export const MODEL_IDS: Record<ModelSlot, string> = {
   archiveParse: resolveModelTarget('archiveParse').model,
   hallTitle: resolveModelTarget('hallTitle').model,
   hallMemory: resolveModelTarget('hallMemory').model,
+  hallThreadSeed: resolveModelTarget('hallThreadSeed').model,
   specialties: resolveModelTarget('specialties').model,
   summary: resolveModelTarget('summary').model,
   chamberMemory: resolveModelTarget('chamberMemory').model,

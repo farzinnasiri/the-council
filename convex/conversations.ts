@@ -1,5 +1,5 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
-import { mutation, query } from './_generated/server';
+import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { archiveNotebookForConversation } from './notebooks';
 
@@ -30,6 +30,46 @@ const participantDoc = v.object({
   status: v.union(v.literal('active'), v.literal('removed')),
   joinedAt: v.number(),
   leftAt: v.optional(v.number()),
+});
+
+const messageDoc = v.object({
+  _id: v.id('messages'),
+  _creationTime: v.number(),
+  userId: v.id('users'),
+  conversationId: v.id('conversations'),
+  role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
+  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
+  authorMemberId: v.optional(v.id('members')),
+  content: v.string(),
+  status: v.union(v.literal('sent'), v.literal('error')),
+  compacted: v.boolean(),
+  deletedAt: v.optional(v.number()),
+  supersededAt: v.optional(v.number()),
+  supersededByMessageId: v.optional(v.id('messages')),
+  supersedesMessageId: v.optional(v.id('messages')),
+  revisionKind: v.optional(
+    v.union(
+      v.literal('think_harder'),
+      v.literal('deep_dive'),
+      v.literal('shorter'),
+      v.literal('elaborate')
+    )
+  ),
+  generationProfile: v.optional(
+    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
+  ),
+  routing: v.optional(v.object({
+    memberIds: v.array(v.id('members')),
+    source: v.union(v.literal('llm'), v.literal('fallback'), v.literal('chamber-fixed')),
+  })),
+  inReplyToMessageId: v.optional(v.id('messages')),
+  originConversationId: v.optional(v.id('conversations')),
+  originMessageId: v.optional(v.id('messages')),
+  mentionedMemberIds: v.optional(v.array(v.id('members'))),
+  roundNumber: v.optional(v.number()),
+  roundIntent: v.optional(v.union(v.literal('speak'), v.literal('challenge'), v.literal('support'))),
+  roundTargetMemberId: v.optional(v.id('members')),
+  error: v.optional(v.string()),
 });
 
 async function requireUser(ctx: any) {
@@ -545,5 +585,91 @@ export const clearChamberSummary = mutation({
     });
 
     return null;
+  },
+});
+
+export const createHallFollowUpThreadInternal = internalMutation({
+  args: {
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    summary: v.string(),
+    originConversationId: v.id('conversations'),
+    originMessageId: v.id('messages'),
+    originMessageContent: v.string(),
+  },
+  returns: v.object({
+    conversation: conversationDoc,
+    messages: v.array(messageDoc),
+    memory: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const member = await ctx.db.get(args.memberId);
+    if (!member || member.userId !== args.userId || member.deletedAt) {
+      throw new Error('Member not found');
+    }
+
+    const conversationId = await ctx.db.insert('conversations', {
+      userId: args.userId,
+      kind: 'chamber',
+      chamberResponseMode: 'instant',
+      title: 'New Thread',
+      chamberMemberId: args.memberId,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert('conversationParticipants', {
+      conversationId,
+      userId: args.userId,
+      memberId: args.memberId,
+      status: 'active',
+      joinedAt: now,
+    });
+
+    await ctx.db.insert('conversationMemoryLogs', {
+      userId: args.userId,
+      conversationId,
+      scope: 'chamber',
+      memory: args.summary,
+      totalMessagesAtRun: 1,
+      activeMessagesAtRun: 1,
+      compactedMessageCount: 0,
+      recentRawTail: 1,
+    });
+
+    const summaryMessageId = await ctx.db.insert('messages', {
+      userId: args.userId,
+      conversationId,
+      role: 'system',
+      systemKind: 'hall_followup_context',
+      content: args.summary,
+      status: 'sent',
+      compacted: false,
+    });
+
+    const anchorMessageId = await ctx.db.insert('messages', {
+      userId: args.userId,
+      conversationId,
+      role: 'member',
+      authorMemberId: args.memberId,
+      content: args.originMessageContent,
+      status: 'sent',
+      compacted: false,
+      originConversationId: args.originConversationId,
+      originMessageId: args.originMessageId,
+    });
+
+    const conversation = await ctx.db.get(conversationId);
+    const summaryMessage = await ctx.db.get(summaryMessageId);
+    const anchorMessage = await ctx.db.get(anchorMessageId);
+    if (!conversation || !summaryMessage || !anchorMessage) {
+      throw new Error('Failed to create follow-up thread');
+    }
+
+    return {
+      conversation,
+      messages: [summaryMessage, anchorMessage],
+      memory: args.summary,
+    };
   },
 });

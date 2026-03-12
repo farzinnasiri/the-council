@@ -37,6 +37,17 @@ export interface CompactConversationResult {
   summary: string;
 }
 
+export interface StartHallFollowUpThreadInput {
+  hallConversationId: Id<'conversations'>;
+  hallMessageId: Id<'messages'>;
+}
+
+export interface StartHallFollowUpThreadResult {
+  conversation: Record<string, unknown>;
+  messages: Array<Record<string, unknown>>;
+  memory: string;
+}
+
 export interface ChamberApplicationService {
   chatWithMember(input: ChatWithMemberInput): Promise<ChatWithMemberResult>;
   compactConversation(input: CompactConversationInput): Promise<CompactConversationResult>;

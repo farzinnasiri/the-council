@@ -131,6 +131,7 @@ export default defineSchema({
     userId: v.id('users'),
     conversationId: v.id('conversations'),
     role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
+    systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
     authorMemberId: v.optional(v.id('members')),
     content: v.string(),
     status: v.union(v.literal('sent'), v.literal('error')),

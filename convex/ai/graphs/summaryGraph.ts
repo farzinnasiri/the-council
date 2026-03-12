@@ -135,3 +135,58 @@ export async function runHallRoundSummaryGraph(input: {
   const fallback = `Round ${input.roundNumber}:\nMember: (summary unavailable)`;
   return (output || '').trim() || fallback;
 }
+
+export async function runHallFollowUpSeedGraph(input: {
+  memberName: string;
+  hallMode: 'advisory' | 'roundtable';
+  participants: string[];
+  roundSummaries: string[];
+  transcript: Array<{ author: string; content: string }>;
+  pairedUserMessage?: string;
+  anchorMemberMessage: string;
+  model?: string;
+}): Promise<string> {
+  const target = modelRegistry.resolve('hallThreadSeed', input.model);
+  const model = createChatModel(target, { temperature: 0.1 });
+  const transcriptBlock = input.transcript
+    .map((item) => `${item.author}: ${item.content}`)
+    .join('\n')
+    .slice(0, 18000);
+  const roundSummaryBlock = input.roundSummaries.join('\n\n').slice(0, 8000);
+  const prompt = [
+    `You are preparing a private follow-up thread with ${input.memberName} after a council hall conversation.`,
+    'Write a compact, high-signal context brief for the private thread.',
+    'This must help the member continue the conversation privately without re-reading the full hall.',
+    'Output plain text only.',
+    'Write in third person, factual, dense, and easy for another model to use as context.',
+    'Keep enough detail to preserve positions, tensions, and unresolved questions. Do not over-compress.',
+    '',
+    '[Required coverage]',
+    '- What the user has been trying to accomplish in the hall',
+    '- What each participating member argued, suggested, or objected to',
+    `- Extra emphasis on ${input.memberName}'s position, reasoning, and tone`,
+    '- Agreement, disagreement, and unresolved questions',
+    '- Why a private follow-up with this member makes sense now',
+    '',
+    `[Hall Mode]\n${input.hallMode}`,
+    '',
+    `[Participants]\n${input.participants.join(', ') || input.memberName}`,
+    '',
+    '[Completed Round Summaries]',
+    roundSummaryBlock || '(none)',
+    '',
+    '[Recent Hall Transcript]',
+    transcriptBlock || '(none)',
+    '',
+    `[User Message Immediately Before ${input.memberName}'s Selected Reply]`,
+    input.pairedUserMessage?.trim() || '(none found)',
+    '',
+    `[Selected Reply From ${input.memberName}]`,
+    input.anchorMemberMessage.trim(),
+    '',
+    'Write the private-thread context brief now:',
+  ].join('\n');
+
+  const output = await invokeText(model, prompt);
+  return (output || '').trim();
+}

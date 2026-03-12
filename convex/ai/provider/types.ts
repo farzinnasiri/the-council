@@ -225,6 +225,17 @@ export interface CouncilAiProvider {
     model?: string;
   }): Promise<string>;
 
+  summarizeHallFollowUpThread(input: {
+    memberName: string;
+    hallMode: 'advisory' | 'roundtable';
+    participants: string[];
+    roundSummaries: string[];
+    transcript: Array<{ author: string; content: string }>;
+    pairedUserMessage?: string;
+    anchorMemberMessage: string;
+    model?: string;
+  }): Promise<string>;
+
   summarizeDocumentDigest(input: {
     displayName: string;
     sampleText?: string;
