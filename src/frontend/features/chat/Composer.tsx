@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignJustify, Brain, ChevronDown, Loader2, Mic, Search, SendHorizontal, Square, Zap } from 'lucide-react';
+import { AlignJustify, Brain, Check, ChevronDown, Loader2, Mic, Search, SendHorizontal, Square, Zap } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { cn } from '../../lib/utils';
@@ -18,6 +18,8 @@ interface ComposerProps {
   mentionError?: string;
   chamberResponseMode?: ChamberResponseMode;
   onChamberResponseModeChange?: (mode: ChamberResponseMode) => void | Promise<void>;
+  timeAwareReentryEnabled?: boolean;
+  onTimeAwareReentryEnabledChange?: (enabled: boolean) => void | Promise<void>;
 }
 
 const CHAMBER_MODE_OPTIONS: Array<{
@@ -40,6 +42,8 @@ export function Composer({
   mentionError,
   chamberResponseMode,
   onChamberResponseModeChange,
+  timeAwareReentryEnabled,
+  onTimeAwareReentryEnabledChange,
 }: ComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -234,6 +238,28 @@ export function Composer({
                       </div>
                     </DropdownMenuItem>
                   ))}
+                  {typeof timeAwareReentryEnabled === 'boolean' && onTimeAwareReentryEnabledChange ? (
+                    <>
+                      <DropdownMenuLabel>Thread Behavior</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          void onTimeAwareReentryEnabledChange(!timeAwareReentryEnabled);
+                        }}
+                        className="gap-2"
+                      >
+                        <div className="flex h-3.5 w-3.5 items-center justify-center">
+                          {timeAwareReentryEnabled ? <Check className="h-3.5 w-3.5" /> : null}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm">Time-Aware Re-entry</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Ease stale momentum after long pauses
+                          </p>
+                        </div>
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}

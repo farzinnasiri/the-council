@@ -15,6 +15,7 @@ import type {
   PersonalArchiveEntry,
   PersonalArchiveProfile,
   ThemeMode,
+  TimeAwareReentryGapBucket,
   User,
 } from '../types/domain';
 import {
@@ -72,6 +73,16 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
     kind: doc.kind,
     hallMode: doc.kind === 'hall' ? ((doc.hallMode as 'advisory' | 'roundtable' | undefined) ?? 'advisory') : undefined,
     chamberResponseMode: doc.kind === 'chamber' ? (doc.chamberResponseMode as ChamberResponseMode | undefined) ?? 'instant' : undefined,
+    timeAwareReentryEnabled: doc.kind === 'chamber' ? Boolean(doc.timeAwareReentryEnabled ?? true) : undefined,
+    timeAwareReentryState: doc.kind === 'chamber' && doc.timeAwareReentryState
+      ? {
+          gapBucket: doc.timeAwareReentryState.gapBucket as TimeAwareReentryGapBucket,
+          repliesRemaining: doc.timeAwareReentryState.repliesRemaining as 1 | 2,
+          explicitContinuation: Boolean(doc.timeAwareReentryState.explicitContinuation),
+          activatedAt: doc.timeAwareReentryState.activatedAt,
+        }
+      : undefined,
+    timeAwareReentryNoticeSeenAt: doc.kind === 'chamber' ? doc.timeAwareReentryNoticeSeenAt : undefined,
     title: doc.title,
     chamberMemberId: doc.chamberMemberId as string | undefined,
     deletedAt: doc.deletedAt,
@@ -544,6 +555,37 @@ class ConvexCouncilRepository implements CouncilRepository {
     return toConversation(doc);
   }
 
+  async setChamberTimeAwareReentryEnabled(conversationId: string, enabled: boolean): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:setChamberTimeAwareReentryEnabled', {
+      conversationId: conversationId as Id<'conversations'>,
+      enabled,
+    });
+    return toConversation(doc);
+  }
+
+  async setChamberTimeAwareReentryState(input: {
+    conversationId: string;
+    state?: {
+      gapBucket: TimeAwareReentryGapBucket;
+      repliesRemaining: 1 | 2;
+      explicitContinuation: boolean;
+      activatedAt: number;
+    };
+  }): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:setChamberTimeAwareReentryState', {
+      conversationId: input.conversationId as Id<'conversations'>,
+      state: input.state,
+    });
+    return toConversation(doc);
+  }
+
+  async markChamberTimeAwareReentryNoticeSeen(conversationId: string): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:markChamberTimeAwareReentryNoticeSeen', {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return toConversation(doc);
+  }
+
   async clearChamberByMember(memberId: string): Promise<void> {
     await this.clientAny.mutation('conversations:clearChamberByMember', {
       memberId: memberId as Id<'members'>,
@@ -835,6 +877,11 @@ class ConvexCouncilRepository implements CouncilRepository {
     chatProfile?: ChamberResponseMode;
     retrievalProfile?: 'default' | 'deep_dive';
     turnDirective?: 'shorter' | 'elaborate';
+    timeAwareReentry?: {
+      gapBucket: TimeAwareReentryGapBucket;
+      repliesRemaining: 1 | 2;
+      explicitContinuation: boolean;
+    };
   }): Promise<MemberChatResult> {
     return (await this.client.action(api.ai.chat.chatWithMember as any, {
       conversationId: input.conversationId as Id<'conversations'>,
@@ -846,6 +893,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       chatProfile: input.chatProfile,
       retrievalProfile: input.retrievalProfile,
       turnDirective: input.turnDirective,
+      timeAwareReentry: input.timeAwareReentry,
     })) as MemberChatResult;
   }
 

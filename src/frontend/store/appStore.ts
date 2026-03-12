@@ -10,6 +10,7 @@ import type {
   MessageRouting,
   PersonalArchiveAccess,
   RoundtableState,
+  TimeAwareReentryGapBucket,
   ThemeMode,
 } from '../types/domain';
 import {
@@ -85,6 +86,7 @@ interface AppState {
   notebookListLoaded: boolean;
   notebookOpen: boolean;
   notebookMobileSnap: 0.3 | 0.5 | 1;
+  timeAwareReentryNoticePendingByConversation: Record<string, boolean>;
   toasts: AppToast[];
   messagePaginationByConversation: Record<
     string,
@@ -107,6 +109,8 @@ interface AppState {
   evaluateChamberCompactionOnLoad: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
   setChamberResponseMode: (conversationId: string, mode: ChamberResponseMode) => Promise<void>;
+  setChamberTimeAwareReentryEnabled: (conversationId: string, enabled: boolean) => Promise<void>;
+  markChamberTimeAwareReentryNoticeSeen: (conversationId: string) => Promise<void>;
   renameConversation: (conversationId: string, title: string) => Promise<void>;
   archiveConversation: (conversationId: string) => Promise<void>;
   createChamberThread: (memberId: string) => Promise<Conversation>;
@@ -123,11 +127,16 @@ interface AppState {
     manualMemberIds?: string[]
   ) => Promise<Conversation>;
   sendMessageToChamberMember: (memberId: string, text: string) => Promise<Conversation>;
-  sendUserMessage: (conversationId: string, text: string, mentionedMemberIds?: string[]) => Promise<void>;
+  sendUserMessage: (
+    conversationId: string,
+    text: string,
+    mentionedMemberIds?: string[]
+  ) => Promise<{ messageId: string; previousActiveMessageAt?: number } | undefined>;
   generateDeterministicReplies: (
     conversationId: string,
     text: string,
     mentionedMemberIds?: string[],
+    previousActiveMessageAt?: number,
     routingOverride?: {
       mode: 'auto' | 'manual';
       memberIds?: string[];
@@ -156,6 +165,7 @@ interface AppState {
   setNotebookDraft: (conversationId: string, content: string) => void;
   saveNotebook: (conversationId: string) => Promise<void>;
   appendMessageToNotebook: (conversationId: string, text: string, authorName?: string) => Promise<void>;
+  dismissChamberTimeAwareReentryNotice: (conversationId: string) => void;
   showToast: (message: string) => void;
   dismissToast: (toastId: string) => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -245,6 +255,59 @@ function getLatestVisibleChamberMemberMessage(messages: Message[], conversationI
         isVisibleMessage(message)
     )
     .sort((a, b) => b.createdAt - a.createdAt)[0];
+}
+
+const TIME_AWARE_REENTRY_MIN_GAP_MS = 60 * 60 * 1000;
+const TIME_AWARE_REENTRY_MEDIUM_GAP_MS = 6 * 60 * 60 * 1000;
+const TIME_AWARE_REENTRY_STRONG_GAP_MS = 24 * 60 * 60 * 1000;
+const TIME_AWARE_REENTRY_VERY_STRONG_GAP_MS = 3 * 24 * 60 * 60 * 1000;
+
+const EXPLICIT_CONTINUATION_PATTERNS = [
+  /\bcontinue\b/i,
+  /\bpick(?:ing)? up\b/i,
+  /\bwhere we left off\b/i,
+  /\bfollowing up\b/i,
+  /\bas we were saying\b/i,
+  /\babout that\b/i,
+];
+
+function getLatestActiveNonSystemMessageAt(messages: Message[], conversationId: string): number | undefined {
+  let latest = 0;
+  for (const message of messages) {
+    if (message.conversationId !== conversationId) continue;
+    if (message.role === 'system') continue;
+    if (message.status === 'error') continue;
+    if (!isVisibleMessage(message)) continue;
+    latest = Math.max(latest, message.createdAt);
+  }
+  return latest > 0 ? latest : undefined;
+}
+
+function classifyTimeAwareReentryGap(gapMs: number): TimeAwareReentryGapBucket | undefined {
+  if (gapMs < TIME_AWARE_REENTRY_MIN_GAP_MS) return undefined;
+  if (gapMs < TIME_AWARE_REENTRY_MEDIUM_GAP_MS) return 'mild';
+  if (gapMs < TIME_AWARE_REENTRY_STRONG_GAP_MS) return 'medium';
+  if (gapMs < TIME_AWARE_REENTRY_VERY_STRONG_GAP_MS) return 'strong';
+  return 'very_strong';
+}
+
+function demoteTimeAwareReentryGap(
+  bucket: TimeAwareReentryGapBucket
+): TimeAwareReentryGapBucket | undefined {
+  switch (bucket) {
+    case 'very_strong':
+      return 'strong';
+    case 'strong':
+      return 'medium';
+    case 'medium':
+      return 'mild';
+    default:
+      return undefined;
+  }
+}
+
+function isExplicitContinuation(text: string): boolean {
+  return EXPLICIT_CONTINUATION_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function buildMessage(input: BuildMessageInput): Message {
@@ -619,6 +682,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   notebookListLoaded: false,
   notebookOpen: false,
   notebookMobileSnap: 0.5,
+  timeAwareReentryNoticePendingByConversation: {},
   toasts: [],
   messagePaginationByConversation: {},
   compactionPolicy: COMPACTION_POLICY_DEFAULTS,
@@ -782,6 +846,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().setNotebookDraft(conversationId, appended);
     get().showToast('Added to Notebook');
     void get().saveNotebook(conversationId);
+  },
+
+  dismissChamberTimeAwareReentryNotice: (conversationId) => {
+    set((state) => ({
+      timeAwareReentryNoticePendingByConversation: removeKey(
+        state.timeAwareReentryNoticePendingByConversation,
+        conversationId
+      ),
+    }));
   },
 
   showToast: (message) => {
@@ -1323,6 +1396,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
+  setChamberTimeAwareReentryEnabled: async (conversationId, enabled) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+    const updated = await councilRepository.setChamberTimeAwareReentryEnabled(conversationId, enabled);
+    set((state) => ({
+      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      timeAwareReentryNoticePendingByConversation: enabled
+        ? state.timeAwareReentryNoticePendingByConversation
+        : removeKey(state.timeAwareReentryNoticePendingByConversation, conversationId),
+    }));
+  },
+
+  markChamberTimeAwareReentryNoticeSeen: async (conversationId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+    const updated = await councilRepository.markChamberTimeAwareReentryNoticeSeen(conversationId);
+    set((state) => ({
+      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      timeAwareReentryNoticePendingByConversation: removeKey(
+        state.timeAwareReentryNoticePendingByConversation,
+        conversationId
+      ),
+    }));
+  },
+
   renameConversation: async (conversationId, title) => {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -1429,9 +1527,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
     }));
 
-    await get().sendUserMessage(created.id, text, []);
+    const sendResult = await get().sendUserMessage(created.id, text, []);
     // Generate member replies in background so navigation + first bubble feel immediate.
-    void get().generateDeterministicReplies(created.id, text, [], {
+    void get().generateDeterministicReplies(created.id, text, [], sendResult?.previousActiveMessageAt, {
       mode: routingMode,
       memberIds: manualMemberIds,
     });
@@ -1462,8 +1560,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
 
-    await get().sendUserMessage(conversation.id, text);
-    await get().generateDeterministicReplies(conversation.id, text);
+    const sendResult = await get().sendUserMessage(conversation.id, text);
+    await get().generateDeterministicReplies(
+      conversation.id,
+      text,
+      [],
+      sendResult?.previousActiveMessageAt
+    );
 
     return conversation;
   },
@@ -1471,7 +1574,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   sendUserMessage: async (conversationId, text, mentionedMemberIds = []) => {
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
-    if (!conversation) return;
+    if (!conversation) return undefined;
+    const previousActiveMessageAt =
+      conversation.kind === 'chamber'
+        ? getLatestActiveNonSystemMessageAt(state.messages, conversationId)
+        : undefined;
     const hasUserMessages = state.messages.some(
       (message) =>
         message.conversationId === conversationId &&
@@ -1539,17 +1646,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         })
         .catch(() => undefined);
     }
+
+    return { messageId: message.id, previousActiveMessageAt };
   },
 
   generateDeterministicReplies: async (
     conversationId,
     text,
     mentionedMemberIds = [],
+    previousActiveMessageAt,
     routingOverride = { mode: 'auto' as const, memberIds: [] }
   ) => {
     const state = get();
-    const conversation = state.conversations.find((item) => item.id === conversationId);
+    let conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
+    let activeTimeAwareReentryState =
+      conversation.kind === 'chamber' ? conversation.timeAwareReentryState : undefined;
     const currentHallRoundNumber =
       conversation.kind === 'hall'
         ? Math.max(
@@ -1853,6 +1965,45 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    if (
+      conversation.kind === 'chamber' &&
+      (conversation.timeAwareReentryEnabled ?? true) &&
+      !activeTimeAwareReentryState &&
+      (state.pendingReplyCount[conversationId] ?? 0) === 0 &&
+      typeof previousActiveMessageAt === 'number'
+    ) {
+      const bucket = classifyTimeAwareReentryGap(Date.now() - previousActiveMessageAt);
+      if (bucket) {
+        const explicitContinuation = isExplicitContinuation(text);
+        const effectiveBucket = explicitContinuation ? demoteTimeAwareReentryGap(bucket) : bucket;
+        if (effectiveBucket) {
+          const updatedConversation = await councilRepository.setChamberTimeAwareReentryState({
+            conversationId,
+            state: {
+              gapBucket: effectiveBucket,
+              repliesRemaining: 2,
+              explicitContinuation,
+              activatedAt: Date.now(),
+            },
+          });
+          conversation = updatedConversation;
+          activeTimeAwareReentryState = updatedConversation.timeAwareReentryState;
+          set((current) => ({
+            conversations: current.conversations.map((item) =>
+              item.id === conversationId ? updatedConversation : item
+            ),
+            timeAwareReentryNoticePendingByConversation:
+              updatedConversation.timeAwareReentryNoticeSeenAt
+                ? current.timeAwareReentryNoticePendingByConversation
+                : {
+                    ...current.timeAwareReentryNoticePendingByConversation,
+                    [conversationId]: true,
+                  },
+          }));
+        }
+      }
+    }
+
     set((current) => ({
       pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: memberIds.length },
       pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: memberIds },
@@ -1916,6 +2067,14 @@ export const useAppStore = create<AppState>((set, get) => ({
                 : undefined,
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
             retrievalProfile: conversation.kind === 'chamber' ? chamberGeneration.retrievalProfile : undefined,
+            timeAwareReentry:
+              conversation.kind === 'chamber' && activeTimeAwareReentryState
+                ? {
+                    gapBucket: activeTimeAwareReentryState.gapBucket,
+                    repliesRemaining: activeTimeAwareReentryState.repliesRemaining,
+                    explicitContinuation: activeTimeAwareReentryState.explicitContinuation,
+                  }
+                : undefined,
           });
 
           reply = buildMessage({
@@ -1959,6 +2118,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
 
       await councilRepository.appendMessages({ conversationId, messages: [reply] });
+
+      if (conversation.kind === 'chamber' && reply.status === 'sent' && activeTimeAwareReentryState) {
+        const nextGapBucket =
+          activeTimeAwareReentryState.repliesRemaining === 2
+            ? demoteTimeAwareReentryGap(activeTimeAwareReentryState.gapBucket)
+            : undefined;
+        const nextState =
+          activeTimeAwareReentryState.repliesRemaining === 2 && nextGapBucket
+            ? {
+                ...activeTimeAwareReentryState,
+                gapBucket: nextGapBucket,
+                repliesRemaining: 1 as const,
+              }
+            : undefined;
+        const updatedConversation = await councilRepository.setChamberTimeAwareReentryState({
+          conversationId,
+          state: nextState,
+        });
+        conversation = updatedConversation;
+        activeTimeAwareReentryState = updatedConversation.timeAwareReentryState;
+        set((current) => ({
+          conversations: current.conversations.map((item) =>
+            item.id === conversationId ? updatedConversation : item
+          ),
+        }));
+      }
     });
 
     await Promise.all(replyTasks);

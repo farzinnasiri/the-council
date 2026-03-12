@@ -34,6 +34,8 @@ interface ChatScreenProps {
   beforeComposer?: ReactNode;
   chamberResponseMode?: ChamberResponseMode;
   onChamberResponseModeChange?: (mode: ChamberResponseMode) => void | Promise<void>;
+  timeAwareReentryEnabled?: boolean;
+  onTimeAwareReentryEnabledChange?: (enabled: boolean) => void | Promise<void>;
   emptyState?: {
     title: string;
     description: string;
@@ -59,6 +61,8 @@ export function ChatScreen({
   beforeComposer,
   chamberResponseMode,
   onChamberResponseModeChange,
+  timeAwareReentryEnabled,
+  onTimeAwareReentryEnabledChange,
   emptyState,
 }: ChatScreenProps) {
   return (
@@ -83,6 +87,8 @@ export function ChatScreen({
         mentionError={mentionError}
         chamberResponseMode={conversationKind === 'chamber' ? (chamberResponseMode ?? 'instant') : undefined}
         onChamberResponseModeChange={onChamberResponseModeChange}
+        timeAwareReentryEnabled={conversationKind === 'chamber' ? timeAwareReentryEnabled : undefined}
+        onTimeAwareReentryEnabledChange={onTimeAwareReentryEnabledChange}
         onSend={(payload) => {
           void onSend(payload);
         }}

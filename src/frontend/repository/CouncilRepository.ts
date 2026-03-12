@@ -12,6 +12,7 @@ import type {
   PersonalArchiveEntry,
   PersonalArchiveProfile,
   RoundtableState,
+  TimeAwareReentryGapBucket,
   ThemeMode,
 } from '../types/domain';
 import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/compactionPolicy';
@@ -213,6 +214,17 @@ export interface CouncilRepository {
   }>;
   getLatestChamberThread(memberId: string): Promise<Conversation | null>;
   setChamberResponseMode(conversationId: string, mode: ChamberResponseMode): Promise<Conversation>;
+  setChamberTimeAwareReentryEnabled(conversationId: string, enabled: boolean): Promise<Conversation>;
+  setChamberTimeAwareReentryState(input: {
+    conversationId: string;
+    state?: {
+      gapBucket: TimeAwareReentryGapBucket;
+      repliesRemaining: 1 | 2;
+      explicitContinuation: boolean;
+      activatedAt: number;
+    };
+  }): Promise<Conversation>;
+  markChamberTimeAwareReentryNoticeSeen(conversationId: string): Promise<Conversation>;
   renameConversation(conversationId: string, title: string): Promise<Conversation>;
   archiveConversation(conversationId: string): Promise<void>;
   clearChamberByMember(memberId: string): Promise<void>;
@@ -325,6 +337,11 @@ export interface CouncilRepository {
     chatProfile?: ChamberResponseMode;
     retrievalProfile?: 'default' | 'deep_dive';
     turnDirective?: 'shorter' | 'elaborate';
+    timeAwareReentry?: {
+      gapBucket: TimeAwareReentryGapBucket;
+      repliesRemaining: 1 | 2;
+      explicitContinuation: boolean;
+    };
   }): Promise<MemberChatResult>;
   prepareRoundtableRound(input: {
     conversationId: string;

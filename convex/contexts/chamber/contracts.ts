@@ -3,6 +3,24 @@
 import type { Id } from '../../_generated/dataModel';
 import type { ProviderChatResponse } from '../../ai/provider/types';
 import type { ContextMessageInput } from '../shared/types';
+import { v } from 'convex/values';
+
+export const timeAwareReentryDirectiveValidator = v.object({
+  gapBucket: v.union(
+    v.literal('mild'),
+    v.literal('medium'),
+    v.literal('strong'),
+    v.literal('very_strong')
+  ),
+  repliesRemaining: v.union(v.literal(1), v.literal(2)),
+  explicitContinuation: v.boolean(),
+});
+
+export type TimeAwareReentryDirective = {
+  gapBucket: 'mild' | 'medium' | 'strong' | 'very_strong';
+  repliesRemaining: 1 | 2;
+  explicitContinuation: boolean;
+};
 
 export interface ChatWithMemberInput {
   conversationId: Id<'conversations'>;
@@ -16,6 +34,7 @@ export interface ChatWithMemberInput {
   retrievalModel?: string;
   retrievalProfile?: 'default' | 'deep_dive';
   turnDirective?: 'shorter' | 'elaborate';
+  timeAwareReentry?: TimeAwareReentryDirective;
 }
 
 export type ChatWithMemberResult = ProviderChatResponse;

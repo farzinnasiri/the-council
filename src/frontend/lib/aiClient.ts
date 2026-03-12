@@ -1,6 +1,6 @@
 import { convexRepository } from '../repository/ConvexCouncilRepository';
 import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
-import type { RoundtableState } from '../types/domain';
+import type { RoundtableState, TimeAwareReentryGapBucket } from '../types/domain';
 
 export interface RouteResult {
   chosenMemberIds: string[];
@@ -355,9 +355,14 @@ export async function chatWithMember(input: {
   previousSummary?: string;
   contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   hallContext?: string;
-  chatProfile?: 'instant' | 'think' | 'deep_dive';
+  chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
   retrievalProfile?: 'default' | 'deep_dive';
   turnDirective?: 'shorter' | 'elaborate';
+  timeAwareReentry?: {
+    gapBucket: TimeAwareReentryGapBucket;
+    repliesRemaining: 1 | 2;
+    explicitContinuation: boolean;
+  };
 }): Promise<MemberChatResult> {
   const result = await convexRepository.chatWithMember({
     conversationId: input.conversationId,
@@ -369,6 +374,7 @@ export async function chatWithMember(input: {
     chatProfile: input.chatProfile,
     retrievalProfile: input.retrievalProfile,
     turnDirective: input.turnDirective,
+    timeAwareReentry: input.timeAwareReentry,
   });
 
   logCouncilDebug(input.memberId, result.debug);

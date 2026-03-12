@@ -47,6 +47,21 @@ export default defineSchema({
         v.literal('deep_dive')
       )
     ),
+    timeAwareReentryEnabled: v.optional(v.boolean()),
+    timeAwareReentryState: v.optional(
+      v.object({
+        gapBucket: v.union(
+          v.literal('mild'),
+          v.literal('medium'),
+          v.literal('strong'),
+          v.literal('very_strong')
+        ),
+        repliesRemaining: v.union(v.literal(1), v.literal(2)),
+        explicitContinuation: v.boolean(),
+        activatedAt: v.number(),
+      })
+    ),
+    timeAwareReentryNoticeSeenAt: v.optional(v.number()),
     title: v.string(),
     chamberMemberId: v.optional(v.id('members')),
     // Legacy compatibility only. Active/archived now derives from deletedAt.

@@ -129,8 +129,8 @@ export function HallPage() {
 
         const normalizedMentions =
           conversation.hallMode === 'roundtable' ? [] : mentionedMemberIds;
-        await sendUserMessage(conversation.id, text, normalizedMentions);
-        await generateReplies(conversation.id, text, normalizedMentions);
+        const sendResult = await sendUserMessage(conversation.id, text, normalizedMentions);
+        await generateReplies(conversation.id, text, normalizedMentions, sendResult?.previousActiveMessageAt);
       }}
     />
   );

@@ -3,6 +3,7 @@ export type ConversationKind = 'hall' | 'chamber';
 export type ConversationType = ConversationKind;
 export type HallMode = 'advisory' | 'roundtable';
 export type ChamberResponseMode = 'instant' | 'short' | 'think' | 'deep_dive';
+export type TimeAwareReentryGapBucket = 'mild' | 'medium' | 'strong' | 'very_strong';
 export type MessageRole = 'user' | 'member' | 'system';
 export type MessageStatus = 'sent' | 'error';
 export type RoutingSource = 'llm' | 'fallback' | 'chamber-fixed';
@@ -44,6 +45,14 @@ export interface Conversation {
   kind: ConversationKind;
   hallMode?: HallMode;
   chamberResponseMode?: ChamberResponseMode;
+  timeAwareReentryEnabled?: boolean;
+  timeAwareReentryState?: {
+    gapBucket: TimeAwareReentryGapBucket;
+    repliesRemaining: 1 | 2;
+    explicitContinuation: boolean;
+    activatedAt: number;
+  };
+  timeAwareReentryNoticeSeenAt?: number;
   title: string;
   chamberMemberId?: string;
   deletedAt?: number;

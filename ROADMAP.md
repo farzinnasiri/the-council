@@ -44,6 +44,7 @@ Status: In Progress (as of February 27, 2026)
   - Grok 4 Fast (non-thinking): `$0.00371/turn`, `$0.082/hour` (SD `$0.026`)
 
 ### 1.7 Conversation Scratchpad Notes (Hall + Chamber)
+(Completed: March 7, 2026)
 - Add per-conversation user notes/receipts as a built-in scratchpad in both Hall and Chamber.
 - Goal: preserve chat flow while letting users quickly capture/copy/paste/edit supporting info.
 - Keep editing lightweight (quick add, directly adding a whole response, inline edit, simple formatting only).
@@ -142,6 +143,7 @@ Status: Completed (March 12, 2026)
 - Initial signal examples: user is ranting, user is confused, user is disengaged, conversation drifted, tone mismatch.
 - Keep outputs constrained to a controlled hint taxonomy (not freeform prompt sprawl).
 - Treat moderator output as advisory context to improve response quality without changing visible user flow.
+- integrate Time aware re-entry into it, to have a coherent mechanism of the current state of the thread
 
 ## 3) Platform / Architecture Changes
 

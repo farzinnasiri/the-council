@@ -12,6 +12,21 @@ const conversationDoc = v.object({
   chamberResponseMode: v.optional(
     v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
   ),
+  timeAwareReentryEnabled: v.optional(v.boolean()),
+  timeAwareReentryState: v.optional(
+    v.object({
+      gapBucket: v.union(
+        v.literal('mild'),
+        v.literal('medium'),
+        v.literal('strong'),
+        v.literal('very_strong')
+      ),
+      repliesRemaining: v.union(v.literal(1), v.literal(2)),
+      explicitContinuation: v.boolean(),
+      activatedAt: v.number(),
+    })
+  ),
+  timeAwareReentryNoticeSeenAt: v.optional(v.number()),
   title: v.string(),
   chamberMemberId: v.optional(v.id('members')),
   // Legacy compatibility while old rows still include status.
@@ -100,6 +115,7 @@ async function createChamberThreadDoc(ctx: any, userId: any, memberId: any) {
     userId,
     kind: 'chamber',
     chamberResponseMode: 'instant',
+    timeAwareReentryEnabled: true,
     title: 'New Thread',
     chamberMemberId: memberId,
     updatedAt: now,
@@ -303,6 +319,76 @@ export const setChamberResponseMode = mutation({
     await ctx.db.patch(args.conversationId, {
       chamberResponseMode: args.mode,
       updatedAt: Date.now(),
+    });
+    return (await ctx.db.get(args.conversationId))!;
+  },
+});
+
+export const setChamberTimeAwareReentryEnabled = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    enabled: v.boolean(),
+  },
+  returns: conversationDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber conversation not found');
+    }
+    await ctx.db.patch(args.conversationId, {
+      timeAwareReentryEnabled: args.enabled,
+      timeAwareReentryState: args.enabled ? conversation.timeAwareReentryState : undefined,
+      updatedAt: Date.now(),
+    });
+    return (await ctx.db.get(args.conversationId))!;
+  },
+});
+
+export const setChamberTimeAwareReentryState = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    state: v.optional(
+      v.object({
+        gapBucket: v.union(
+          v.literal('mild'),
+          v.literal('medium'),
+          v.literal('strong'),
+          v.literal('very_strong')
+        ),
+        repliesRemaining: v.union(v.literal(1), v.literal(2)),
+        explicitContinuation: v.boolean(),
+        activatedAt: v.number(),
+      })
+    ),
+  },
+  returns: conversationDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber conversation not found');
+    }
+    await ctx.db.patch(args.conversationId, {
+      timeAwareReentryState: args.state,
+    });
+    return (await ctx.db.get(args.conversationId))!;
+  },
+});
+
+export const markChamberTimeAwareReentryNoticeSeen = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+  },
+  returns: conversationDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber conversation not found');
+    }
+    await ctx.db.patch(args.conversationId, {
+      timeAwareReentryNoticeSeenAt: Date.now(),
     });
     return (await ctx.db.get(args.conversationId))!;
   },

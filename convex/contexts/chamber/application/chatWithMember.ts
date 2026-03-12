@@ -27,6 +27,25 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
   const summaryBlock = args.previousSummary?.trim()
     ? `[Conversation Memory]\n${args.previousSummary.trim()}`
     : '';
+  const reentryBlock = args.timeAwareReentry
+    ? [
+        '[Time-Aware Re-entry]',
+        'This reply follows a meaningful idle gap in the thread.',
+        'Preserve durable context: facts, goals, constraints, decisions, and unresolved threads.',
+        'Decay short-lived context: urgency, emotional intensity, rhetorical momentum, and assumptions that the previous cadence is still active.',
+        args.timeAwareReentry.explicitContinuation
+          ? 'The user explicitly signaled continuation. Keep topic continuity, but soften stale momentum by one level.'
+          : 'Treat the current user message as the present source of truth for how to continue.',
+        args.timeAwareReentry.gapBucket === 'mild'
+          ? 'Mild gap: keep continuity, but do not answer as if the prior emotional beat is still live.'
+          : args.timeAwareReentry.gapBucket === 'medium'
+            ? 'Medium gap: re-anchor lightly to the current message before continuing.'
+            : 'Strong gap: treat prior thread state as background context, not the current scene. Respond from the present message first.',
+        args.timeAwareReentry.repliesRemaining === 1
+          ? 'This is the second and final re-entry-adjusted reply, so keep the adjustment lighter than the initial reset.'
+          : 'This is the first re-entry-adjusted reply, so fully apply the gap-aware reset.',
+      ].join('\n')
+    : '';
   const identityBlock = profile?.identity?.trim()
     ? [
         '[User Identity Context]',
@@ -39,6 +58,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     member.systemPrompt.trim(),
     hallBlock,
     summaryBlock,
+    reentryBlock,
   ]
     .filter(Boolean)
     .join('\n\n');
