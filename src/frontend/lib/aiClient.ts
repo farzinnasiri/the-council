@@ -64,6 +64,7 @@ interface MemberChatResult {
       originalQuery: string;
       standaloneQuery: string;
       queryAlternates: string[];
+      deepDiveQueries?: string[];
       gateUsed: boolean;
       gateReason: string;
       matchedDigestSignals: string[];
@@ -84,6 +85,15 @@ interface MemberChatResult {
       snippets: string[];
       queryUsed?: string;
       usedAlternateQuery?: boolean;
+      deepDivePasses?: Array<{
+        query: string;
+        grounded: boolean;
+        citationsCount: number;
+        snippetsCount: number;
+        retrievalText: string;
+        citations: Array<{ title: string; uri?: string }>;
+        snippets: string[];
+      }>;
     };
     personalArchiveSearchResponse?: {
       grounded: boolean;
@@ -345,6 +355,9 @@ export async function chatWithMember(input: {
   previousSummary?: string;
   contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   hallContext?: string;
+  chatProfile?: 'instant' | 'think' | 'deep_dive';
+  retrievalProfile?: 'default' | 'deep_dive';
+  turnDirective?: 'shorter' | 'elaborate';
 }): Promise<MemberChatResult> {
   const result = await convexRepository.chatWithMember({
     conversationId: input.conversationId,
@@ -353,6 +366,9 @@ export async function chatWithMember(input: {
     previousSummary: input.previousSummary,
     contextMessages: input.contextMessages ?? [],
     hallContext: input.hallContext ?? undefined,
+    chatProfile: input.chatProfile,
+    retrievalProfile: input.retrievalProfile,
+    turnDirective: input.turnDirective,
   });
 
   logCouncilDebug(input.memberId, result.debug);

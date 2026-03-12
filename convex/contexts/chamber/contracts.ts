@@ -12,7 +12,10 @@ export interface ChatWithMemberInput {
   contextMessages?: ContextMessageInput[];
   hallContext?: string;
   chatModel?: string;
+  chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
   retrievalModel?: string;
+  retrievalProfile?: 'default' | 'deep_dive';
+  turnDirective?: 'shorter' | 'elaborate';
 }
 
 export type ChatWithMemberResult = ProviderChatResponse;

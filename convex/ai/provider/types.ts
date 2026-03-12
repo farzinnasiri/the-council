@@ -119,6 +119,7 @@ export interface ProviderChatResponse {
       originalQuery: string;
       standaloneQuery: string;
       queryAlternates: string[];
+      deepDiveQueries?: string[];
       gateUsed: boolean;
       gateReason: string;
       matchedDigestSignals: string[];
@@ -139,6 +140,15 @@ export interface ProviderChatResponse {
       snippets: string[];
       queryUsed?: string;
       usedAlternateQuery?: boolean;
+      deepDivePasses?: Array<{
+        query: string;
+        grounded: boolean;
+        citationsCount: number;
+        snippetsCount: number;
+        retrievalText: string;
+        citations: Array<{ title: string; uri?: string }>;
+        snippets: string[];
+      }>;
     };
     personalArchiveSearchResponse?: {
       grounded: boolean;
@@ -149,6 +159,9 @@ export interface ProviderChatResponse {
       snippets: string[];
       queryUsed?: string;
     };
+    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
+    retrievalProfile?: 'default' | 'deep_dive';
+    turnDirective?: 'shorter' | 'elaborate';
     answerPrompt: string;
   };
 }
@@ -181,12 +194,15 @@ export interface CouncilAiProvider {
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;
     responseModel?: string;
+    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
+    retrievalProfile?: 'default' | 'deep_dive';
     temperature?: number;
     metadataFilter?: string;
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
     useKnowledgeBase?: boolean;
+    turnDirective?: 'shorter' | 'elaborate';
   }): Promise<ProviderChatResponse>;
 
   summarizeConversation(input: {

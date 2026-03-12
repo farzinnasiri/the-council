@@ -1,6 +1,7 @@
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
 import type { Message } from '../../types/domain';
+import type { ChamberResponseMode } from '../../types/domain';
 import type { ReactNode } from 'react';
 
 export interface ComposerSendInput {
@@ -31,6 +32,8 @@ interface ChatScreenProps {
   onSend: (payload: ComposerSendInput) => void | Promise<void>;
   onLoadOlder?: () => void | Promise<void>;
   beforeComposer?: ReactNode;
+  chamberResponseMode?: ChamberResponseMode;
+  onChamberResponseModeChange?: (mode: ChamberResponseMode) => void | Promise<void>;
   emptyState?: {
     title: string;
     description: string;
@@ -54,6 +57,8 @@ export function ChatScreen({
   onSend,
   onLoadOlder,
   beforeComposer,
+  chamberResponseMode,
+  onChamberResponseModeChange,
   emptyState,
 }: ChatScreenProps) {
   return (
@@ -76,6 +81,8 @@ export function ChatScreen({
         sendDisabled={isSending || sendDisabled}
         mentionOptions={mentionOptions}
         mentionError={mentionError}
+        chamberResponseMode={conversationKind === 'chamber' ? (chamberResponseMode ?? 'instant') : undefined}
+        onChamberResponseModeChange={onChamberResponseModeChange}
         onSend={(payload) => {
           void onSend(payload);
         }}

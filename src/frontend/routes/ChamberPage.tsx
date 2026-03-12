@@ -13,6 +13,7 @@ export function ChamberPage() {
   const selectConversation = useAppStore((state) => state.selectConversation);
   const sendUserMessage = useAppStore((state) => state.sendUserMessage);
   const generateReplies = useAppStore((state) => state.generateDeterministicReplies);
+  const setChamberResponseMode = useAppStore((state) => state.setChamberResponseMode);
   const loadOlderMessages = useAppStore((state) => state.loadOlderMessages);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
   const pendingReplyCount = useAppStore((state) => state.pendingReplyCount);
@@ -35,7 +36,13 @@ export function ChamberPage() {
     return <Placeholder title="Thread not found" description="Choose a chamber thread from the sidebar." />;
   }
 
-  const messages = allMessages.filter((message) => message.conversationId === conversation.id);
+  const messages = allMessages.filter(
+    (message) =>
+      message.conversationId === conversation.id &&
+      !message.deletedAt &&
+      !message.supersededAt &&
+      !message.compacted
+  );
   const typingMembers = member
     ? (pendingReplyMemberIds[conversation.id] ?? [])
         .filter((pendingMemberId) => pendingMemberId === member.id)
@@ -53,8 +60,10 @@ export function ChamberPage() {
       isSending={isSending}
       hasOlderMessages={pagination?.hasOlder ?? false}
       loadingOlderMessages={pagination?.isLoadingOlder ?? false}
+      chamberResponseMode={conversation.chamberResponseMode ?? 'instant'}
       placeholder={member ? `Ask ${member.name}...` : 'Ask your chamber member...'}
       onLoadOlder={() => loadOlderMessages(conversation.id)}
+      onChamberResponseModeChange={(mode) => setChamberResponseMode(conversation.id, mode)}
       emptyState={{
         title: 'No messages yet',
         description: member ? `Start a thread with ${member.name}.` : 'Start this chamber thread.',

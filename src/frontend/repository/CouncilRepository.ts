@@ -1,5 +1,6 @@
 import type {
   Conversation,
+  ChamberResponseMode,
   ConversationMemoryLog,
   ConversationNotebook,
   ConversationParticipant,
@@ -104,6 +105,7 @@ export interface MemberChatResult {
       originalQuery: string;
       standaloneQuery: string;
       queryAlternates: string[];
+      deepDiveQueries?: string[];
       gateUsed: boolean;
       gateReason: string;
       matchedDigestSignals: string[];
@@ -124,6 +126,15 @@ export interface MemberChatResult {
       snippets: string[];
       queryUsed?: string;
       usedAlternateQuery?: boolean;
+      deepDivePasses?: Array<{
+        query: string;
+        grounded: boolean;
+        citationsCount: number;
+        snippetsCount: number;
+        retrievalText: string;
+        citations: Array<{ title: string; uri?: string }>;
+        snippets: string[];
+      }>;
     };
     personalArchiveSearchResponse?: {
       grounded: boolean;
@@ -193,6 +204,7 @@ export interface CouncilRepository {
   createHall(input: CreateHallInput): Promise<Conversation>;
   createChamberThread(memberId: string): Promise<Conversation>;
   getLatestChamberThread(memberId: string): Promise<Conversation | null>;
+  setChamberResponseMode(conversationId: string, mode: ChamberResponseMode): Promise<Conversation>;
   renameConversation(conversationId: string, title: string): Promise<Conversation>;
   archiveConversation(conversationId: string): Promise<void>;
   clearChamberByMember(memberId: string): Promise<void>;
@@ -220,6 +232,14 @@ export interface CouncilRepository {
   }): Promise<void>;
   getCompactionPolicy(): Promise<CompactionPolicyConfig>;
   appendMessages(input: AppendMessagesInput): Promise<void>;
+  replaceWithRefinement(input: {
+    targetMessageId: string;
+    replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+  }): Promise<{ superseded: Message; replacement: Message }>;
+  appendElaborationReply(input: {
+    targetMessageId: string;
+    reply: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+  }): Promise<Message>;
   clearMessages(conversationId: string): Promise<void>;
   clearChamberSummary(conversationId: string): Promise<void>;
   applyCompaction(
@@ -294,6 +314,9 @@ export interface CouncilRepository {
     previousSummary?: string;
     contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     hallContext?: string;
+    chatProfile?: ChamberResponseMode;
+    retrievalProfile?: 'default' | 'deep_dive';
+    turnDirective?: 'shorter' | 'elaborate';
   }): Promise<MemberChatResult>;
   prepareRoundtableRound(input: {
     conversationId: string;

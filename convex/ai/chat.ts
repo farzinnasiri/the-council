@@ -17,7 +17,12 @@ export const chatWithMember = action({
     contextMessages: v.optional(v.array(contextMessageValidator)),
     hallContext: v.optional(v.string()),
     chatModel: v.optional(v.string()),
+    chatProfile: v.optional(
+      v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
+    ),
     retrievalModel: v.optional(v.string()),
+    retrievalProfile: v.optional(v.union(v.literal('default'), v.literal('deep_dive'))),
+    turnDirective: v.optional(v.union(v.literal('shorter'), v.literal('elaborate'))),
   },
   handler: async (ctx, args) => await chatWithMemberUseCase(ctx, args),
 });

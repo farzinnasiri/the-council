@@ -39,6 +39,14 @@ export default defineSchema({
     userId: v.id('users'),
     kind: v.union(v.literal('hall'), v.literal('chamber')),
     hallMode: v.optional(v.union(v.literal('advisory'), v.literal('roundtable'))),
+    chamberResponseMode: v.optional(
+      v.union(
+        v.literal('instant'),
+        v.literal('short'),
+        v.literal('think'),
+        v.literal('deep_dive')
+      )
+    ),
     title: v.string(),
     chamberMemberId: v.optional(v.id('members')),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
@@ -128,6 +136,25 @@ export default defineSchema({
     status: v.union(v.literal('sent'), v.literal('error')),
     compacted: v.boolean(),
     deletedAt: v.optional(v.number()),
+    supersededAt: v.optional(v.number()),
+    supersededByMessageId: v.optional(v.id('messages')),
+    supersedesMessageId: v.optional(v.id('messages')),
+    revisionKind: v.optional(
+      v.union(
+        v.literal('think_harder'),
+        v.literal('deep_dive'),
+        v.literal('shorter'),
+        v.literal('elaborate')
+      )
+    ),
+    generationProfile: v.optional(
+      v.union(
+        v.literal('instant'),
+        v.literal('short'),
+        v.literal('think'),
+        v.literal('deep_dive')
+      )
+    ),
     routing: v.optional(v.object({
       memberIds: v.array(v.id('members')),
       source: v.union(

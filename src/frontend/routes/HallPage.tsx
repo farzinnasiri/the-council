@@ -40,7 +40,13 @@ export function HallPage() {
     return <Placeholder title="Hall conversation not found" description="Choose an existing hall from the sidebar." />;
   }
 
-  const messages = allMessages.filter((message) => message.conversationId === conversation.id);
+  const messages = allMessages.filter(
+    (message) =>
+      message.conversationId === conversation.id &&
+      !message.deletedAt &&
+      !message.supersededAt &&
+      !message.compacted
+  );
   const typingMembers = (pendingReplyMemberIds[conversation.id] ?? [])
     .map((memberId) => members.find((member) => member.id === memberId))
     .filter((member): member is NonNullable<typeof member> => Boolean(member))

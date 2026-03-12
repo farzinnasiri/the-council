@@ -2,6 +2,7 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export type ConversationKind = 'hall' | 'chamber';
 export type ConversationType = ConversationKind;
 export type HallMode = 'advisory' | 'roundtable';
+export type ChamberResponseMode = 'instant' | 'short' | 'think' | 'deep_dive';
 export type MessageRole = 'user' | 'member' | 'system';
 export type MessageStatus = 'sent' | 'error';
 export type RoutingSource = 'llm' | 'fallback' | 'chamber-fixed';
@@ -41,6 +42,7 @@ export interface Conversation {
   id: string;
   kind: ConversationKind;
   hallMode?: HallMode;
+  chamberResponseMode?: ChamberResponseMode;
   title: string;
   chamberMemberId?: string;
   deletedAt?: number;
@@ -95,6 +97,12 @@ export interface Message {
   content: string;
   status: MessageStatus;
   compacted: boolean;
+  deletedAt?: number;
+  supersededAt?: number;
+  supersededByMessageId?: string;
+  supersedesMessageId?: string;
+  revisionKind?: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate';
+  generationProfile?: ChamberResponseMode;
   routing?: MessageRouting;
   inReplyToMessageId?: string;
   originConversationId?: string;

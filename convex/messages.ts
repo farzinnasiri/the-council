@@ -22,6 +22,20 @@ const messageDoc = v.object({
   status: v.union(v.literal('sent'), v.literal('error')),
   compacted: v.boolean(),
   deletedAt: v.optional(v.number()),
+  supersededAt: v.optional(v.number()),
+  supersededByMessageId: v.optional(v.id('messages')),
+  supersedesMessageId: v.optional(v.id('messages')),
+  revisionKind: v.optional(
+    v.union(
+      v.literal('think_harder'),
+      v.literal('deep_dive'),
+      v.literal('shorter'),
+      v.literal('elaborate'),
+    ),
+  ),
+  generationProfile: v.optional(
+    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive')),
+  ),
   routing: v.optional(routingValidator),
   inReplyToMessageId: v.optional(v.id('messages')),
   originConversationId: v.optional(v.id('conversations')),
@@ -39,6 +53,21 @@ const messageInputValidator = v.object({
   authorMemberId: v.optional(v.id('members')),
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
+  deletedAt: v.optional(v.number()),
+  supersededAt: v.optional(v.number()),
+  supersededByMessageId: v.optional(v.id('messages')),
+  supersedesMessageId: v.optional(v.id('messages')),
+  revisionKind: v.optional(
+    v.union(
+      v.literal('think_harder'),
+      v.literal('deep_dive'),
+      v.literal('shorter'),
+      v.literal('elaborate'),
+    ),
+  ),
+  generationProfile: v.optional(
+    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive')),
+  ),
   routing: v.optional(routingValidator),
   inReplyToMessageId: v.optional(v.id('messages')),
   originConversationId: v.optional(v.id('conversations')),
@@ -75,6 +104,14 @@ async function assertOwnedMember(ctx: any, userId: any, memberId: any) {
   if (!member || member.userId !== userId || member.deletedAt) throw new Error('Member not found');
 }
 
+async function getOwnedMessage(ctx: any, userId: any, messageId: any) {
+  const message = await ctx.db.get(messageId);
+  if (!message || message.userId !== userId) {
+    throw new Error('Message not found');
+  }
+  return message;
+}
+
 export const listActive = query({
   args: { conversationId: v.id('conversations') },
   returns: v.array(messageDoc),
@@ -89,7 +126,7 @@ export const listActive = query({
       )
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt);
+    return rows.filter((row) => !row.deletedAt && !row.supersededAt);
   },
 });
 
@@ -121,7 +158,7 @@ export const listActivePage = query({
     }
 
     const rows = await queryBuilder.take(limit + 1);
-    const filtered = rows.filter((row) => !row.deletedAt);
+    const filtered = rows.filter((row) => !row.deletedAt && !row.supersededAt);
     const hasMore = rows.length > limit;
 
     return {
@@ -143,7 +180,7 @@ export const listAll = query({
       .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt);
+    return rows.filter((row) => !row.deletedAt && !row.supersededAt);
   },
 });
 
@@ -161,7 +198,7 @@ export const listReplies = query({
       )
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt);
+    return rows.filter((row) => !row.deletedAt && !row.supersededAt);
   },
 });
 
@@ -179,7 +216,7 @@ export const getConversationCounts = query({
     const nonDeleted = rows.filter((row) => row.userId === userId && !row.deletedAt && row.role !== 'system');
     return {
       totalNonSystem: nonDeleted.length,
-      activeNonSystem: nonDeleted.filter((row) => !row.compacted).length,
+      activeNonSystem: nonDeleted.filter((row) => !row.compacted && !row.supersededAt).length,
     };
   },
 });
@@ -246,6 +283,92 @@ export const appendMany = mutation({
       lastMessageAt: now,
     });
     return null;
+  },
+});
+
+export const replaceWithRefinement = mutation({
+  args: {
+    targetMessageId: v.id('messages'),
+    replacement: messageInputValidator,
+  },
+  returns: v.object({
+    superseded: messageDoc,
+    replacement: messageDoc,
+  }),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const target = await getOwnedMessage(ctx, userId, args.targetMessageId);
+    await getOwnedConversation(ctx, userId, target.conversationId);
+
+    if (target.deletedAt || target.supersededAt) {
+      throw new Error('Message is no longer active');
+    }
+    if (target.role !== 'member') {
+      throw new Error('Only member replies can be refined');
+    }
+    if (args.replacement.conversationId !== target.conversationId) {
+      throw new Error('Replacement must target the same conversation');
+    }
+
+    await assertOwnedMember(ctx, userId, args.replacement.authorMemberId);
+    const now = Date.now();
+    const replacementId = await ctx.db.insert('messages', {
+      userId,
+      ...args.replacement,
+      compacted: false,
+      supersedesMessageId: args.targetMessageId,
+    });
+
+    await ctx.db.patch(args.targetMessageId, {
+      supersededAt: now,
+      supersededByMessageId: replacementId,
+    });
+    await ctx.db.patch(target.conversationId, {
+      updatedAt: now,
+      lastMessageAt: now,
+    });
+
+    return {
+      superseded: (await ctx.db.get(args.targetMessageId))!,
+      replacement: (await ctx.db.get(replacementId))!,
+    };
+  },
+});
+
+export const appendElaborationReply = mutation({
+  args: {
+    targetMessageId: v.id('messages'),
+    reply: messageInputValidator,
+  },
+  returns: messageDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const target = await getOwnedMessage(ctx, userId, args.targetMessageId);
+    await getOwnedConversation(ctx, userId, target.conversationId);
+
+    if (target.deletedAt || target.supersededAt) {
+      throw new Error('Message is no longer active');
+    }
+    if (target.role !== 'member') {
+      throw new Error('Only member replies can be elaborated');
+    }
+    if (args.reply.conversationId !== target.conversationId) {
+      throw new Error('Reply must target the same conversation');
+    }
+
+    await assertOwnedMember(ctx, userId, args.reply.authorMemberId);
+    const now = Date.now();
+    const replyId = await ctx.db.insert('messages', {
+      userId,
+      ...args.reply,
+      compacted: false,
+      inReplyToMessageId: args.reply.inReplyToMessageId ?? args.targetMessageId,
+    });
+    await ctx.db.patch(target.conversationId, {
+      updatedAt: now,
+      lastMessageAt: now,
+    });
+    return (await ctx.db.get(replyId))!;
   },
 });
 

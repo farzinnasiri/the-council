@@ -100,6 +100,11 @@ Status: In Progress (as of February 27, 2026)
 - Apply coaching-specific system prompt/tool presets.
 
 ### 2.6 Response Modes (Behavior + Length Control)
+Status: Completed (March 12, 2026)
+- Completed: chamber response-mode switcher with `Instant`, `Short`, `Think`, and `Deep Dive`.
+- Completed: latest-reply refinement actions with `Think harder`, `Deep dive`, `Shorter`, and `Elaborate`.
+- Completed: per-thread mode persistence for Chamber only, with one-turn refinement overrides that do not mutate the thread mode.
+- Completed: deep-dive retrieval/profile behavior, richer KB query planning, and superseded-message exclusion from future context.
 - Add user-selectable response modes (examples):
   - Instant,
   - Brief/Short,

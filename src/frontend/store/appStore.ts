@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  ChamberResponseMode,
   Conversation,
   ConversationMemoryLog,
   ConversationNotebook,
@@ -94,6 +95,7 @@ interface AppState {
     }
   >;
   compactionPolicy: CompactionPolicy;
+  refiningActionByMessageId: Record<string, 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate' | undefined>;
 
   initializeApp: () => Promise<void>;
   refreshCompactionPolicy: () => Promise<CompactionPolicy>;
@@ -104,6 +106,7 @@ interface AppState {
   syncHallRoundSummaries: (conversationId: string) => Promise<void>;
   evaluateChamberCompactionOnLoad: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
+  setChamberResponseMode: (conversationId: string, mode: ChamberResponseMode) => Promise<void>;
   renameConversation: (conversationId: string, title: string) => Promise<void>;
   archiveConversation: (conversationId: string) => Promise<void>;
   createChamberThread: (memberId: string) => Promise<Conversation>;
@@ -137,6 +140,10 @@ interface AppState {
   addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
   removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
   clearChamberByMember: (memberId: string) => Promise<void>;
+  refineLatestChamberResponse: (
+    conversationId: string,
+    action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate'
+  ) => Promise<void>;
   setNotebookOpen: (open: boolean) => void;
   toggleNotebookOpen: () => void;
   setNotebookMobileSnap: (snap: 0.3 | 0.5 | 1) => void;
@@ -174,6 +181,66 @@ function removeKey<T>(record: Record<string, T>, key: string) {
   const next = { ...record };
   delete next[key];
   return next;
+}
+
+function isVisibleMessage(message: Message) {
+  return !message.deletedAt && !message.supersededAt && !message.compacted;
+}
+
+function getBaseGenerationProfile(mode: ChamberResponseMode | undefined): {
+  chatProfile: ChamberResponseMode;
+  retrievalProfile: 'default' | 'deep_dive';
+} {
+  switch (mode) {
+    case 'short':
+      return { chatProfile: 'short', retrievalProfile: 'default' };
+    case 'think':
+      return { chatProfile: 'think', retrievalProfile: 'default' };
+    case 'deep_dive':
+      return { chatProfile: 'instant', retrievalProfile: 'deep_dive' };
+    default:
+      return { chatProfile: 'instant', retrievalProfile: 'default' };
+  }
+}
+
+function resolveRefinementProfiles(action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate') {
+  if (action === 'think_harder') {
+    return { chatProfile: 'think' as const, retrievalProfile: 'default' as const, turnDirective: undefined };
+  }
+  if (action === 'deep_dive') {
+    return { chatProfile: 'instant' as const, retrievalProfile: 'deep_dive' as const, turnDirective: undefined };
+  }
+  if (action === 'shorter') {
+    return { chatProfile: 'instant' as const, retrievalProfile: 'default' as const, turnDirective: 'shorter' as const };
+  }
+  return { chatProfile: 'instant' as const, retrievalProfile: 'default' as const, turnDirective: 'elaborate' as const };
+}
+
+function getRefinementGenerationProfile(
+  action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate'
+): ChamberResponseMode {
+  switch (action) {
+    case 'think_harder':
+      return 'think';
+    case 'deep_dive':
+      return 'deep_dive';
+    case 'shorter':
+      return 'short';
+    default:
+      return 'instant';
+  }
+}
+
+function getLatestVisibleChamberMemberMessage(messages: Message[], conversationId: string): Message | undefined {
+  return messages
+    .filter(
+      (message) =>
+        message.conversationId === conversationId &&
+        message.role === 'member' &&
+        message.status === 'sent' &&
+        isVisibleMessage(message)
+    )
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
 function buildMessage(input: BuildMessageInput): Message {
@@ -240,7 +307,7 @@ function buildMemberContextWindow(
   const filtered = messages
     .filter((msg) => {
       if (msg.conversationId !== conversationId) return false;
-      if (msg.compacted) return false;
+      if (!isVisibleMessage(msg)) return false;
       if (msg.role === 'system') return false;
       if (msg.status === 'error') return false;
       if (msg.role === 'user') return true;
@@ -292,7 +359,7 @@ function buildHallSystemContext(
     .filter(
       (msg) =>
         msg.conversationId === conversationId &&
-        !msg.compacted &&
+        isVisibleMessage(msg) &&
         msg.role !== 'system' &&
         msg.status !== 'error'
     )
@@ -359,7 +426,7 @@ function buildHallRoundAssignments(
   hallMode?: 'advisory' | 'roundtable'
 ): Map<string, number> {
   const ordered = messages
-    .filter((msg) => msg.conversationId === conversationId && !msg.compacted && msg.status !== 'error')
+    .filter((msg) => msg.conversationId === conversationId && isVisibleMessage(msg) && msg.status !== 'error')
     .sort((a, b) => a.createdAt - b.createdAt);
 
   if (hallMode === 'roundtable') {
@@ -415,7 +482,7 @@ function buildHallRoundAwareContext(options: {
 
   const rawMessages = options.messages.filter((msg) => {
     if (msg.conversationId !== options.conversationId) return false;
-    if (msg.compacted || msg.status === 'error' || msg.role === 'system') return false;
+    if (!isVisibleMessage(msg) || msg.status === 'error' || msg.role === 'system') return false;
     const round = assignments.get(msg.id);
     if (typeof round !== 'number') return true;
     return round >= firstRawRound;
@@ -551,6 +618,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   toasts: [],
   messagePaginationByConversation: {},
   compactionPolicy: COMPACTION_POLICY_DEFAULTS,
+  refiningActionByMessageId: {},
 
   refreshCompactionPolicy: async () => {
     const policy = await councilRepository.getCompactionPolicy();
@@ -1148,7 +1216,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       .filter(
         (message) =>
           message.conversationId === conversationId &&
-          !message.compacted &&
+          isVisibleMessage(message) &&
           message.status !== 'error' &&
           message.role !== 'system'
       )
@@ -1240,6 +1308,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     return created;
+  },
+
+  setChamberResponseMode: async (conversationId, mode) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+    const updated = await councilRepository.setChamberResponseMode(conversationId, mode);
+    set((state) => ({
+      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+    }));
   },
 
   renameConversation: async (conversationId, title) => {
@@ -1373,7 +1450,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           msg.conversationId === conversationId &&
           msg.role === 'user' &&
           msg.status !== 'error' &&
-          !msg.compacted
+          isVisibleMessage(msg)
       ).length + 1;
     const maxExplicitRound = Math.max(
       0,
@@ -1382,7 +1459,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           (msg) =>
             msg.conversationId === conversationId &&
             msg.status !== 'error' &&
-            !msg.compacted &&
+            isVisibleMessage(msg) &&
             typeof msg.roundNumber === 'number'
         )
         .map((msg) => msg.roundNumber as number)
@@ -1444,7 +1521,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               message.conversationId === conversationId &&
               message.role === 'user' &&
               message.status !== 'error' &&
-              !message.compacted
+              isVisibleMessage(message)
           ).length
         )
         : undefined;
@@ -1749,7 +1826,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       : [];
     const hallContextBundle =
       conversation.kind === 'hall'
-        ? buildHallRoundAwareContext({
+      ? buildHallRoundAwareContext({
           messages: get().messages,
           conversationId,
           hallMemoryLogs: await councilRepository.listMemoryLogsByScope(conversationId, 'hall'),
@@ -1757,6 +1834,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           hallMode: conversation.hallMode ?? 'advisory',
         })
         : null;
+    const chamberGeneration =
+      conversation.kind === 'chamber'
+        ? getBaseGenerationProfile(conversation.chamberResponseMode)
+        : { chatProfile: 'instant' as const, retrievalProfile: 'default' as const };
     const replyTasks = memberIds.map(async (memberId) => {
       const member = membersMap.get(memberId);
       let reply: Message;
@@ -1795,6 +1876,8 @@ export const useAppStore = create<AppState>((set, get) => ({
                   conversationId,
                 )
                 : undefined,
+            chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
+            retrievalProfile: conversation.kind === 'chamber' ? chamberGeneration.retrievalProfile : undefined,
           });
 
           reply = buildMessage({
@@ -1806,6 +1889,10 @@ export const useAppStore = create<AppState>((set, get) => ({
               : result.answer,
             status: 'sent',
             roundNumber: currentHallRoundNumber,
+            generationProfile:
+              conversation.kind === 'chamber'
+                ? conversation.chamberResponseMode ?? chamberGeneration.chatProfile
+                : undefined,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Request failed';
@@ -1950,6 +2037,146 @@ export const useAppStore = create<AppState>((set, get) => ({
           : state.selectedConversationId,
       };
     });
+  },
+
+  refineLatestChamberResponse: async (conversationId, action) => {
+    await get().loadMessages(conversationId);
+    const state = get();
+    const conversation = state.conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+
+    const target = getLatestVisibleChamberMemberMessage(state.messages, conversationId);
+    if (!target?.authorMemberId || state.refiningActionByMessageId[target.id]) return;
+
+    const visibleMessages = state.messages
+      .filter((message) => message.conversationId === conversationId && isVisibleMessage(message))
+      .sort((a, b) => a.createdAt - b.createdAt);
+    const targetIndex = visibleMessages.findIndex((message) => message.id === target.id);
+    if (targetIndex <= 0) return;
+
+    const promptMessage = [...visibleMessages.slice(0, targetIndex)]
+      .reverse()
+      .find((message) => message.role === 'user' && message.status !== 'error');
+    if (!promptMessage) return;
+
+    const membersMap = new Map(state.members.map((member) => [member.id, member]));
+    const member = membersMap.get(target.authorMemberId);
+    if (!member) return;
+
+    const previousSummary = state.chamberMemoryByConversation[conversationId]
+      ?? (await councilRepository.getLatestChamberMemoryLog(conversationId))?.memory;
+    const refinementProfiles = resolveRefinementProfiles(action);
+    const refinementGenerationProfile = getRefinementGenerationProfile(action);
+    const contextMessages = buildMemberContextWindow(
+      visibleMessages.filter((message) => message.id !== target.id),
+      conversationId,
+      member.id,
+      'chamber',
+      membersMap
+    );
+
+    set((current) => ({
+      refiningActionByMessageId: {
+        ...current.refiningActionByMessageId,
+        [target.id]: action,
+      },
+      pendingReplyCount: {
+        ...current.pendingReplyCount,
+        [conversationId]: 1,
+      },
+      pendingReplyMemberIds: {
+        ...current.pendingReplyMemberIds,
+        [conversationId]: [member.id],
+      },
+    }));
+
+    try {
+      const result = await chatWithMember({
+        message: promptMessage.content,
+        memberId: member.id,
+        conversationId,
+        previousSummary,
+        contextMessages,
+        chatProfile: refinementProfiles.chatProfile,
+        retrievalProfile: refinementProfiles.retrievalProfile,
+        turnDirective: refinementProfiles.turnDirective,
+      });
+
+      if (action === 'elaborate') {
+        const appended = await councilRepository.appendElaborationReply({
+          targetMessageId: target.id,
+          reply: {
+            conversationId,
+            role: 'member',
+            authorMemberId: member.id,
+            content: result.answer,
+            status: 'sent',
+            inReplyToMessageId: target.id,
+            revisionKind: 'elaborate',
+            generationProfile: refinementGenerationProfile,
+          },
+        });
+
+        set((current) => ({
+          messages: [...current.messages, appended],
+          ...updateConversationStamp(current, conversationId, true),
+          refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
+          pendingReplyCount: {
+            ...current.pendingReplyCount,
+            [conversationId]: 0,
+          },
+          pendingReplyMemberIds: {
+            ...current.pendingReplyMemberIds,
+            [conversationId]: [],
+          },
+        }));
+        return;
+      }
+
+      const replaced = await councilRepository.replaceWithRefinement({
+        targetMessageId: target.id,
+        replacement: {
+          conversationId,
+          role: 'member',
+          authorMemberId: member.id,
+          content: result.answer,
+          status: 'sent',
+          inReplyToMessageId: promptMessage.id,
+          revisionKind: action,
+          generationProfile: refinementGenerationProfile,
+        },
+      });
+
+      set((current) => ({
+        messages: current.messages
+          .map((message) => (message.id === replaced.superseded.id ? replaced.superseded : message))
+          .concat(replaced.replacement)
+          .sort((a, b) => a.createdAt - b.createdAt),
+        ...updateConversationStamp(current, conversationId, true),
+        refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
+        pendingReplyCount: {
+          ...current.pendingReplyCount,
+          [conversationId]: 0,
+        },
+        pendingReplyMemberIds: {
+          ...current.pendingReplyMemberIds,
+          [conversationId]: [],
+        },
+      }));
+    } catch (error) {
+      set((current) => ({
+        refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
+        pendingReplyCount: {
+          ...current.pendingReplyCount,
+          [conversationId]: 0,
+        },
+        pendingReplyMemberIds: {
+          ...current.pendingReplyMemberIds,
+          [conversationId]: [],
+        },
+      }));
+      get().showToast(error instanceof Error ? error.message : 'Could not refine the reply.');
+    }
   },
 
   setThemeMode: async (mode) => {

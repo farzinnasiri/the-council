@@ -55,12 +55,15 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;
     responseModel?: string;
+    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
+    retrievalProfile?: 'default' | 'deep_dive';
     temperature?: number;
     metadataFilter?: string;
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
     useKnowledgeBase?: boolean;
+    turnDirective?: 'shorter' | 'elaborate';
   }) {
     return await runMemberChatGraph(input);
   }

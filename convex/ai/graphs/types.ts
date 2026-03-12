@@ -43,6 +43,7 @@ export interface QueryPlanDebug {
   originalQuery: string;
   standaloneQuery: string;
   queryAlternates: string[];
+  deepDiveQueries?: string[];
   gateUsed: boolean;
   gateReason: string;
   matchedDigestSignals: string[];

@@ -2,6 +2,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type {
+  ChamberResponseMode,
   Conversation,
   ConversationMemoryLog,
   ConversationNotebook,
@@ -70,6 +71,7 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
     id: doc._id,
     kind: doc.kind,
     hallMode: doc.kind === 'hall' ? ((doc.hallMode as 'advisory' | 'roundtable' | undefined) ?? 'advisory') : undefined,
+    chamberResponseMode: doc.kind === 'chamber' ? (doc.chamberResponseMode as ChamberResponseMode | undefined) ?? 'instant' : undefined,
     title: doc.title,
     chamberMemberId: doc.chamberMemberId as string | undefined,
     deletedAt: doc.deletedAt,
@@ -100,6 +102,12 @@ function toMessage(doc: ConvexMessageDoc): Message {
     content: doc.content,
     status: doc.status,
     compacted: doc.compacted,
+    deletedAt: doc.deletedAt,
+    supersededAt: doc.supersededAt,
+    supersededByMessageId: doc.supersededByMessageId,
+    supersedesMessageId: doc.supersedesMessageId,
+    revisionKind: doc.revisionKind,
+    generationProfile: doc.generationProfile,
     routing: doc.routing,
     inReplyToMessageId: doc.inReplyToMessageId,
     originConversationId: doc.originConversationId,
@@ -508,6 +516,14 @@ class ConvexCouncilRepository implements CouncilRepository {
     return doc ? toConversation(doc) : null;
   }
 
+  async setChamberResponseMode(conversationId: string, mode: ChamberResponseMode): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:setChamberResponseMode', {
+      conversationId: conversationId as Id<'conversations'>,
+      mode,
+    });
+    return toConversation(doc);
+  }
+
   async clearChamberByMember(memberId: string): Promise<void> {
     await this.clientAny.mutation('conversations:clearChamberByMember', {
       memberId: memberId as Id<'members'>,
@@ -625,6 +641,12 @@ class ConvexCouncilRepository implements CouncilRepository {
         authorMemberId: message.authorMemberId as Id<'members'> | undefined,
         content: message.content,
         status: message.status,
+        deletedAt: message.deletedAt,
+        supersededAt: message.supersededAt,
+        supersededByMessageId: message.supersededByMessageId as Id<'messages'> | undefined,
+        supersedesMessageId: message.supersedesMessageId as Id<'messages'> | undefined,
+        revisionKind: message.revisionKind,
+        generationProfile: message.generationProfile,
         routing: message.routing
           ? {
             memberIds: message.routing.memberIds as Id<'members'>[],
@@ -641,6 +663,83 @@ class ConvexCouncilRepository implements CouncilRepository {
         error: message.error,
       })),
     });
+  }
+
+  async replaceWithRefinement(input: {
+    targetMessageId: string;
+    replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+  }): Promise<{ superseded: Message; replacement: Message }> {
+    const result = await this.clientAny.mutation('messages:replaceWithRefinement', {
+      targetMessageId: input.targetMessageId as Id<'messages'>,
+      replacement: {
+        conversationId: input.replacement.conversationId as Id<'conversations'>,
+        role: input.replacement.role,
+        authorMemberId: input.replacement.authorMemberId as Id<'members'> | undefined,
+        content: input.replacement.content,
+        status: input.replacement.status,
+        deletedAt: input.replacement.deletedAt,
+        supersededAt: input.replacement.supersededAt,
+        supersededByMessageId: input.replacement.supersededByMessageId as Id<'messages'> | undefined,
+        supersedesMessageId: input.replacement.supersedesMessageId as Id<'messages'> | undefined,
+        revisionKind: input.replacement.revisionKind,
+        generationProfile: input.replacement.generationProfile,
+        routing: input.replacement.routing
+          ? {
+              memberIds: input.replacement.routing.memberIds as Id<'members'>[],
+              source: input.replacement.routing.source,
+            }
+          : undefined,
+        inReplyToMessageId: input.replacement.inReplyToMessageId as Id<'messages'> | undefined,
+        originConversationId: input.replacement.originConversationId as Id<'conversations'> | undefined,
+        originMessageId: input.replacement.originMessageId as Id<'messages'> | undefined,
+        mentionedMemberIds: input.replacement.mentionedMemberIds as Id<'members'>[] | undefined,
+        roundNumber: input.replacement.roundNumber,
+        roundIntent: input.replacement.roundIntent,
+        roundTargetMemberId: input.replacement.roundTargetMemberId as Id<'members'> | undefined,
+        error: input.replacement.error,
+      },
+    });
+    return {
+      superseded: toMessage(result.superseded),
+      replacement: toMessage(result.replacement),
+    };
+  }
+
+  async appendElaborationReply(input: {
+    targetMessageId: string;
+    reply: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+  }): Promise<Message> {
+    const result = await this.clientAny.mutation('messages:appendElaborationReply', {
+      targetMessageId: input.targetMessageId as Id<'messages'>,
+      reply: {
+        conversationId: input.reply.conversationId as Id<'conversations'>,
+        role: input.reply.role,
+        authorMemberId: input.reply.authorMemberId as Id<'members'> | undefined,
+        content: input.reply.content,
+        status: input.reply.status,
+        deletedAt: input.reply.deletedAt,
+        supersededAt: input.reply.supersededAt,
+        supersededByMessageId: input.reply.supersededByMessageId as Id<'messages'> | undefined,
+        supersedesMessageId: input.reply.supersedesMessageId as Id<'messages'> | undefined,
+        revisionKind: input.reply.revisionKind,
+        generationProfile: input.reply.generationProfile,
+        routing: input.reply.routing
+          ? {
+              memberIds: input.reply.routing.memberIds as Id<'members'>[],
+              source: input.reply.routing.source,
+            }
+          : undefined,
+        inReplyToMessageId: input.reply.inReplyToMessageId as Id<'messages'> | undefined,
+        originConversationId: input.reply.originConversationId as Id<'conversations'> | undefined,
+        originMessageId: input.reply.originMessageId as Id<'messages'> | undefined,
+        mentionedMemberIds: input.reply.mentionedMemberIds as Id<'members'>[] | undefined,
+        roundNumber: input.reply.roundNumber,
+        roundIntent: input.reply.roundIntent,
+        roundTargetMemberId: input.reply.roundTargetMemberId as Id<'members'> | undefined,
+        error: input.reply.error,
+      },
+    });
+    return toMessage(result);
   }
 
   async clearMessages(conversationId: string): Promise<void> {
@@ -710,6 +809,9 @@ class ConvexCouncilRepository implements CouncilRepository {
     previousSummary?: string;
     contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     hallContext?: string;
+    chatProfile?: ChamberResponseMode;
+    retrievalProfile?: 'default' | 'deep_dive';
+    turnDirective?: 'shorter' | 'elaborate';
   }): Promise<MemberChatResult> {
     return (await this.client.action(api.ai.chat.chatWithMember as any, {
       conversationId: input.conversationId as Id<'conversations'>,
@@ -718,6 +820,9 @@ class ConvexCouncilRepository implements CouncilRepository {
       previousSummary: input.previousSummary,
       contextMessages: input.contextMessages,
       hallContext: input.hallContext,
+      chatProfile: input.chatProfile,
+      retrievalProfile: input.retrievalProfile,
+      turnDirective: input.turnDirective,
     })) as MemberChatResult;
   }
 

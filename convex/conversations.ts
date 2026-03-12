@@ -9,6 +9,9 @@ const conversationDoc = v.object({
   userId: v.id('users'),
   kind: v.union(v.literal('hall'), v.literal('chamber')),
   hallMode: v.optional(v.union(v.literal('advisory'), v.literal('roundtable'))),
+  chamberResponseMode: v.optional(
+    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
+  ),
   title: v.string(),
   chamberMemberId: v.optional(v.id('members')),
   // Legacy compatibility while old rows still include status.
@@ -56,6 +59,7 @@ async function createChamberThreadDoc(ctx: any, userId: any, memberId: any) {
   const conversationId = await ctx.db.insert('conversations', {
     userId,
     kind: 'chamber',
+    chamberResponseMode: 'instant',
     title: 'New Thread',
     chamberMemberId: memberId,
     updatedAt: now,
@@ -241,6 +245,26 @@ export const renameConversation = mutation({
     const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
     if (conversation.deletedAt) throw new Error('Conversation not found');
     return await renameConversationDoc(ctx, args.conversationId, args.title, conversation.title);
+  },
+});
+
+export const setChamberResponseMode = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    mode: v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive')),
+  },
+  returns: conversationDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber conversation not found');
+    }
+    await ctx.db.patch(args.conversationId, {
+      chamberResponseMode: args.mode,
+      updatedAt: Date.now(),
+    });
+    return (await ctx.db.get(args.conversationId))!;
   },
 });
 

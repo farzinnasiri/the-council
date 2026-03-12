@@ -56,10 +56,13 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     memoryHint: args.previousSummary,
     kbDigests: toKBDigestHints(kbDigests),
     responseModel: args.chatModel,
+    chatProfile: args.chatProfile,
     retrievalModel: args.retrievalModel,
+    retrievalProfile: args.retrievalProfile,
     temperature: 0.35,
     personaPrompt: effectiveSystemPrompt,
     contextMessages: (args.contextMessages ?? []).slice(-12),
     includeConversationContext: args.hallContext?.trim() ? false : true,
+    turnDirective: args.turnDirective,
   });
 }

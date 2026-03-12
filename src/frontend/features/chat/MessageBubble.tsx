@@ -1,10 +1,12 @@
-import { Check, Copy, MessageCircle, NotebookPen, Reply, UserCircle2 } from 'lucide-react';
+import { AlignJustify, Brain, Check, Copy, Expand, MessageCircle, NotebookPen, Reply, Search, SlidersHorizontal, UserCircle2 } from 'lucide-react';
 import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import type { Message } from '../../types/domain';
 import { Button } from '../../components/ui/button';
 import { RoutePill } from './RoutePill';
 import { MarkdownMessage } from './MarkdownMessage';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
+import { cn } from '../../lib/utils';
 
 /** Format epoch ms → "HH:MM" */
 function formatClock(epochMs: number): string {
@@ -33,7 +35,10 @@ export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const members = useAppStore((state) => state.members);
   const conversations = useAppStore((state) => state.conversations);
+  const messages = useAppStore((state) => state.messages);
   const appendMessageToNotebook = useAppStore((state) => state.appendMessageToNotebook);
+  const refiningActionByMessageId = useAppStore((state) => state.refiningActionByMessageId);
+  const refineLatestChamberResponse = useAppStore((state) => state.refineLatestChamberResponse);
 
   if (message.role === 'system') {
     const isManual = message.content.toLowerCase().startsWith('manually routed');
@@ -47,7 +52,36 @@ export function MessageBubble({ message }: { message: Message }) {
   const label = member?.name ?? 'Council Member';
   const conversation = conversations.find((item) => item.id === message.conversationId);
   const isChamber = conversation?.kind === 'chamber';
+  const latestChamberMemberMessageId = isChamber
+    ? messages
+        .filter(
+          (item) =>
+            item.conversationId === message.conversationId &&
+            item.role === 'member' &&
+            item.status === 'sent' &&
+            !item.deletedAt &&
+            !item.supersededAt &&
+            !item.compacted
+        )
+        .sort((a, b) => b.createdAt - a.createdAt)[0]?.id
+    : undefined;
+  const canRefine =
+    Boolean(
+      isChamber &&
+      !isUser &&
+      message.status === 'sent' &&
+      !message.deletedAt &&
+      !message.supersededAt &&
+      !message.compacted &&
+      latestChamberMemberMessageId === message.id
+    );
+  const activeRefinement = refiningActionByMessageId[message.id];
+  const isReplacementRefining = activeRefinement && activeRefinement !== 'elaborate';
   const timeLabel = formatClock(message.createdAt);
+
+  if (isReplacementRefining) {
+    return null;
+  }
 
   const copyContent = async () => {
     try {
@@ -86,7 +120,67 @@ export function MessageBubble({ message }: { message: Message }) {
           {!isUser ? (
             <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
               {isChamber ? (
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
+                  {canRefine ? (
+                    <>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                            disabled={Boolean(activeRefinement)}
+                          >
+                            <SlidersHorizontal className="h-3 w-3" />
+                            Refine
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44">
+                          <DropdownMenuLabel>Refine Reply</DropdownMenuLabel>
+                          <DropdownMenuItem
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              void refineLatestChamberResponse(message.conversationId, 'think_harder');
+                            }}
+                            className="gap-2"
+                          >
+                            <Brain className="h-3.5 w-3.5" />
+                            Think harder
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              void refineLatestChamberResponse(message.conversationId, 'deep_dive');
+                            }}
+                            className="gap-2"
+                          >
+                            <Search className="h-3.5 w-3.5" />
+                            Deep dive
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              void refineLatestChamberResponse(message.conversationId, 'shorter');
+                            }}
+                            className="gap-2"
+                          >
+                            <AlignJustify className="h-3.5 w-3.5" />
+                            Shorter
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                        onClick={() => void refineLatestChamberResponse(message.conversationId, 'elaborate')}
+                        disabled={Boolean(activeRefinement)}
+                      >
+                        <Expand className="h-3 w-3" />
+                        Elaborate
+                      </Button>
+                    </>
+                  ) : null}
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                     <NotebookPen className="h-3 w-3" />
                   </Button>
@@ -106,7 +200,7 @@ export function MessageBubble({ message }: { message: Message }) {
                   </Button>
                 </div>
               )}
-              <span className="text-[10px] text-muted-foreground">{timeLabel}</span>
+              <span className={cn('text-[10px] text-muted-foreground', isChamber && canRefine ? 'ml-auto' : '')}>{timeLabel}</span>
             </div>
           ) : (
             <div className="mt-2 flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">

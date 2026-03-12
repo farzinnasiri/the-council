@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Mic, SendHorizontal, Square } from 'lucide-react';
+import { AlignJustify, Brain, ChevronDown, Loader2, Mic, Search, SendHorizontal, Square, Zap } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { cn } from '../../lib/utils';
@@ -7,6 +7,8 @@ import { transcribeRecordedAudio } from '../../lib/aiClient';
 import { appendTranscriptToDraft } from './audio';
 import { LiveWaveform } from './LiveWaveform';
 import { useAudioRecorder } from './useAudioRecorder';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
+import type { ChamberResponseMode } from '../../types/domain';
 
 interface ComposerProps {
   onSend: (payload: { text: string; mentionedMemberIds?: string[] }) => void | Promise<void>;
@@ -14,7 +16,21 @@ interface ComposerProps {
   sendDisabled?: boolean;
   mentionOptions?: Array<{ id: string; name: string }>;
   mentionError?: string;
+  chamberResponseMode?: ChamberResponseMode;
+  onChamberResponseModeChange?: (mode: ChamberResponseMode) => void | Promise<void>;
 }
+
+const CHAMBER_MODE_OPTIONS: Array<{
+  value: ChamberResponseMode;
+  label: string;
+  description: string;
+  Icon: typeof Zap;
+}> = [
+  { value: 'instant', label: 'Instant', description: 'Fast default reply', Icon: Zap },
+  { value: 'short', label: 'Short', description: 'Concise default reply', Icon: AlignJustify },
+  { value: 'think', label: 'Think', description: 'Reason more before replying', Icon: Brain },
+  { value: 'deep_dive', label: 'Deep Dive', description: 'Search broader across member knowledge', Icon: Search },
+];
 
 export function Composer({
   onSend,
@@ -22,6 +38,8 @@ export function Composer({
   sendDisabled = false,
   mentionOptions = [],
   mentionError,
+  chamberResponseMode,
+  onChamberResponseModeChange,
 }: ComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -108,6 +126,8 @@ export function Composer({
   };
 
   const currentVoiceError = voiceError ?? recorderError;
+  const activeMode = CHAMBER_MODE_OPTIONS.find((option) => option.value === chamberResponseMode);
+  const ActiveModeIcon = activeMode?.Icon ?? Zap;
 
   return (
     <div className="bg-background px-4 py-4 md:px-8 border-t border-border">
@@ -178,6 +198,45 @@ export function Composer({
           </div>
 
           <div className="flex items-center gap-1">
+            {chamberResponseMode && onChamberResponseModeChange ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground"
+                    disabled={isLocked}
+                    aria-label={`Response mode: ${activeMode?.label ?? 'Instant'}`}
+                  >
+                    <ActiveModeIcon className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{activeMode?.label ?? 'Instant'}</span>
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuLabel>Response Mode</DropdownMenuLabel>
+                  {CHAMBER_MODE_OPTIONS.map(({ value, label, description, Icon }) => (
+                    <DropdownMenuItem
+                      key={value}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        void onChamberResponseModeChange(value);
+                      }}
+                      className={cn(
+                        'gap-2',
+                        chamberResponseMode === value && 'bg-muted text-foreground'
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm">{label}</p>
+                        <p className="text-[11px] text-muted-foreground">{description}</p>
+                      </div>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             <Button
               variant="ghost"
               size="icon"

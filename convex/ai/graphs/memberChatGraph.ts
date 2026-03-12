@@ -70,12 +70,15 @@ export interface MemberChatInput {
   kbDigests?: KBDocumentDigestHint[];
   retrievalModel?: string;
   responseModel?: string;
+  chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
+  retrievalProfile?: 'default' | 'deep_dive';
   temperature?: number;
   metadataFilter?: string;
   personaPrompt?: string;
   contextMessages?: ContextMessage[];
   includeConversationContext?: boolean;
   useKnowledgeBase?: boolean;
+  turnDirective?: 'shorter' | 'elaborate';
 }
 
 export interface MemberChatOutput {
@@ -131,6 +134,15 @@ export interface MemberChatOutput {
       snippets: string[];
       queryUsed?: string;
       usedAlternateQuery?: boolean;
+      deepDivePasses?: Array<{
+        query: string;
+        grounded: boolean;
+        citationsCount: number;
+        snippetsCount: number;
+        retrievalText: string;
+        citations: Citation[];
+        snippets: string[];
+      }>;
     };
     personalArchiveSearchResponse?: {
       grounded: boolean;
@@ -141,6 +153,9 @@ export interface MemberChatOutput {
       snippets: string[];
       queryUsed?: string;
     };
+    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
+    retrievalProfile?: 'default' | 'deep_dive';
+    turnDirective?: 'shorter' | 'elaborate';
     answerPrompt: string;
   };
 }
@@ -153,6 +168,10 @@ const rewriteSchema = z.object({
 const plannerSchema = z.object({
   sources: z.array(z.enum(['knowledge_base', 'personal_archive'])).max(2).default([]),
   reason: z.string().default('context-planner'),
+});
+
+const deepDiveSchema = z.object({
+  subqueries: z.array(z.string()).max(3).default([]),
 });
 
 function collectDigestSignals(query: string, kbDigests: KBDocumentDigestHint[]): string[] {
@@ -208,6 +227,45 @@ function buildEvidencePack(evidence: GroundedEvidence): string[] {
     });
   }
   return lines;
+}
+
+function mergeEvidencePacks(passes: RetrievePass[]): GroundedEvidence {
+  const citations: Citation[] = [];
+  const citationKeyToIndex = new Map<string, number>();
+  const snippets: GroundedSnippet[] = [];
+  const snippetKeys = new Set<string>();
+
+  for (const pass of passes) {
+    const localToGlobal = new Map<number, number>();
+    for (const citation of pass.evidence.citations) {
+      const key = `${citation.title}::${citation.uri ?? ''}`;
+      if (!citationKeyToIndex.has(key)) {
+        citationKeyToIndex.set(key, citations.length);
+        citations.push(citation);
+      }
+      localToGlobal.set(
+        pass.evidence.citations.indexOf(citation),
+        citationKeyToIndex.get(key) as number
+      );
+    }
+
+    for (const snippet of pass.evidence.snippets) {
+      const key = snippet.text.trim();
+      if (!key || snippetKeys.has(key)) continue;
+      snippetKeys.add(key);
+      snippets.push({
+        text: snippet.text,
+        citationIndices: snippet.citationIndices
+          .map((index) => localToGlobal.get(index))
+          .filter((index): index is number => typeof index === 'number'),
+      });
+    }
+  }
+
+  return {
+    citations: citations.slice(0, 15),
+    snippets: snippets.slice(0, 15),
+  };
 }
 
 async function safeListDocuments(input: MemberChatInput): Promise<{ docs: Array<{ name?: string; displayName?: string }>; error?: string }> {
@@ -397,6 +455,7 @@ async function retrieveKnowledgeEvidence(
   input: MemberChatInput,
   traceId: string,
   query: string,
+  limit = 5,
 ): Promise<RetrievePass> {
   if (!input.knowledgeRetriever || !input.storeName) {
     throw new Error('Knowledge retriever is required for knowledge-base chat mode');
@@ -412,6 +471,7 @@ async function retrieveKnowledgeEvidence(
   const retrieved = await input.knowledgeRetriever.retrieve({
     storeName: input.storeName,
     query,
+    limit,
     metadataFilter: input.metadataFilter,
     traceId,
   });
@@ -425,6 +485,65 @@ async function retrieveKnowledgeEvidence(
       snippets: retrieved.snippets ?? [],
     },
   };
+}
+
+async function planDeepDiveQueries(input: MemberChatInput, rewrite: QueryRewriteResult): Promise<string[]> {
+  const target = modelRegistry.resolve('kbQueryRewrite');
+  const model = createChatModel(target, { temperature: 0.1 });
+  const prompt = [
+    'Split the user question into up to 3 mutually exclusive retrieval subqueries.',
+    'Each query should target different evidence, not rephrase the same angle.',
+    'Keep them concise and grounded in the original request.',
+    'Return JSON only: {"subqueries":["..."]}',
+    '',
+    `Original question: ${input.query}`,
+    `Standalone query: ${rewrite.standaloneQuery}`,
+  ].join('\n');
+
+  try {
+    const parsed = await invokeStructured(model, prompt, deepDiveSchema);
+    const unique = Array.from(
+      new Set(
+        parsed.subqueries
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .filter((item) => item.toLowerCase() !== rewrite.standaloneQuery.toLowerCase())
+      )
+    ).slice(0, 2);
+    return [rewrite.standaloneQuery, ...unique].slice(0, 3);
+  } catch {
+    return [rewrite.standaloneQuery, ...rewrite.alternates].slice(0, 3);
+  }
+}
+
+async function retrieveKnowledgeDeepDive(
+  input: MemberChatInput,
+  traceId: string,
+  rewrite: QueryRewriteResult,
+): Promise<{ pass?: RetrievePass; queries: string[]; passes: RetrievePass[] }> {
+  const queries = await planDeepDiveQueries(input, rewrite);
+  const passes = await Promise.all(
+    queries.map(async (query) => {
+      try {
+        return await retrieveKnowledgeEvidence(input, traceId, query, 5);
+      } catch {
+        return undefined;
+      }
+    })
+  );
+  const groundedPasses = passes.filter((pass): pass is RetrievePass => Boolean(pass && pass.grounded));
+  const successfulPasses = passes.filter((pass): pass is RetrievePass => Boolean(pass));
+  const chosen = groundedPasses.length > 0 ? groundedPasses : successfulPasses;
+  if (chosen.length === 0) {
+    return { pass: undefined, queries, passes: [] };
+  }
+  const merged: RetrievePass = {
+    query: queries.join(' | '),
+    grounded: chosen.some((pass) => pass.grounded),
+    retrievalText: chosen.map((pass) => pass.retrievalText).filter(Boolean).join('\n\n'),
+    evidence: mergeEvidencePacks(chosen),
+  };
+  return { pass: merged, queries, passes: successfulPasses };
 }
 
 async function retrieveKnowledgeWithAlternate(
@@ -474,7 +593,13 @@ async function retrieveArchiveEvidence(
 
 export async function runMemberChatGraph(input: MemberChatInput): Promise<MemberChatOutput> {
   const traceId = makeTraceId();
-  const responseModelTarget = modelRegistry.resolve('chatResponse', input.responseModel);
+  const effectiveChatProfile = input.chatProfile ?? 'instant';
+  const effectiveRetrievalProfile =
+    input.retrievalProfile ?? (effectiveChatProfile === 'deep_dive' ? 'deep_dive' : 'default');
+  const responseModelTarget = modelRegistry.resolve(
+    effectiveChatProfile === 'think' ? 'chatThinking' : 'chatResponse',
+    input.responseModel
+  );
   const retrievalModelTarget = modelRegistry.resolve('retrieval', input.retrievalModel);
 
   const [{ docs, error: listError }, archiveSourceState] = await Promise.all([
@@ -494,13 +619,42 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     useKnowledgeBase: input.useKnowledgeBase,
   });
 
-  const runKnowledge = planner.sources.includes('knowledge_base');
-  const runArchive = planner.sources.includes('personal_archive');
+  const forceKnowledgeForDeepDive =
+    effectiveRetrievalProfile === 'deep_dive' &&
+    docs.length > 0 &&
+    Boolean(input.storeName && input.knowledgeRetriever);
+  const requestedSources = new Set(planner.sources);
+  if (forceKnowledgeForDeepDive) {
+    requestedSources.add('knowledge_base');
+  }
+
+  const runKnowledge = requestedSources.has('knowledge_base');
+  const runArchive = requestedSources.has('personal_archive');
+  const contextDecisionReason =
+    forceKnowledgeForDeepDive && !planner.sources.includes('knowledge_base')
+      ? 'deep-dive-forced-kb'
+      : planner.reason;
 
   const [knowledgeResult, archivePass] = await Promise.all([
     runKnowledge
-      ? retrieveKnowledgeWithAlternate(input, traceId, rewrite)
-      : Promise.resolve({ pass: undefined as RetrievePass | undefined, alternateQuery: undefined as string | undefined }),
+      ? effectiveRetrievalProfile === 'deep_dive'
+        ? retrieveKnowledgeDeepDive(input, traceId, rewrite).then((result) => ({
+            pass: result.pass,
+            deepDiveQueries: result.queries,
+            deepDivePasses: result.passes,
+            alternateQuery: result.queries.slice(1).join(' | ') || undefined,
+          }))
+        : retrieveKnowledgeWithAlternate(input, traceId, rewrite).then((result) => ({
+            ...result,
+            deepDiveQueries: undefined as string[] | undefined,
+            deepDivePasses: undefined as RetrievePass[] | undefined,
+          }))
+      : Promise.resolve({
+          pass: undefined as RetrievePass | undefined,
+          alternateQuery: undefined as string | undefined,
+          deepDiveQueries: undefined as string[] | undefined,
+          deepDivePasses: undefined as RetrievePass[] | undefined,
+        }),
     runArchive
       ? retrieveArchiveEvidence(input, traceId, rewrite.standaloneQuery, archiveSourceState.availableBuckets)
       : Promise.resolve(undefined),
@@ -545,14 +699,42 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         ].join('\n')
       : '(none)',
     '',
+    ...(effectiveRetrievalProfile === 'deep_dive'
+      ? [
+          'Response directive:',
+          'This is a deep-dive turn.',
+          'Use the available knowledge context aggressively when it is relevant, synthesize across multiple pieces of evidence, and cover the question more fully than a normal reply.',
+          'It is okay to give a longer answer here when that improves specificity, completeness, and usefulness.',
+          '',
+        ]
+      : []),
+    ...((input.turnDirective === 'shorter' || effectiveChatProfile === 'short')
+      ? [
+          'Response directive:',
+          'Answer this turn briefly. Prefer 2-4 sentences unless a short list is clearer.',
+          'Do not pad the reply, repeat context, or add extra framing.',
+          '',
+        ]
+      : []),
+    ...(input.turnDirective === 'elaborate'
+      ? [
+          'Response directive:',
+          'Continue the most recent assistant answer with more detail.',
+          'Do not repeat the opening or restart from scratch.',
+          '',
+        ]
+      : []),
     'Now provide the final answer.',
   ].join('\n');
 
-  const model = createChatModel(responseModelTarget, { temperature: input.temperature ?? 0.35 });
+  const model = createChatModel(responseModelTarget, {
+    temperature: input.temperature ?? 0.35,
+    thinkingBudget: effectiveChatProfile === 'think' ? 2048 : undefined,
+  });
   const answer = (await invokeText(model, answerPrompt)) || 'I could not generate a response.';
 
   const reason =
-    planner.reason ||
+    contextDecisionReason ||
     (evidenceMode === 'prompt-only' ? 'no-context-selected' : undefined);
 
   return {
@@ -568,10 +750,10 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
       mode: evidenceMode,
       reason,
       contextPlanner: {
-        requestedSources: planner.sources,
+        requestedSources: [...requestedSources],
         availableKnowledgeDocs: docs.length,
         availableArchiveBuckets: archiveSourceState.availableBuckets,
-        decisionReason: planner.reason,
+        decisionReason: contextDecisionReason,
       },
       kbCheck: {
         requestedStoreName: input.storeName ?? null,
@@ -579,9 +761,9 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         listError,
         fileSearchInvoked: runKnowledge,
         gateDecision: {
-          mode: 'llm-gate',
+          mode: forceKnowledgeForDeepDive ? 'heuristic' : 'llm-gate',
           useKnowledgeBase: runKnowledge,
-          reason: planner.reason,
+          reason: contextDecisionReason,
         },
       },
       personalArchiveCheck: {
@@ -592,9 +774,13 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
       queryPlan: {
         originalQuery: input.query,
         standaloneQuery: rewrite.standaloneQuery,
-        queryAlternates: rewrite.alternates,
+        queryAlternates:
+          effectiveRetrievalProfile === 'deep_dive'
+            ? (knowledgeResult.deepDiveQueries?.slice(1) ?? rewrite.alternates)
+            : rewrite.alternates,
+        deepDiveQueries: knowledgeResult.deepDiveQueries,
         gateUsed: runKnowledge,
-        gateReason: planner.reason,
+        gateReason: contextDecisionReason,
         matchedDigestSignals: digestSignals,
       },
       fileSearchStart:
@@ -618,6 +804,15 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
               snippets: knowledgePass.evidence.snippets.map((item) => item.text),
               queryUsed: knowledgePass.query,
               usedAlternateQuery: Boolean(knowledgeResult.alternateQuery && knowledgePass.query === knowledgeResult.alternateQuery),
+              deepDivePasses: knowledgeResult.deepDivePasses?.map((pass) => ({
+                query: pass.query,
+                grounded: pass.grounded,
+                citationsCount: pass.evidence.citations.length,
+                snippetsCount: pass.evidence.snippets.length,
+                retrievalText: pass.retrievalText,
+                citations: pass.evidence.citations,
+                snippets: pass.evidence.snippets.map((item) => item.text),
+              })),
             }
           : undefined,
       personalArchiveSearchResponse:
@@ -632,6 +827,9 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
               queryUsed: archivePass.query,
             }
           : undefined,
+      chatProfile: effectiveChatProfile,
+      retrievalProfile: effectiveRetrievalProfile,
+      turnDirective: input.turnDirective,
       answerPrompt,
     },
   };
