@@ -169,7 +169,7 @@ export async function runRoundtableSpeakerContribution(
           omitLatestUserMessage: true,
         }),
         includeConversationContext: false,
-        useKnowledgeBase: true,
+        knowledgeMode: 'force',
       }),
       ROUND_SPEAKER_TIMEOUT_MS,
     );

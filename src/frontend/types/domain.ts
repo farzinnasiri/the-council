@@ -155,6 +155,7 @@ export interface RoundtableIntentState {
 export interface RoundtableState {
   round: RoundtableRound;
   intents: RoundtableIntentState[];
+  spokenMemberIds: string[];
 }
 
 export interface KnowledgeDocument {

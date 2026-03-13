@@ -13,6 +13,8 @@ Hall + Chamber advisory chat app with:
 
 - Halls are created lazily from `/hall/new` on first send.
 - Hall routing is one-off per hall: first routed turn chooses participants, later turns use active hall participants.
+- Roundtable halls open with one parallel opening round, then switch to user-moderated one-speaker-at-a-time rounds.
+- Later roundtable rounds re-evaluate raised hands after each speaker and stop when the round cap is hit, nobody still wants to speak, or the user moves on.
 - Chambers support multiple threads per member. `/chamber/member/:memberId` opens the latest thread, and `/chamber/:conversationId` is the canonical thread route.
 - Hall member replies are generated in parallel and rendered progressively as they arrive.
 - Member avatars support crop/upload via `react-easy-crop`; create flow stages avatar and applies it after first save.
@@ -129,7 +131,7 @@ make vercel-deploy
 - `ai/chat:compactConversation`
 - `ai/voice:transcribeAudioFromStorage`
 - `ai/roundtable:prepareRoundtableRound`
-- `ai/roundtable:chatRoundtableSpeakers`
+- `ai/roundtable:refreshRoundtableRound`
 - `ai/roundtable:chatRoundtableSpeaker`
 - `ai/knowledge:ensureMemberKnowledgeStore`
 - `ai/knowledge:uploadMemberDocuments`

@@ -1,14 +1,14 @@
-import { CheckCircle2, ChevronDown, CirclePause, Hand, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { CheckCircle2, Hand, Loader2 } from 'lucide-react';
 import type { Member, RoundtableState } from '../../types/domain';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../lib/utils';
+import { deriveRoundtableViewModel } from './roundtableViewModel';
 
 interface RoundtablePanelProps {
   state: RoundtableState | null;
   members: Member[];
-  onSelectionChange: (roundNumber: number, selectedMemberIds: string[]) => void;
-  onStartRound: () => void;
+  onSpeakNext: (memberId: string) => void;
+  onFinishRound: () => void;
   onContinueRound: () => void;
   isRunning: boolean;
   isPreparing?: boolean;
@@ -32,7 +32,7 @@ function RoundStatusBadge({
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background/70 px-2 py-1 text-[11px] text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Opening statements
+        Opening round
       </span>
     );
   }
@@ -41,7 +41,7 @@ function RoundStatusBadge({
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background/70 px-2 py-1 text-[11px] text-muted-foreground">
         <Hand className="h-3.5 w-3.5" />
-        Hands raised
+        Pick next speaker
       </span>
     );
   }
@@ -73,27 +73,16 @@ function RoundStatusBadge({
 export function RoundtablePanel({
   state,
   members,
-  onSelectionChange,
-  onStartRound,
+  onSpeakNext,
+  onFinishRound,
   onContinueRound,
   isRunning,
   isPreparing = false,
 }: RoundtablePanelProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  const membersById = new Map(members.map((member) => [member.id, member]));
-
-  useEffect(() => {
-    if (!state) {
-      setCollapsed(false);
-      return;
-    }
-    setCollapsed(false);
-  }, [state?.round.roundNumber, state?.round.status]);
-
   if (!state) {
     const isBusy = isPreparing || isRunning;
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 pt-3 md:px-8">
+      <div className="mx-auto w-full max-w-4xl px-4 pt-2 md:px-8">
         <div className="rounded-xl border border-border bg-card/60 p-3">
           <div className="flex items-center justify-between gap-2">
             <RoundStatusBadge status={isRunning ? 'opening' : 'idle'} />
@@ -113,57 +102,40 @@ export function RoundtablePanel({
   }
 
   const round = state.round;
-  const cap = Math.max(1, state.intents.length);
-  const selectedIds = state.intents.filter((intent) => intent.selected).map((intent) => intent.memberId);
-  const selectedSet = new Set(selectedIds);
+  const view = deriveRoundtableViewModel(state, members);
   const isAwaitingUser = round.status === 'awaiting_user';
-  const canEdit = isAwaitingUser && !isRunning && !isPreparing;
   const canPrepareNext =
-    (round.status === 'completed' || round.status === 'superseded') && !isRunning && !isPreparing;
-  const raisedCount = state.intents.filter((intent) => intent.intent !== 'pass').length;
-  const passCount = state.intents.length - raisedCount;
-
-  const toggle = (memberId: string) => {
-    if (!canEdit) return;
-    const next = selectedSet.has(memberId)
-      ? selectedIds.filter((id) => id !== memberId)
-      : [...selectedIds, memberId].slice(0, cap);
-    onSelectionChange(round.roundNumber, next);
-  };
-
-  const allPass = state.intents.every((intent) => intent.intent === 'pass');
+    (round.status === 'completed' || round.status === 'superseded') && !isPreparing && !isRunning;
+  const canChooseNext = isAwaitingUser && !isPreparing && !isRunning;
+  const showChoices = isAwaitingUser && view.remainingCount > 0;
+  const showFallbackChoices = showChoices && view.fallbackChoices.length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-3 md:px-8">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-2 md:px-8">
       <div className="rounded-xl border border-border bg-card/60 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <RoundStatusBadge status={round.status} />
+            <RoundStatusBadge status={view.isOpeningRound && isRunning ? 'opening' : round.status} />
             <p className="text-xs text-muted-foreground">
-              Round {round.roundNumber} • {selectedIds.length}/{cap}
+              Round {round.roundNumber} • spoken {view.spokenCount}/{Math.max(1, round.maxSpeakers)}
             </p>
-            <p className="text-xs text-muted-foreground">Raised {raisedCount}</p>
-            <p className="text-xs text-muted-foreground">Pass {passCount}</p>
+            {round.status === 'awaiting_user' ? (
+              <p className="text-xs text-muted-foreground">
+                {view.volunteeredChoices.length > 0
+                  ? `${view.volunteeredChoices.length} raised hand${view.volunteeredChoices.length === 1 ? '' : 's'}`
+                  : 'No raised hands'}
+              </p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              onClick={() => setCollapsed((current) => !current)}
-              aria-label={collapsed ? 'Expand speakers' : 'Collapse speakers'}
-              title={collapsed ? 'Expand speakers' : 'Collapse speakers'}
-            >
-              <ChevronDown className={cn('h-4 w-4 transition-transform', collapsed && '-rotate-90')} />
-            </Button>
+            {isAwaitingUser ? (
+              <Button size="sm" variant="outline" onClick={onFinishRound} disabled={isPreparing || isRunning}>
+                End round
+              </Button>
+            ) : null}
             {canPrepareNext ? (
               <Button size="sm" variant="outline" onClick={onContinueRound} disabled={isPreparing || isRunning}>
                 Prepare round
-              </Button>
-            ) : null}
-            {isAwaitingUser ? (
-              <Button size="sm" onClick={onStartRound} disabled={!canEdit || selectedIds.length === 0}>
-                Start round
               </Button>
             ) : null}
           </div>
@@ -176,42 +148,79 @@ export function RoundtablePanel({
           </div>
         ) : null}
 
-        {allPass ? <p className="mt-2 text-xs text-muted-foreground">No raised hands for this round.</p> : null}
-
-        {!collapsed ? (
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {state.intents.map((intent) => {
-              const member = membersById.get(intent.memberId);
-              const selected = selectedSet.has(intent.memberId);
-              const disabled = !canEdit || (!selected && selectedIds.length >= cap);
-              return (
-                <button
-                  key={intent.id}
-                  type="button"
-                  onClick={() => toggle(intent.memberId)}
-                  disabled={disabled}
-                  className={cn(
-                    'rounded-lg border p-2 text-left transition',
-                    selected ? 'border-primary/60 bg-primary/10' : 'border-border hover:border-foreground/30',
-                    disabled && !selected ? 'opacity-60' : ''
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">{member?.name ?? intent.memberId}</p>
-                    <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                      {intent.intent === 'pass' ? <CirclePause className="h-3.5 w-3.5" /> : <Hand className="h-3.5 w-3.5" />}
-                      {intent.intent}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Speakers collapsed.
+        {view.isOpeningRound ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Everyone gives one opener before the table moves into moderated rounds.
           </p>
-        )}
+        ) : null}
+
+        {round.status === 'in_progress' ? (
+          <p className="mt-2 text-xs text-muted-foreground">Waiting for the current speaker to finish.</p>
+        ) : null}
+
+        {round.status === 'awaiting_user' && view.volunteeredChoices.length === 0 ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            No one raised a hand. You can pick any participant or end the round.
+          </p>
+        ) : null}
+
+        {round.status === 'completed' && view.spokenCount === 0 ? (
+          <p className="mt-2 text-xs text-muted-foreground">This round ended without any member speaking.</p>
+        ) : null}
+
+        {showChoices ? (
+          <div className="mt-3 space-y-3">
+            {view.volunteeredChoices.length > 0 ? (
+              <div>
+                <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Raised Hands</p>
+                <div className="flex flex-wrap gap-2">
+                  {view.volunteeredChoices.map((choice) => (
+                    <Button
+                      key={choice.memberId}
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => onSpeakNext(choice.memberId)}
+                      disabled={!canChooseNext}
+                    >
+                      <Hand className="mr-1.5 h-3.5 w-3.5" />
+                      {choice.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {showFallbackChoices ? (
+              <div>
+                <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Pick Anyone</p>
+                <div className="flex flex-wrap gap-2">
+                  {view.fallbackChoices.map((choice) => (
+                    <Button
+                      key={choice.memberId}
+                      size="sm"
+                      variant="outline"
+                      className={cn('rounded-full')}
+                      onClick={() => onSpeakNext(choice.memberId)}
+                      disabled={!canChooseNext}
+                    >
+                      {choice.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {view.spokenNames.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Spoke
+            </span>
+            <span>{view.spokenNames.join(', ')}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );

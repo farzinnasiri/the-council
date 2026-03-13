@@ -44,8 +44,14 @@ export interface ChatRoundtableSpeakerInput {
   conversationId: Id<'conversations'>;
   roundNumber: number;
   memberId: Id<'members'>;
+  force?: boolean;
   retrievalModel?: string;
   chatModel?: string;
+}
+
+export interface RefreshRoundtableRoundInput {
+  conversationId: Id<'conversations'>;
+  roundNumber: number;
 }
 
 export type NormalizedRouteCandidate = {
@@ -72,6 +78,6 @@ export interface HallApplicationService {
   suggestHallTitle(input: SuggestHallTitleInput): Promise<{ title: string; model: string }>;
   suggestMemberSpecialties(input: SuggestMemberSpecialtiesInput): Promise<{ specialties: string[]; model: string }>;
   prepareRoundtableRound(input: PrepareRoundtableRoundInput): Promise<RoundtableState>;
-  chatRoundtableSpeakers(input: ChatRoundtableSpeakersInput): Promise<{ results: RoundtableSpeakerResult[] }>;
+  refreshRoundtableRound(input: RefreshRoundtableRoundInput): Promise<RoundtableState>;
   chatRoundtableSpeaker(input: ChatRoundtableSpeakerInput): Promise<RoundtableSingleSpeakerResponse>;
 }

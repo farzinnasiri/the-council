@@ -391,12 +391,11 @@ export async function prepareRoundtableRound(input: {
   return await convexRepository.prepareRoundtableRound(input);
 }
 
-export async function setRoundtableSelections(input: {
+export async function refreshRoundtableRound(input: {
   conversationId: string;
   roundNumber: number;
-  selectedMemberIds: string[];
 }): Promise<RoundtableState> {
-  return await convexRepository.setRoundtableSelections(input);
+  return await convexRepository.refreshRoundtableRound(input);
 }
 
 export async function markRoundtableInProgress(input: {
@@ -421,6 +420,7 @@ export async function chatRoundtableSpeaker(input: {
   conversationId: string;
   roundNumber: number;
   memberId: string;
+  force?: boolean;
 }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
   const result = await convexRepository.chatRoundtableSpeaker(input);
   if (result.debug) {
@@ -437,20 +437,4 @@ export async function chatRoundtableSpeaker(input: {
     console.groupEnd();
   }
   return result;
-}
-
-export async function chatRoundtableSpeakers(input: {
-  conversationId: string;
-  roundNumber: number;
-}): Promise<
-  Array<{
-    memberId: string;
-    status: 'sent' | 'error';
-    answer: string;
-    intent: 'speak' | 'challenge' | 'support';
-    targetMemberId?: string;
-    error?: string;
-  }>
-> {
-  return await convexRepository.chatRoundtableSpeakers(input);
 }

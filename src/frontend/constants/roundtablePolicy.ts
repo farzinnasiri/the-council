@@ -3,7 +3,7 @@ export const ROUNDTABLE_POLICY_KEYS = {
 } as const;
 
 export const ROUNDTABLE_POLICY_DEFAULTS = {
-  maxSpeakersPerRound: 2,
+  maxSpeakersPerRound: 3,
   minSpeakers: 1,
   maxSpeakers: 8,
 } as const;

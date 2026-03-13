@@ -201,7 +201,7 @@ export interface CouncilAiProvider {
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
-    useKnowledgeBase?: boolean;
+    knowledgeMode?: 'auto' | 'force' | 'off';
     turnDirective?: 'shorter' | 'elaborate';
   }): Promise<ProviderChatResponse>;
 

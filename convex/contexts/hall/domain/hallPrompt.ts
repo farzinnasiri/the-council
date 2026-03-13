@@ -45,6 +45,17 @@ export function buildHallSystemPrompt(options: {
   rawMessages: MessageRow[];
   conversationId: Id<'conversations'>;
 }): string {
+  return [options.member.systemPrompt.trim(), buildHallContextAddendum(options)].filter(Boolean).join('\n\n');
+}
+
+export function buildHallContextAddendum(options: {
+  member: MemberListRow;
+  participants: MemberListRow[];
+  hallMode: 'advisory' | 'roundtable';
+  roundSummaries: string[];
+  rawMessages: MessageRow[];
+  conversationId: Id<'conversations'>;
+}): string {
   const presentMemberNames = options.participants.map((member) => member.name);
   const otherNames = options.participants
     .filter((member) => member._id !== options.member._id)
@@ -85,14 +96,15 @@ export function buildHallSystemPrompt(options: {
     latestInteractions.length > 0 ? latestInteractions.join('\n') : '(none yet)',
     '',
     '[Response Rules]',
-    'Use the context above to align with the ongoing discussion.',
+    'Use the context above to stay grounded in the ongoing discussion without collapsing into consensus.',
     "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
     'Give one concise contribution unless the user explicitly asks for detailed elaboration.',
-    'Stay in Character and express your opinion as a Council Member, You are allowed to express your opinion and engage in debate with other council members.',
-    'You are also allowed to agree/disagree with other council members or the user',
-    'It is ok to change your opinion based on new information or arguments presented by other council members or the user, however you are always consistant with your personality and values',
-    'In the end, your job is to help the user to see the world from different perspectives and make informed decisions and understand the issue at hand better'
+    'Stay in character and express your opinion as a council member.',
+    'You may genuinely agree, disagree, partially agree, or change your mind when the discussion earns it.',
+    'Do not smooth over differences just to sound collaborative.',
+    'If another member already covered your exact point, add only what is materially different.',
+    'Your job is to help the user see the issue from distinct perspectives and make a better-informed decision.'
   ].join('\n');
 
-  return [options.member.systemPrompt.trim(), hallAddendum].filter(Boolean).join('\n\n');
+  return hallAddendum;
 }

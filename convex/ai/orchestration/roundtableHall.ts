@@ -16,7 +16,7 @@ export function applyRoundDefaultSelection(options: {
 }): DraftRoundIntent[] {
   return options.intents.map((intent) => ({
     ...intent,
-    selected: false,
+    selected: intent.intent !== 'pass',
     source: 'intent_default' as DraftRoundIntent['source'],
   }));
 }

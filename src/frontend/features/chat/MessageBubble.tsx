@@ -163,6 +163,11 @@ export function MessageBubble({ message }: { message: Message }) {
               } ${message.status === 'error' ? 'border-destructive/50 border' : ''}`}
           >
             <MarkdownMessage content={message.content} />
+            {message.status === 'error' && message.error ? (
+              <div className="mt-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive/90">
+                {message.error}
+              </div>
+            ) : null}
 
             {!isUser ? (
               <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">

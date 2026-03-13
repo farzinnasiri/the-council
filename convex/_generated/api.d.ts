@@ -54,6 +54,7 @@ import type * as contexts_chamber_infrastructure_chamberRepo from "../contexts/c
 import type * as contexts_hall_application_chatRoundtableSpeaker from "../contexts/hall/application/chatRoundtableSpeaker.js";
 import type * as contexts_hall_application_chatRoundtableSpeakers from "../contexts/hall/application/chatRoundtableSpeakers.js";
 import type * as contexts_hall_application_prepareRoundtableRound from "../contexts/hall/application/prepareRoundtableRound.js";
+import type * as contexts_hall_application_refreshRoundtableRound from "../contexts/hall/application/refreshRoundtableRound.js";
 import type * as contexts_hall_application_routeHallMembers from "../contexts/hall/application/routeHallMembers.js";
 import type * as contexts_hall_application_suggestHallTitle from "../contexts/hall/application/suggestHallTitle.js";
 import type * as contexts_hall_application_suggestMemberSpecialties from "../contexts/hall/application/suggestMemberSpecialties.js";
@@ -153,6 +154,7 @@ declare const fullApi: ApiFromModules<{
   "contexts/hall/application/chatRoundtableSpeaker": typeof contexts_hall_application_chatRoundtableSpeaker;
   "contexts/hall/application/chatRoundtableSpeakers": typeof contexts_hall_application_chatRoundtableSpeakers;
   "contexts/hall/application/prepareRoundtableRound": typeof contexts_hall_application_prepareRoundtableRound;
+  "contexts/hall/application/refreshRoundtableRound": typeof contexts_hall_application_refreshRoundtableRound;
   "contexts/hall/application/routeHallMembers": typeof contexts_hall_application_routeHallMembers;
   "contexts/hall/application/suggestHallTitle": typeof contexts_hall_application_suggestHallTitle;
   "contexts/hall/application/suggestMemberSpecialties": typeof contexts_hall_application_suggestMemberSpecialties;

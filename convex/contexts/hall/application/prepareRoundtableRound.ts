@@ -1,17 +1,18 @@
 'use node';
 
 import type { Id } from '../../../_generated/dataModel';
+import { resolveRoundtableMaxSpeakers } from '../../../ai/roundtablePolicy';
 import { applyRoundDefaultSelection, buildRoundContext } from '../../../ai/orchestration/roundtableHall';
 import type { RoundIntentProposal } from '../../../ai/provider/types';
 import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, withTimeout } from '../../shared/convexGateway';
-import type { MessageRow, PreparedRoundIntent, RoundtableState } from '../../shared/types';
+import type { PreparedRoundIntent, RoundtableState } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
 import type { PrepareRoundtableRoundInput } from '../contracts';
 import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
-import { createRoundWithIntents } from '../infrastructure/roundtableRepo';
+import { createRoundWithIntents, getRoundtableState } from '../infrastructure/roundtableRepo';
 
 export async function prepareRoundtableRoundUseCase(
   ctx: any,
@@ -35,8 +36,14 @@ export async function prepareRoundtableRoundUseCase(
   ]);
 
   const activeMemberIds = participants.map((row) => row.memberId);
-  const filteredMentioned = (args.mentionedMemberIds ?? []).filter((memberId) => activeMemberIds.includes(memberId));
-  const maxSpeakers = Math.max(1, activeMemberIds.length);
+  const [existingRoundState, configuredMaxSpeakers] = await Promise.all([
+    getRoundtableState(ctx, args.conversationId),
+    resolveRoundtableMaxSpeakers(ctx),
+  ]);
+  const isOpeningRound = !existingRoundState;
+  const maxSpeakers = isOpeningRound
+    ? Math.max(1, activeMemberIds.length)
+    : Math.max(1, Math.min(configuredMaxSpeakers, activeMemberIds.length));
 
   const triggerMessage = args.triggerMessageId
     ? activeMessages.find((message) => message._id === args.triggerMessageId)
@@ -57,6 +64,23 @@ export async function prepareRoundtableRoundUseCase(
     userMessage: triggerMessage?.content,
     recentMessages,
   });
+
+  if (isOpeningRound) {
+    return await createRoundWithIntents(ctx, {
+      conversationId: args.conversationId,
+      trigger: args.trigger,
+      triggerMessageId: args.triggerMessageId,
+      maxSpeakers,
+      intents: activeMemberIds.map((memberId) => ({
+        memberId,
+        intent: 'speak' as const,
+        targetMemberId: undefined,
+        rationale: 'Opening round: give your initial position.',
+        selected: true,
+        source: 'intent_default' as const,
+      })),
+    });
+  }
 
   const provider = createAiProvider();
 
@@ -95,8 +119,8 @@ export async function prepareRoundtableRoundUseCase(
       } catch {
         return {
           memberId: memberId as string,
-          intent: 'speak' as const,
-          rationale: 'Can add one point.',
+          intent: 'pass' as const,
+          rationale: 'Will listen unless a clearer opening emerges.',
         };
       }
     })
@@ -111,15 +135,24 @@ export async function prepareRoundtableRoundUseCase(
       selected: false,
       source: 'intent_default',
     })),
-    mentionedMemberIds: filteredMentioned.map((id) => id as string),
     maxSpeakers,
   }) as PreparedRoundIntent[];
+
+  if (args.trigger === 'user_message' && preparedIntents.every((row) => !row.selected) && preparedIntents.length > 0) {
+    for (const row of preparedIntents.slice(0, Math.min(2, maxSpeakers, preparedIntents.length))) {
+      row.intent = 'speak';
+      row.targetMemberId = undefined;
+      row.rationale = 'Fresh user message: respond instead of deferring.';
+      row.selected = true;
+    }
+  }
 
   return await createRoundWithIntents(ctx, {
     conversationId: args.conversationId,
     trigger: args.trigger,
     triggerMessageId: args.triggerMessageId,
     maxSpeakers,
+    initialStatus: 'awaiting_user',
     intents: preparedIntents.map((row) => ({
       memberId: row.memberId as Id<'members'>,
       intent: row.intent,

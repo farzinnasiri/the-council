@@ -2,7 +2,7 @@ import { api } from '../_generated/api';
 
 export const ROUNDTABLE_POLICY_KEY = 'roundtable-max-speakers';
 export const ROUNDTABLE_POLICY_DEFAULTS = {
-  maxSpeakersPerRound: 2,
+  maxSpeakersPerRound: 3,
   minSpeakers: 1,
   maxSpeakers: 8,
 } as const;

@@ -349,10 +349,9 @@ export interface CouncilRepository {
     triggerMessageId?: string;
     mentionedMemberIds?: string[];
   }): Promise<RoundtableState>;
-  setRoundtableSelections(input: {
+  refreshRoundtableRound(input: {
     conversationId: string;
     roundNumber: number;
-    selectedMemberIds: string[];
   }): Promise<RoundtableState>;
   markRoundtableInProgress(input: {
     conversationId: string;
@@ -367,20 +366,8 @@ export interface CouncilRepository {
     conversationId: string;
     roundNumber: number;
     memberId: string;
+    force?: boolean;
   }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }>;
-  chatRoundtableSpeakers(input: {
-    conversationId: string;
-    roundNumber: number;
-  }): Promise<
-    Array<{
-      memberId: string;
-      status: 'sent' | 'error';
-      answer: string;
-      intent: 'speak' | 'challenge' | 'support';
-      targetMemberId?: string;
-      error?: string;
-    }>
-  >;
   compactConversation(input: {
     conversationId: string;
     previousSummary?: string;

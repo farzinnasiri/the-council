@@ -112,6 +112,7 @@ export interface RoundIntentRow {
 export interface RoundtableState {
   round: RoundRow;
   intents: RoundIntentRow[];
+  spokenMemberIds: Id<'members'>[];
 }
 
 export interface RoundtableSpeakerResult {

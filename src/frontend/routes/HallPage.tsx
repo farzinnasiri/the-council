@@ -22,9 +22,9 @@ export function HallPage() {
   const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
   const roundtableStateByConversation = useAppStore((state) => state.roundtableStateByConversation);
   const roundtablePreparingByConversation = useAppStore((state) => state.roundtablePreparingByConversation);
-  const setRoundtableSelectedSpeakers = useAppStore((state) => state.setRoundtableSelectedSpeakers);
-  const startRoundtableRound = useAppStore((state) => state.startRoundtableRound);
   const continueRoundtableRound = useAppStore((state) => state.continueRoundtableRound);
+  const speakNextRoundtableMember = useAppStore((state) => state.speakNextRoundtableMember);
+  const finishRoundtableRound = useAppStore((state) => state.finishRoundtableRound);
   const pagination = useAppStore((state) =>
     conversationId ? state.messagePaginationByConversation[conversationId] : undefined
   );
@@ -91,10 +91,8 @@ export function HallPage() {
         members={members.filter((member) => !member.deletedAt)}
         isRunning={isSending}
         isPreparing={isPreRoundPreparing}
-        onSelectionChange={(roundNumber, selectedMemberIds) =>
-          void setRoundtableSelectedSpeakers(conversation.id, roundNumber, selectedMemberIds)
-        }
-        onStartRound={() => void startRoundtableRound(conversation.id)}
+        onSpeakNext={(memberId) => void speakNextRoundtableMember(conversation.id, memberId)}
+        onFinishRound={() => void finishRoundtableRound(conversation.id)}
         onContinueRound={() => void continueRoundtableRound(conversation.id)}
       />
     ) : null;

@@ -28,6 +28,7 @@ Status: In Progress (as of February 27, 2026)
 - Define guardrails for how much prior context is included per turn.
 
 ### 1.5 Time-Aware Chamber Continuity
+(Completed: March 12, 2026)
 - Detect significant idle gaps (for example, 1+ day).
 - Avoid carrying stale conversational momentum after long pauses.
 - Re-introduce context with a lightweight recap when needed.
@@ -57,6 +58,7 @@ Status: In Progress (as of February 27, 2026)
 - Keep controls frictionless in both Hall and Chamber so feedback does not interrupt chat flow.
 - Add guardrails to avoid overfitting to one-off signals (decay, recency weighting, reset controls).
 - Make the adaptation behavior visible and reversible by the user.
+- this task is related to the moderator  task
 
 ## 2) Mid-Term (Core Capabilities)
 

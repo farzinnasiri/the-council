@@ -62,7 +62,7 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
-    useKnowledgeBase?: boolean;
+    knowledgeMode?: 'auto' | 'force' | 'off';
     turnDirective?: 'shorter' | 'elaborate';
   }) {
     return await runMemberChatGraph(input);

@@ -1,6 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import type { Id } from './_generated/dataModel';
 
 const roundStatusValidator = v.union(
   v.literal('awaiting_user'),
@@ -55,6 +56,7 @@ const roundIntentDoc = v.object({
 const roundState = v.object({
   round: roundDoc,
   intents: v.array(roundIntentDoc),
+  spokenMemberIds: v.array(v.id('members')),
 });
 
 async function requireUser(ctx: any) {
@@ -99,7 +101,27 @@ async function loadRoundState(ctx: any, conversationId: any, roundNumber: number
     )
     .collect();
 
-  return { round, intents };
+  const spokenMessages = await ctx.db
+    .query('messages')
+    .withIndex('by_conversation', (q: any) => q.eq('conversationId', conversationId))
+    .collect();
+
+  const spokenMemberIds = Array.from(
+    new Set(
+      spokenMessages
+        .filter(
+          (row: any) =>
+            !row.deletedAt &&
+            !row.supersededAt &&
+            row.role === 'member' &&
+            row.roundNumber === roundNumber &&
+            row.authorMemberId
+        )
+        .map((row: any) => row.authorMemberId)
+    )
+  ) as Id<'members'>[];
+
+  return { round, intents, spokenMemberIds };
 }
 
 async function supersedePendingRounds(ctx: any, conversationId: any) {
@@ -148,17 +170,7 @@ export const getRoundtableState = query({
       return null;
     }
 
-    const intents = await ctx.db
-      .query('hallRoundIntents')
-      .withIndex('by_conversation_round', (q: any) =>
-        q.eq('conversationId', args.conversationId).eq('roundNumber', latest.roundNumber)
-      )
-      .collect();
-
-    return {
-      round: latest,
-      intents,
-    };
+    return await loadRoundState(ctx, args.conversationId, latest.roundNumber);
   },
 });
 
@@ -168,6 +180,7 @@ export const createRoundWithIntents = mutation({
     trigger: roundTriggerValidator,
     triggerMessageId: v.optional(v.id('messages')),
     maxSpeakers: v.number(),
+    initialStatus: v.optional(v.union(v.literal('awaiting_user'), v.literal('completed'))),
     intents: v.array(
       v.object({
         memberId: v.id('members'),
@@ -211,7 +224,7 @@ export const createRoundWithIntents = mutation({
       userId,
       conversationId: args.conversationId,
       roundNumber: nextRoundNumber,
-      status: 'awaiting_user',
+      status: args.initialStatus ?? 'awaiting_user',
       trigger: args.trigger,
       triggerMessageId: args.triggerMessageId,
       maxSpeakers: Math.max(1, args.maxSpeakers),
@@ -327,6 +340,60 @@ export const markRoundCompleted = mutation({
     await ctx.db.patch(round._id, {
       status: 'completed',
       updatedAt: Date.now(),
+    });
+
+    return await loadRoundState(ctx, args.conversationId, args.roundNumber);
+  },
+});
+
+export const updateRoundAfterTurn = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    roundNumber: v.number(),
+    nextStatus: v.union(v.literal('awaiting_user'), v.literal('completed')),
+    updates: v.array(
+      v.object({
+        memberId: v.id('members'),
+        intent: v.optional(roundIntentValidator),
+        targetMemberId: v.optional(v.id('members')),
+        rationale: v.optional(v.string()),
+        selected: v.boolean(),
+      })
+    ),
+  },
+  returns: roundState,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await assertOwnedHallConversation(ctx, userId, args.conversationId);
+
+    const { round, intents } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
+    if (round.status === 'superseded') {
+      throw new Error('Cannot update a superseded round');
+    }
+
+    const updateMap = new Map(args.updates.map((row) => [row.memberId as string, row]));
+    const now = Date.now();
+
+    await Promise.all(
+      intents.map((row: any) => {
+        const next = updateMap.get(row.memberId as string);
+        if (!next) return Promise.resolve();
+        return ctx.db.patch(row._id, {
+          intent: next.intent ?? row.intent,
+          targetMemberId:
+            typeof next.intent === 'string' || Object.prototype.hasOwnProperty.call(next, 'targetMemberId')
+              ? next.targetMemberId
+              : row.targetMemberId,
+          rationale: next.rationale ?? row.rationale,
+          selected: next.selected,
+          updatedAt: now,
+        });
+      })
+    );
+
+    await ctx.db.patch(round._id, {
+      status: args.nextStatus,
+      updatedAt: now,
     });
 
     return await loadRoundState(ctx, args.conversationId, args.roundNumber);

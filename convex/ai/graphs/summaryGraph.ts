@@ -123,6 +123,7 @@ export async function runHallRoundSummaryGraph(input: {
     `Round ${input.roundNumber}:`,
     'Member Name: one-line summary of what they argued or changed',
     'Include disagreement/support signals when present.',
+    'Do not flatten distinct positions into a group consensus if they remained different.',
     'Do not include members who did not speak.',
     '',
     'Round transcript:',

@@ -83,6 +83,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     personaPrompt: effectiveSystemPrompt,
     contextMessages: (args.contextMessages ?? []).slice(-12),
     includeConversationContext: args.hallContext?.trim() ? false : true,
+    knowledgeMode: args.hallContext?.trim() ? 'force' : 'auto',
     turnDirective: args.turnDirective,
   });
 }

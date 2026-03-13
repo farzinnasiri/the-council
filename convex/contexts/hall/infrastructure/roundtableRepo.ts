@@ -20,6 +20,7 @@ export async function createRoundWithIntents(
     trigger: 'user_message' | 'continue';
     triggerMessageId?: Id<'messages'>;
     maxSpeakers: number;
+    initialStatus?: 'awaiting_user' | 'completed';
     intents: Array<{
       memberId: Id<'members'>;
       intent: 'speak' | 'challenge' | 'support' | 'pass';
@@ -31,4 +32,22 @@ export async function createRoundWithIntents(
   }
 ): Promise<RoundtableState> {
   return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:createRoundWithIntents', args);
+}
+
+export async function updateRoundAfterTurn(
+  ctx: ActionCtxLike,
+  args: {
+    conversationId: Id<'conversations'>;
+    roundNumber: number;
+    nextStatus: 'awaiting_user' | 'completed';
+    updates: Array<{
+      memberId: Id<'members'>;
+      intent?: 'speak' | 'challenge' | 'support' | 'pass';
+      targetMemberId?: Id<'members'>;
+      rationale?: string;
+      selected: boolean;
+    }>;
+  }
+): Promise<RoundtableState> {
+  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:updateRoundAfterTurn', args);
 }

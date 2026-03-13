@@ -24,6 +24,7 @@ import {
   compactConversation,
   createKbDocumentRecord,
   deleteKbDocument,
+  refreshRoundtableRound,
   getRoundtableState,
   listKbDocuments,
   markRoundtableCompleted,
@@ -33,7 +34,6 @@ import {
   retryKbDocumentMetadata,
   routeHallMembers,
   suggestChamberTitle,
-  setRoundtableSelections,
   startKbDocumentProcessing,
   suggestHallTitle,
   uploadFileToConvexStorage,
@@ -143,13 +143,9 @@ interface AppState {
     }
   ) => Promise<void>;
   refreshRoundtableState: (conversationId: string) => Promise<void>;
-  setRoundtableSelectedSpeakers: (
-    conversationId: string,
-    roundNumber: number,
-    selectedMemberIds: string[]
-  ) => Promise<void>;
-  startRoundtableRound: (conversationId: string) => Promise<void>;
   continueRoundtableRound: (conversationId: string) => Promise<void>;
+  speakNextRoundtableMember: (conversationId: string, memberId: string) => Promise<void>;
+  finishRoundtableRound: (conversationId: string) => Promise<void>;
   addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
   removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
   clearChamberByMember: (memberId: string) => Promise<void>;
@@ -458,9 +454,12 @@ function buildHallSystemContext(
     latestInteractions.length > 0 ? latestInteractions.join('\n') : '(none yet)',
     '',
     '[Response Rules]',
-    'Use the context above to align with the ongoing discussion.',
+    'Use the context above to stay grounded in the ongoing discussion without collapsing into consensus.',
     "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
     'Give one concise contribution for this turn unless the user explicitly asks for detailed elaboration.',
+    'You may genuinely agree, disagree, partially agree, or change your mind when the discussion earns it.',
+    'Do not smooth over differences just to sound collaborative.',
+    'If another member already covered your exact point, add only what is materially different.',
   ].join('\n');
 }
 
@@ -482,6 +481,8 @@ function stripLeadingSpeakerLabel(text: string, memberName: string): string {
 }
 
 function selectOpeningRoundMembers(intents: RoundtableState['intents']): string[] {
+  const selected = intents.filter((intent) => intent.selected).map((intent) => intent.memberId);
+  if (selected.length > 0) return selected;
   const nonPass = intents.filter((intent) => intent.intent !== 'pass').map((intent) => intent.memberId);
   if (nonPass.length > 0) return nonPass;
   return intents.map((intent) => intent.memberId);
@@ -1092,26 +1093,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
-  setRoundtableSelectedSpeakers: async (conversationId, roundNumber, selectedMemberIds) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
-      return;
-    }
-
-    const next = await setRoundtableSelections({
-      conversationId,
-      roundNumber,
-      selectedMemberIds,
-    });
-
-    set((state) => ({
-      roundtableStateByConversation: {
-        ...state.roundtableStateByConversation,
-        [conversationId]: next,
-      },
-    }));
-  },
-
   continueRoundtableRound: async (conversationId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
     if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
@@ -1151,7 +1132,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  startRoundtableRound: async (conversationId) => {
+  speakNextRoundtableMember: async (conversationId, memberId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
     if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
       return;
@@ -1163,13 +1144,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const roundNumber = snapshot.round.roundNumber;
-    const selected = snapshot.intents
-      .filter((item) => item.selected)
-      .map((item) => item.memberId);
-
-    if (selected.length === 0) {
+    if (snapshot.spokenMemberIds.includes(memberId)) {
       return;
     }
+    const ready = snapshot.intents.find((item) => item.memberId === memberId && item.selected);
+    const intent = snapshot.intents.find((item) => item.memberId === memberId);
+    if (!intent) {
+      return;
+    }
+    const force = !ready;
 
     const inProgress = await markRoundtableInProgress({
       conversationId,
@@ -1183,81 +1166,74 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
       pendingReplyCount: {
         ...state.pendingReplyCount,
-        [conversationId]: selected.length,
+        [conversationId]: 1,
       },
       pendingReplyMemberIds: {
         ...state.pendingReplyMemberIds,
-        [conversationId]: selected,
+        [conversationId]: [memberId],
       },
     }));
 
     try {
       const membersById = new Map(get().members.map((member) => [member.id, member]));
-      await Promise.all(
-        selected.map(async (memberId) => {
-          const memberName = membersById.get(memberId)?.name ?? 'Member';
-          let reply: Message;
+      const memberName = membersById.get(memberId)?.name ?? 'Member';
+      let reply: Message;
 
-          try {
-            const result = await chatRoundtableSpeaker({
-              conversationId,
-              roundNumber,
-              memberId,
-            });
-            reply = buildMessage({
-              conversationId,
-              role: 'member',
-              authorMemberId: memberId,
-              content: stripLeadingSpeakerLabel(result.answer, memberName),
-              status: 'sent',
-              roundNumber,
-              roundIntent: result.intent,
-              roundTargetMemberId: result.targetMemberId,
-            });
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Request failed';
-            reply = buildMessage({
-              conversationId,
-              role: 'member',
-              authorMemberId: memberId,
-              content: `${memberName} could not speak in this round.`,
-              status: 'error',
-              roundNumber,
-              error: errorMessage,
-            });
-          }
+      try {
+        const result = await chatRoundtableSpeaker({
+          conversationId,
+          roundNumber,
+          memberId,
+          force,
+        });
+        reply = buildMessage({
+          conversationId,
+          role: 'member',
+          authorMemberId: memberId,
+          content: stripLeadingSpeakerLabel(result.answer, memberName),
+          status: 'sent',
+          roundNumber,
+          roundIntent: result.intent,
+          roundTargetMemberId: result.targetMemberId,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Request failed';
+        reply = buildMessage({
+          conversationId,
+          role: 'member',
+          authorMemberId: memberId,
+          content: `${memberName} could not speak in this round.`,
+          status: 'error',
+          roundNumber,
+          error: errorMessage,
+        });
+      }
 
-          set((state) => ({
-            messages: [...state.messages, reply],
-            ...updateConversationStamp(state, conversationId, true),
-            pendingReplyCount: {
-              ...state.pendingReplyCount,
-              [conversationId]: Math.max(0, (state.pendingReplyCount[conversationId] ?? 1) - 1),
-            },
-            pendingReplyMemberIds: {
-              ...state.pendingReplyMemberIds,
-              [conversationId]: (state.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId),
-            },
-          }));
+      set((state) => ({
+        messages: [...state.messages, reply],
+        ...updateConversationStamp(state, conversationId, true),
+      }));
 
-          await councilRepository.appendMessages({
-            conversationId,
-            messages: [reply],
-          });
-        })
-      );
+      await councilRepository.appendMessages({
+        conversationId,
+        messages: [reply],
+      });
 
-      await markRoundtableCompleted({
+      const refreshed = await refreshRoundtableRound({
         conversationId,
         roundNumber,
       });
+
       set((state) => ({
         roundtableStateByConversation: {
           ...state.roundtableStateByConversation,
-          [conversationId]: null,
+          [conversationId]: refreshed,
         },
       }));
-      void get().syncHallRoundSummaries(conversationId);
+
+      if (refreshed.round.status === 'completed') {
+        void get().syncHallRoundSummaries(conversationId);
+      }
     } catch (error) {
       await get().refreshRoundtableState(conversationId);
     } finally {
@@ -1272,6 +1248,32 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
       }));
     }
+  },
+
+  finishRoundtableRound: async (conversationId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
+      return;
+    }
+
+    const snapshot = get().roundtableStateByConversation[conversationId];
+    if (!snapshot || (snapshot.round.status !== 'awaiting_user' && snapshot.round.status !== 'in_progress')) {
+      return;
+    }
+
+    const completed = await markRoundtableCompleted({
+      conversationId,
+      roundNumber: snapshot.round.roundNumber,
+    });
+
+    set((state) => ({
+      roundtableStateByConversation: {
+        ...state.roundtableStateByConversation,
+        [conversationId]: completed,
+      },
+    }));
+
+    void get().syncHallRoundSummaries(conversationId);
   },
 
   refreshHallParticipants: async (conversationId) => {
@@ -1779,32 +1781,143 @@ export const useAppStore = create<AppState>((set, get) => ({
           trigger: 'user_message',
           mentionedMemberIds: mentionedMemberIds.filter((memberId) => activeParticipantIds.includes(memberId)),
         });
-        let effectiveRound = nextRound;
-
-        if (isOpeningRound) {
-          const autoSelectedIds = selectOpeningRoundMembers(nextRound.intents);
-          if (autoSelectedIds.length > 0) {
-            effectiveRound = await setRoundtableSelections({
-              conversationId,
-              roundNumber: nextRound.round.roundNumber,
-              selectedMemberIds: autoSelectedIds,
-            });
-          }
-        }
 
         set((current) => ({
           roundtableStateByConversation: {
             ...current.roundtableStateByConversation,
-            [conversationId]: effectiveRound,
+            [conversationId]: nextRound,
           },
         }));
 
-        if (
-          isOpeningRound &&
-          effectiveRound.round.status === 'awaiting_user' &&
-          effectiveRound.intents.some((intent) => intent.selected)
-        ) {
-          void get().startRoundtableRound(conversationId);
+        if (isOpeningRound && nextRound.round.status === 'awaiting_user') {
+          const openingSpeakerIds = selectOpeningRoundMembers(nextRound.intents);
+          if (openingSpeakerIds.length > 0) {
+            const inProgress = await markRoundtableInProgress({
+              conversationId,
+              roundNumber: nextRound.round.roundNumber,
+            });
+
+            set((current) => ({
+              roundtableStateByConversation: {
+                ...current.roundtableStateByConversation,
+                [conversationId]: inProgress,
+              },
+              pendingReplyCount: {
+                ...current.pendingReplyCount,
+                [conversationId]: openingSpeakerIds.length,
+              },
+              pendingReplyMemberIds: {
+                ...current.pendingReplyMemberIds,
+                [conversationId]: openingSpeakerIds,
+              },
+            }));
+
+            const membersById = new Map(get().members.map((member) => [member.id, member]));
+            const openingMessages = get().messages.filter(
+              (message) =>
+                message.conversationId === conversationId &&
+                isVisibleMessage(message) &&
+                message.status !== 'error'
+            );
+            const openingParticipants = activeParticipantIds
+              .map((id) => membersById.get(id))
+              .filter((member): member is Member => Boolean(member && !member.deletedAt));
+            try {
+              await Promise.all(
+                openingSpeakerIds.map(async (memberId) => {
+                  const member = membersById.get(memberId);
+                  const memberName = member?.name ?? 'Member';
+                  let reply: Message;
+
+                  try {
+                    const result = await chatWithMember({
+                      message: text,
+                      memberId,
+                      conversationId,
+                      contextMessages: buildMemberContextWindow(
+                        openingMessages,
+                        conversationId,
+                        memberId,
+                        'hall',
+                        membersById
+                      ),
+                      hallContext: member
+                        ? buildHallSystemContext(
+                            member,
+                            openingParticipants,
+                            openingMessages,
+                            [],
+                            'roundtable',
+                            conversationId,
+                          )
+                        : undefined,
+                    });
+                    reply = buildMessage({
+                      conversationId,
+                      role: 'member',
+                      authorMemberId: memberId,
+                      content: stripLeadingSpeakerLabel(result.answer, memberName),
+                      status: 'sent',
+                      roundNumber: nextRound.round.roundNumber,
+                    });
+                  } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : 'Request failed';
+                    reply = buildMessage({
+                      conversationId,
+                      role: 'member',
+                      authorMemberId: memberId,
+                      content: `${memberName} could not speak in this round.`,
+                      status: 'error',
+                      roundNumber: nextRound.round.roundNumber,
+                      error: errorMessage,
+                    });
+                  }
+
+                  set((current) => ({
+                    messages: [...current.messages, reply],
+                    ...updateConversationStamp(current, conversationId, true),
+                    pendingReplyCount: {
+                      ...current.pendingReplyCount,
+                      [conversationId]: Math.max(0, (current.pendingReplyCount[conversationId] ?? 1) - 1),
+                    },
+                    pendingReplyMemberIds: {
+                      ...current.pendingReplyMemberIds,
+                      [conversationId]: (current.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId),
+                    },
+                  }));
+
+                  await councilRepository.appendMessages({
+                    conversationId,
+                    messages: [reply],
+                  });
+                })
+              );
+
+              const completed = await markRoundtableCompleted({
+                conversationId,
+                roundNumber: nextRound.round.roundNumber,
+              });
+
+              set((current) => ({
+                roundtableStateByConversation: {
+                  ...current.roundtableStateByConversation,
+                  [conversationId]: completed,
+                },
+              }));
+              void get().syncHallRoundSummaries(conversationId);
+            } finally {
+              set((current) => ({
+                pendingReplyCount: {
+                  ...current.pendingReplyCount,
+                  [conversationId]: 0,
+                },
+                pendingReplyMemberIds: {
+                  ...current.pendingReplyMemberIds,
+                  [conversationId]: [],
+                },
+              }));
+            }
+          }
         }
       } finally {
         set((current) => ({

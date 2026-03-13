@@ -77,7 +77,7 @@ export interface MemberChatInput {
   personaPrompt?: string;
   contextMessages?: ContextMessage[];
   includeConversationContext?: boolean;
-  useKnowledgeBase?: boolean;
+  knowledgeMode?: 'auto' | 'force' | 'off';
   turnDirective?: 'shorter' | 'elaborate';
 }
 
@@ -361,17 +361,31 @@ async function planSources(input: {
   digestSignals: string[];
   availableArchiveBuckets: ArchiveBucket[];
   totalArchiveEntries: number;
-  useKnowledgeBase?: boolean;
+  hasKnowledgePath?: boolean;
+  knowledgeMode?: 'auto' | 'force' | 'off';
 }): Promise<SourceDecision> {
   const sources = new Set<'knowledge_base' | 'personal_archive'>();
   const combinedQuery = `${input.query} ${input.standaloneQuery}`.toLowerCase();
 
-  if (input.useKnowledgeBase === false) {
+  if (input.knowledgeMode === 'off') {
     if (input.availableArchiveBuckets.length > 0) {
       sources.add('personal_archive');
       return { sources: [...sources], reason: 'kb-disabled' };
     }
     return { sources: [], reason: 'kb-disabled-no-archive' };
+  }
+
+  if (input.knowledgeMode === 'force') {
+    if (input.hasKnowledgePath) {
+      sources.add('knowledge_base');
+    }
+    if (input.availableArchiveBuckets.length > 0) {
+      const explicitArchive = /\b(i|me|my|myself)\b/.test(combinedQuery);
+      if (explicitArchive) {
+        sources.add('personal_archive');
+      }
+    }
+    return { sources: [...sources], reason: 'kb-forced' };
   }
 
   if (input.docsCount > 0) {
@@ -616,7 +630,8 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     digestSignals,
     availableArchiveBuckets: archiveSourceState.availableBuckets,
     totalArchiveEntries: archiveSourceState.totalEntries,
-    useKnowledgeBase: input.useKnowledgeBase,
+    hasKnowledgePath: Boolean(input.storeName && input.knowledgeRetriever),
+    knowledgeMode: input.knowledgeMode,
   });
 
   const forceKnowledgeForDeepDive =
@@ -761,7 +776,10 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         listError,
         fileSearchInvoked: runKnowledge,
         gateDecision: {
-          mode: forceKnowledgeForDeepDive ? 'heuristic' : 'llm-gate',
+          mode:
+            input.knowledgeMode === 'force' || forceKnowledgeForDeepDive
+              ? 'heuristic'
+              : 'llm-gate',
           useKnowledgeBase: runKnowledge,
           reason: contextDecisionReason,
         },
