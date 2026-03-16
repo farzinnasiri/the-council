@@ -16,6 +16,10 @@ export const timeAwareReentryDirectiveValidator = v.object({
   explicitContinuation: v.boolean(),
 });
 
+export const activeGuidanceDirectiveValidator = v.object({
+  note: v.string(),
+});
+
 export type TimeAwareReentryDirective = {
   gapBucket: 'mild' | 'medium' | 'strong' | 'very_strong';
   repliesRemaining: 1 | 2;
@@ -35,6 +39,9 @@ export interface ChatWithMemberInput {
   retrievalProfile?: 'default' | 'deep_dive';
   turnDirective?: 'shorter' | 'elaborate';
   timeAwareReentry?: TimeAwareReentryDirective;
+  guidanceDirectives?: Array<{
+    note: string;
+  }>;
 }
 
 export type ChatWithMemberResult = ProviderChatResponse;

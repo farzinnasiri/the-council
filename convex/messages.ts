@@ -225,15 +225,16 @@ export const getConversationCounts = query({
 
 export const appendMany = mutation({
   args: { messages: v.array(messageInputValidator) },
-  returns: v.null(),
+  returns: v.array(messageDoc),
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
-    if (args.messages.length === 0) return null;
+    if (args.messages.length === 0) return [];
 
     const conversationId = args.messages[0].conversationId;
     await getOwnedConversation(ctx, userId, conversationId);
 
     const now = Date.now();
+    const inserted: Array<any> = [];
 
     for (const msg of args.messages) {
       if (msg.conversationId !== conversationId) {
@@ -273,19 +274,20 @@ export const appendMany = mutation({
         }
       }
 
-      await ctx.db.insert('messages', {
+      const insertedId = await ctx.db.insert('messages', {
         userId,
         ...msg,
         systemKind: msg.role === 'system' ? msg.systemKind ?? (msg.routing ? 'routing' : undefined) : undefined,
         compacted: false,
       });
+      inserted.push(await ctx.db.get(insertedId));
     }
 
     await ctx.db.patch(conversationId, {
       updatedAt: now,
       lastMessageAt: now,
     });
-    return null;
+    return inserted.filter(Boolean);
   },
 });
 
@@ -401,6 +403,18 @@ export const clearConversation = mutation({
     await Promise.all(logs
       .filter((row: any) => !row.deletedAt)
       .map((row: any) => ctx.db.patch(row._id, { deletedAt: now })));
+
+    const directives = await ctx.db
+      .query('conversationGuidanceDirectives')
+      .withIndex('by_conversation', (q: any) => q.eq('conversationId', args.conversationId))
+      .collect();
+    await Promise.all(directives.map((row: any) => ctx.db.delete(row._id)));
+
+    const feedbackRows = await ctx.db
+      .query('messageFeedback')
+      .withIndex('by_conversation', (q: any) => q.eq('conversationId', args.conversationId))
+      .collect();
+    await Promise.all(feedbackRows.map((row: any) => ctx.db.delete(row._id)));
 
     await ctx.db.patch(args.conversationId, {
       lastMessageAt: undefined,

@@ -183,6 +183,31 @@ export interface CouncilAiProvider {
     model?: string;
   }): Promise<{ specialties: string[]; model: string }>;
 
+  generateMemberGuidanceProfile(input: {
+    memberName: string;
+    systemPrompt: string;
+    specialties?: string[];
+    existingGuidanceProfilePrompt?: string;
+    model?: string;
+  }): Promise<{ guidanceProfilePrompt: string; model: string }>;
+
+  reflectChamberGuidance(input: {
+    memberName: string;
+    guidanceProfilePrompt: string;
+    previousSummary?: string;
+    trigger: 'interval' | 'feedback';
+    recentMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    activeDirectiveNotes?: string[];
+    feedbackKeys?: string[];
+    model?: string;
+  }): Promise<{
+    directives: Array<{
+      note: string;
+      ttlUserTurns: 1 | 2 | 3;
+    }>;
+    model: string;
+  }>;
+
   chatMember(input: {
     query: string;
     storeName?: string | null;

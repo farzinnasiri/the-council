@@ -26,8 +26,9 @@ const conversationDoc = v.object({
       activatedAt: v.number(),
     })
   ),
-  timeAwareReentryNoticeSeenAt: v.optional(v.number()),
-  title: v.string(),
+    timeAwareReentryNoticeSeenAt: v.optional(v.number()),
+    guidanceLastReflectedUserTurnCount: v.optional(v.number()),
+    title: v.string(),
   chamberMemberId: v.optional(v.id('members')),
   // Legacy compatibility while old rows still include status.
   status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
@@ -394,6 +395,26 @@ export const markChamberTimeAwareReentryNoticeSeen = mutation({
   },
 });
 
+export const setGuidanceLastReflectedUserTurnCount = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    userTurnCount: v.number(),
+  },
+  returns: conversationDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber conversation not found');
+    }
+    await ctx.db.patch(args.conversationId, {
+      guidanceLastReflectedUserTurnCount: Math.max(0, args.userTurnCount),
+      updatedAt: Date.now(),
+    });
+    return (await ctx.db.get(args.conversationId))!;
+  },
+});
+
 export const archiveConversation = mutation({
   args: { conversationId: v.id('conversations') },
   returns: v.null(),
@@ -454,6 +475,18 @@ export const clearChamberByMember = mutation({
           .filter((row: any) => !row.deletedAt)
           .map((row: any) => ctx.db.patch(row._id, { deletedAt: now }))
       );
+
+      const directives = await ctx.db
+        .query('conversationGuidanceDirectives')
+        .withIndex('by_conversation', (q: any) => q.eq('conversationId', conversation._id))
+        .collect();
+      await Promise.all(directives.map((row: any) => ctx.db.delete(row._id)));
+
+      const feedbackRows = await ctx.db
+        .query('messageFeedback')
+        .withIndex('by_conversation', (q: any) => q.eq('conversationId', conversation._id))
+        .collect();
+      await Promise.all(feedbackRows.map((row: any) => ctx.db.delete(row._id)));
     }
 
     return null;

@@ -11,6 +11,17 @@ export type RoundtableIntent = 'speak' | 'challenge' | 'support' | 'pass';
 export type RoundtableRoundStatus = 'awaiting_user' | 'in_progress' | 'completed' | 'superseded';
 export type PersonalArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
 export type SystemMessageKind = 'routing' | 'hall_followup_context';
+export type MessageFeedbackKey =
+  | 'like'
+  | 'dislike'
+  | 'helpful'
+  | 'not_helpful'
+  | 'shorter'
+  | 'longer'
+  | 'clearer'
+  | 'more_direct'
+  | 'softer'
+  | 'harder';
 
 export interface PersonalArchiveAccess {
   reflection: boolean;
@@ -33,6 +44,9 @@ export interface Member {
   avatarUrl?: string | null;
   specialties: string[];
   systemPrompt: string;
+  guidanceProfilePrompt?: string;
+  guidanceProfileGeneratedAt?: number;
+  guidanceProfileUpdatedAt?: number;
   kbStoreName?: string;
   personalArchiveAccess: PersonalArchiveAccess;
   deletedAt?: number;
@@ -53,6 +67,7 @@ export interface Conversation {
     activatedAt: number;
   };
   timeAwareReentryNoticeSeenAt?: number;
+  guidanceLastReflectedUserTurnCount?: number;
   title: string;
   chamberMemberId?: string;
   deletedAt?: number;
@@ -94,6 +109,18 @@ export interface ConversationNotebook {
   archivedAt?: number;
 }
 
+export interface ConversationGuidanceDirective {
+  id: string;
+  conversationId: string;
+  memberId: string;
+  source: 'background_reflection' | 'feedback' | 'system_rule';
+  triggerMessageId?: string;
+  note: string;
+  createdAfterUserTurn: number;
+  expiresAfterUserTurn: number;
+  createdAt: number;
+}
+
 export interface MessageRouting {
   memberIds: string[];
   source: RoutingSource;
@@ -124,6 +151,16 @@ export interface Message {
   roundTargetMemberId?: string;
   error?: string;
   createdAt: number;
+}
+
+export interface MessageFeedback {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  memberId: string;
+  key: MessageFeedbackKey;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface RoundtableRound {

@@ -46,3 +46,37 @@ export const backfillConversationLastMessageAt = mutation({
         return `Updated ${patched} conversations`;
     },
 });
+
+export const removeGuidanceDirectiveControlTags = mutation({
+    args: {},
+    handler: async (ctx) => {
+        const rows = await ctx.db.query('conversationGuidanceDirectives').collect();
+        let cleaned = 0;
+
+        for (const row of rows) {
+            if ((row as any).controlTags === undefined) continue;
+            const { controlTags, ...rest } = row as any;
+            await ctx.db.replace(row._id, rest);
+            cleaned += 1;
+        }
+
+        return `Cleaned ${cleaned} conversation guidance directives`;
+    },
+});
+
+export const removeGuidanceDirectiveConfidence = mutation({
+    args: {},
+    handler: async (ctx) => {
+        const rows = await ctx.db.query('conversationGuidanceDirectives').collect();
+        let cleaned = 0;
+
+        for (const row of rows) {
+            if ((row as any).confidence === undefined) continue;
+            const { confidence, ...rest } = row as any;
+            await ctx.db.replace(row._id, rest);
+            cleaned += 1;
+        }
+
+        return `Cleaned ${cleaned} conversation guidance directives`;
+    },
+});

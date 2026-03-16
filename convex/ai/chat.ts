@@ -6,7 +6,10 @@ import { contextMessageValidator } from '../contexts/shared/contracts';
 import { chatWithMemberUseCase } from '../contexts/chamber/application/chatWithMember';
 import { compactConversationUseCase } from '../contexts/chamber/application/compactConversation';
 import type { StartHallFollowUpThreadResult } from '../contexts/chamber/contracts';
-import { timeAwareReentryDirectiveValidator } from '../contexts/chamber/contracts';
+import {
+  activeGuidanceDirectiveValidator,
+  timeAwareReentryDirectiveValidator,
+} from '../contexts/chamber/contracts';
 import { startHallFollowUpThreadUseCase } from '../contexts/chamber/application/startHallFollowUpThread';
 import { createAiProvider } from '../contexts/shared/convexGateway';
 import { requireAuthUser, requireOwnedConversation } from '../contexts/shared/auth';
@@ -27,6 +30,7 @@ export const chatWithMember = action({
     retrievalProfile: v.optional(v.union(v.literal('default'), v.literal('deep_dive'))),
     turnDirective: v.optional(v.union(v.literal('shorter'), v.literal('elaborate'))),
     timeAwareReentry: v.optional(timeAwareReentryDirectiveValidator),
+    guidanceDirectives: v.optional(v.array(activeGuidanceDirectiveValidator)),
   },
   handler: async (ctx, args) => await chatWithMemberUseCase(ctx, args),
 });

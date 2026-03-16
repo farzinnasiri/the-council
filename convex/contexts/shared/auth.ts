@@ -9,6 +9,9 @@ export interface OwnedMember {
   name: string;
   specialties: string[];
   systemPrompt: string;
+  guidanceProfilePrompt?: string;
+  guidanceProfileGeneratedAt?: number;
+  guidanceProfileUpdatedAt?: number;
   kbStoreName?: string;
   personalArchiveAccess?: {
     reflection: boolean;
@@ -25,6 +28,7 @@ export interface OwnedConversation {
   hallMode?: 'advisory' | 'roundtable';
   title: string;
   chamberMemberId?: Id<'members'>;
+  guidanceLastReflectedUserTurnCount?: number;
   deletedAt?: number;
 }
 

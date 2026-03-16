@@ -1,11 +1,29 @@
 'use node';
 
+import { api } from '../../../_generated/api';
 import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, createKnowledgeRetriever, createPersonalArchiveRetriever, toKBDigestHints } from '../../shared/convexGateway';
 import type { ChatWithMemberInput, ChatWithMemberResult } from '../contracts';
 import { ensureChamberMemberStore, listMemberDigests } from '../infrastructure/chamberRepo';
 import { getPersonalArchiveProfile } from '../../personalArchive/infrastructure/archiveRepo';
 import { defaultPersonalArchiveAccess } from '../../../personalArchiveShared';
+
+function buildEffectiveSystemPrompt(input: {
+  systemPrompt: string;
+  guidanceBlock?: string;
+  hallBlock?: string;
+  summaryBlock?: string;
+  includeGuidance: boolean;
+}) {
+  return [
+    input.systemPrompt.trim(),
+    input.includeGuidance ? input.guidanceBlock ?? '' : '',
+    input.hallBlock ?? '',
+    input.summaryBlock ?? '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput): Promise<ChatWithMemberResult> {
   const userId = await requireAuthUser(ctx);
@@ -27,24 +45,29 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
   const summaryBlock = args.previousSummary?.trim()
     ? `[Conversation Memory]\n${args.previousSummary.trim()}`
     : '';
-  const reentryBlock = args.timeAwareReentry
+  const allMessages = await ctx.runQuery(api.messages.listAll, {
+    conversationId: args.conversationId,
+  });
+  const currentUserTurnCount = allMessages.filter((message: any) => message.role === 'user').length;
+  const storedGuidance = conversation.kind === 'chamber'
+    ? await ctx.runQuery(api.guidance.listActiveConversationGuidanceDirectives, {
+        conversationId: args.conversationId,
+        userTurnCount: currentUserTurnCount,
+      })
+    : [];
+  const guidanceNotes = [
+    ...(args.guidanceDirectives ?? []).map((directive) => directive.note.trim()),
+    ...storedGuidance.map((directive: any) => directive.note.trim()),
+  ].filter(Boolean);
+  const guidanceBlock = guidanceNotes.length > 0
     ? [
-        '[Time-Aware Re-entry]',
-        'This reply follows a meaningful idle gap in the thread.',
-        'Preserve durable context: facts, goals, constraints, decisions, and unresolved threads.',
-        'Decay short-lived context: urgency, emotional intensity, rhetorical momentum, and assumptions that the previous cadence is still active.',
-        args.timeAwareReentry.explicitContinuation
-          ? 'The user explicitly signaled continuation. Keep topic continuity, but soften stale momentum by one level.'
-          : 'Treat the current user message as the present source of truth for how to continue.',
-        args.timeAwareReentry.gapBucket === 'mild'
-          ? 'Mild gap: keep continuity, but do not answer as if the prior emotional beat is still live.'
-          : args.timeAwareReentry.gapBucket === 'medium'
-            ? 'Medium gap: re-anchor lightly to the current message before continuing.'
-            : 'Strong gap: treat prior thread state as background context, not the current scene. Respond from the present message first.',
-        args.timeAwareReentry.repliesRemaining === 1
-          ? 'This is the second and final re-entry-adjusted reply, so keep the adjustment lighter than the initial reset.'
-          : 'This is the first re-entry-adjusted reply, so fully apply the gap-aware reset.',
-      ].join('\n')
+        '[Current Inner Compass]',
+        'This is my inner thoughts about the user and our conversation to this point.',
+        guidanceNotes.length > 0 ? guidanceNotes.map((note) => `- ${note}`).join('\n') : '',
+        "I should adjust my responses based on the above. These are temporary steering notes, not permanent identity changes. I'm still fully in character.",
+      ]
+        .filter(Boolean)
+        .join('\n')
     : '';
   const identityBlock = profile?.identity?.trim()
     ? [
@@ -54,19 +77,18 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
         profile.identity.trim(),
       ].join('\n')
     : '';
-  const effectiveSystemPrompt = [
-    member.systemPrompt.trim(),
+  const effectiveSystemPrompt = buildEffectiveSystemPrompt({
+    systemPrompt: member.systemPrompt,
+    guidanceBlock,
     hallBlock,
     summaryBlock,
-    reentryBlock,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+    includeGuidance: true,
+  });
 
   const kbDigests = member.deletedAt ? [] : await listMemberDigests(ctx, args.memberId);
 
   const provider = createAiProvider();
-  return await provider.chatMember({
+  const providerInput = {
     query: args.message,
     storeName: effectiveStoreName,
     knowledgeRetriever: createKnowledgeRetriever(ctx, args.memberId),
@@ -80,10 +102,37 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     retrievalModel: args.retrievalModel,
     retrievalProfile: args.retrievalProfile,
     temperature: 0.35,
-    personaPrompt: effectiveSystemPrompt,
     contextMessages: (args.contextMessages ?? []).slice(-12),
     includeConversationContext: args.hallContext?.trim() ? false : true,
-    knowledgeMode: args.hallContext?.trim() ? 'force' : 'auto',
+    knowledgeMode: (args.hallContext?.trim() ? 'force' : 'auto') as 'force' | 'auto',
     turnDirective: args.turnDirective,
-  });
+  };
+
+  try {
+    return await provider.chatMember({
+      ...providerInput,
+      personaPrompt: effectiveSystemPrompt,
+    });
+  } catch (error) {
+    const hasGuidance = guidanceNotes.length > 0;
+    if (!hasGuidance) {
+      throw error;
+    }
+
+    console.error('[guidance-fallback] Chamber reply failed with guidance; retrying without guidance.', {
+      conversationId: String(args.conversationId),
+      memberId: String(args.memberId),
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return await provider.chatMember({
+      ...providerInput,
+      personaPrompt: buildEffectiveSystemPrompt({
+        systemPrompt: member.systemPrompt,
+        hallBlock,
+        summaryBlock,
+        includeGuidance: false,
+      }),
+    });
+  }
 }

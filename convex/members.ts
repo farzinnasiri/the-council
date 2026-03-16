@@ -55,6 +55,7 @@ export const create = mutation({
     name: v.string(),
     specialties: v.optional(v.array(v.string())),
     systemPrompt: v.string(),
+    guidanceProfilePrompt: v.optional(v.string()),
     personalArchiveAccess: v.optional(personalArchiveAccessValidator),
   },
   handler: async (ctx, args) => {
@@ -64,6 +65,9 @@ export const create = mutation({
       name: args.name,
       specialties: args.specialties ?? [],
       systemPrompt: args.systemPrompt,
+      guidanceProfilePrompt: args.guidanceProfilePrompt,
+      guidanceProfileGeneratedAt: args.guidanceProfilePrompt ? Date.now() : undefined,
+      guidanceProfileUpdatedAt: args.guidanceProfilePrompt ? Date.now() : undefined,
       personalArchiveAccess: args.personalArchiveAccess ?? defaultPersonalArchiveAccess(),
       updatedAt: Date.now(),
     });
@@ -78,6 +82,8 @@ export const update = mutation({
     name: v.optional(v.string()),
     specialties: v.optional(v.array(v.string())),
     systemPrompt: v.optional(v.string()),
+    guidanceProfilePrompt: v.optional(v.string()),
+    guidanceProfileGeneratedAt: v.optional(v.number()),
     avatarId: v.optional(v.id('_storage')),
     kbStoreName: v.optional(v.string()),
     personalArchiveAccess: v.optional(personalArchiveAccessValidator),
@@ -89,7 +95,13 @@ export const update = mutation({
     if (!current || current.userId !== userId) throw new Error('Member not found');
     const { memberId, ...patch } = args;
     const filteredPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
-    await ctx.db.patch(memberId, { ...filteredPatch, updatedAt: Date.now() });
+    await ctx.db.patch(memberId, {
+      ...filteredPatch,
+      ...(args.guidanceProfilePrompt !== undefined
+        ? { guidanceProfileUpdatedAt: Date.now() }
+        : {}),
+      updatedAt: Date.now(),
+    });
     const updated = (await ctx.db.get(memberId))!;
     return {
       ...updated,

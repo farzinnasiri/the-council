@@ -7,11 +7,14 @@ import type {
   HallMode,
   Member,
   Message,
+  MessageFeedback,
+  MessageFeedbackKey,
   PersonalArchiveAccess,
   PersonalArchiveCapturePreview,
   PersonalArchiveEntry,
   PersonalArchiveProfile,
   RoundtableState,
+  ConversationGuidanceDirective,
   TimeAwareReentryGapBucket,
   ThemeMode,
 } from '../types/domain';
@@ -20,6 +23,7 @@ import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/co
 export interface CreateMemberInput {
   name: string;
   systemPrompt: string;
+  guidanceProfilePrompt?: string;
   specialties?: string[];
   personalArchiveAccess?: PersonalArchiveAccess;
 }
@@ -27,6 +31,8 @@ export interface CreateMemberInput {
 export interface UpdateMemberPatch {
   name?: string;
   systemPrompt?: string;
+  guidanceProfilePrompt?: string;
+  guidanceProfileGeneratedAt?: number;
   specialties?: string[];
   personalArchiveAccess?: PersonalArchiveAccess;
   kbStoreName?: string | null;
@@ -197,6 +203,12 @@ export interface CouncilRepository {
   updateMember(memberId: string, patch: UpdateMemberPatch): Promise<Member>;
   archiveMember(memberId: string): Promise<void>;
   setMemberStoreName(memberId: string, storeName: string): Promise<void>;
+  generateMemberGuidanceProfile(input: {
+    memberId: string;
+    systemPrompt: string;
+    specialties?: string[];
+    force?: boolean;
+  }): Promise<{ guidanceProfilePrompt: string; model: string }>;
 
   listConversations(includeArchived?: boolean): Promise<Conversation[]>;
   listHalls(includeArchived?: boolean): Promise<Conversation[]>;
@@ -228,6 +240,27 @@ export interface CouncilRepository {
   renameConversation(conversationId: string, title: string): Promise<Conversation>;
   archiveConversation(conversationId: string): Promise<void>;
   clearChamberByMember(memberId: string): Promise<void>;
+  listConversationGuidanceDirectives(conversationId: string): Promise<ConversationGuidanceDirective[]>;
+  listMessageFeedback(conversationId: string): Promise<MessageFeedback[]>;
+  setMessageFeedback(input: {
+    messageId: string;
+    key: MessageFeedbackKey;
+    active: boolean;
+  }): Promise<MessageFeedback[]>;
+  syncFeedbackGuidanceDirectives(input: {
+    messageId: string;
+  }): Promise<{ directivesCreated: number; activeKeys: MessageFeedbackKey[] }>;
+  upsertTimeAwareReentryGuidance(input: {
+    conversationId: string;
+    gapBucket: TimeAwareReentryGapBucket;
+    explicitContinuation: boolean;
+  }): Promise<{ directivesCreated: number }>;
+  reflectChamberGuidance(input: {
+    conversationId: string;
+    trigger: 'interval' | 'feedback';
+    messageId?: string;
+    feedbackKeys?: MessageFeedbackKey[];
+  }): Promise<{ directivesCreated: number; model?: string; skippedReason?: string }>;
 
   listParticipants(conversationId: string, includeRemoved?: boolean): Promise<ConversationParticipant[]>;
   addHallParticipant(conversationId: string, memberId: string): Promise<void>;
@@ -251,7 +284,7 @@ export interface CouncilRepository {
     compactedMessageCount: number;
   }): Promise<void>;
   getCompactionPolicy(): Promise<CompactionPolicyConfig>;
-  appendMessages(input: AppendMessagesInput): Promise<void>;
+  appendMessages(input: AppendMessagesInput): Promise<Message[]>;
   replaceWithRefinement(input: {
     targetMessageId: string;
     replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
@@ -342,6 +375,9 @@ export interface CouncilRepository {
       repliesRemaining: 1 | 2;
       explicitContinuation: boolean;
     };
+    guidanceDirectives?: Array<{
+      note: string;
+    }>;
   }): Promise<MemberChatResult>;
   prepareRoundtableRound(input: {
     conversationId: string;

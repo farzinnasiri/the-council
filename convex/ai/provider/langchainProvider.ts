@@ -2,6 +2,7 @@
 
 import { runChamberTitleGraph, runHallTitleGraph } from '../graphs/hallTitleGraph';
 import { runKBDigestGraph } from '../graphs/kbDigestGraph';
+import { runChamberGuidanceReflectionGraph, runMemberGuidanceProfileGraph } from '../graphs/memberGuidanceGraph';
 import { runMemberChatGraph } from '../graphs/memberChatGraph';
 import { runRoundIntentGraph } from '../graphs/roundIntentGraph';
 import { runRouteMembersGraph } from '../graphs/routeMembersGraph';
@@ -42,6 +43,35 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     model?: string;
   }): Promise<{ specialties: string[]; model: string }> {
     return await runSpecialtiesGraph(input);
+  }
+
+  async generateMemberGuidanceProfile(input: {
+    memberName: string;
+    systemPrompt: string;
+    specialties?: string[];
+    existingGuidanceProfilePrompt?: string;
+    model?: string;
+  }): Promise<{ guidanceProfilePrompt: string; model: string }> {
+    return await runMemberGuidanceProfileGraph(input);
+  }
+
+  async reflectChamberGuidance(input: {
+    memberName: string;
+    guidanceProfilePrompt: string;
+    previousSummary?: string;
+    trigger: 'interval' | 'feedback';
+    recentMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    activeDirectiveNotes?: string[];
+    feedbackKeys?: string[];
+    model?: string;
+  }): Promise<{
+    directives: Array<{
+      note: string;
+      ttlUserTurns: 1 | 2 | 3;
+    }>;
+    model: string;
+  }> {
+    return await runChamberGuidanceReflectionGraph(input);
   }
 
   async chatMember(input: {

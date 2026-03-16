@@ -20,6 +20,7 @@ The role of this file is to describe common mistakes and confusion points that a
 2. Prefer `make vercel-*` targets for Vercel operations.
 3. Never commit secrets or env files (`.env`, `.env.local`, `.env.convex.local`), never read them, only ask the user. 
 
+
 ## Known Confusion Points
 
 1. The workspace path currently includes trailing spaces (`.../the-council  `). Absolute-path tooling can fail with `Not a directory` unless paths preserve those trailing spaces exactly. Prefer repo-relative paths in shell/apply_patch commands.
@@ -28,6 +29,7 @@ The role of this file is to describe common mistakes and confusion points that a
 
 1. `npm run build`
 2. `npx convex codegen --typecheck enable --dry-run`
+3.  run convex deployment (via make) to deploy the backend of the project, if such change has occured
 
 ## Development Phase and Collaboration
 

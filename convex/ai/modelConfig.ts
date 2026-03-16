@@ -13,7 +13,9 @@ export type ModelSlot =
   | 'chamberMemory'
   | 'kbGate'
   | 'kbQueryRewrite'
-  | 'kbDigest';
+  | 'kbDigest'
+  | 'guidanceProfile'
+  | 'guidanceReflection';
 
 export type AiProvider = 'openai' | 'google';
 
@@ -38,6 +40,8 @@ const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   kbGate: 'AI_MODEL_KB_GATE',
   kbQueryRewrite: 'AI_MODEL_KB_QUERY_REWRITE',
   kbDigest: 'AI_MODEL_KB_DIGEST',
+  guidanceProfile: 'AI_MODEL_GUIDANCE_PROFILE',
+  guidanceReflection: 'AI_MODEL_GUIDANCE_REFLECTION',
 };
 
 const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
@@ -56,6 +60,8 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
   kbGate: ['GEMINI_KB_GATE_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   kbQueryRewrite: ['GEMINI_KB_QUERY_REWRITE_MODEL', 'GEMINI_MODEL'],
   kbDigest: ['GEMINI_KB_DIGEST_MODEL', 'GEMINI_MODEL'],
+  guidanceProfile: ['GEMINI_GUIDANCE_PROFILE_MODEL', 'GEMINI_MODEL'],
+  guidanceReflection: ['GEMINI_GUIDANCE_REFLECTION_MODEL', 'GEMINI_MODEL'],
 };
 
 const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
@@ -74,6 +80,8 @@ const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   kbGate: { provider: 'google', model: 'gemma-3-12b-it' },
   kbQueryRewrite: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   kbDigest: { provider: 'google', model: 'gemini-2.5-flash-lite' },
+  guidanceProfile: { provider: 'google', model: 'gemini-2.5-flash' },
+  guidanceReflection: { provider: 'google', model: 'gemini-3-flash-preview' },
 };
 
 function parseModelSpec(raw?: string | null): ModelTarget | null {
@@ -135,6 +143,8 @@ export const MODEL_IDS: Record<ModelSlot, string> = {
   kbGate: resolveModelTarget('kbGate').model,
   kbQueryRewrite: resolveModelTarget('kbQueryRewrite').model,
   kbDigest: resolveModelTarget('kbDigest').model,
+  guidanceProfile: resolveModelTarget('guidanceProfile').model,
+  guidanceReflection: resolveModelTarget('guidanceReflection').model,
 };
 
 export function resolveModel(slot: ModelSlot, override?: string): string {

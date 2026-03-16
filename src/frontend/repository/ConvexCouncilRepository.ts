@@ -4,12 +4,15 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import type {
   ChamberResponseMode,
   Conversation,
+  ConversationGuidanceDirective,
   ConversationMemoryLog,
   ConversationNotebook,
   ConversationParticipant,
   RoundtableState,
   Member,
   Message,
+  MessageFeedback,
+  MessageFeedbackKey,
   PersonalArchiveAccess,
   PersonalArchiveCapturePreview,
   PersonalArchiveEntry,
@@ -59,6 +62,9 @@ function toMember(doc: ConvexMemberDoc): Member {
     avatarUrl: (doc as any).avatarUrl ?? null,
     specialties: doc.specialties,
     systemPrompt: doc.systemPrompt,
+    guidanceProfilePrompt: doc.guidanceProfilePrompt,
+    guidanceProfileGeneratedAt: doc.guidanceProfileGeneratedAt,
+    guidanceProfileUpdatedAt: doc.guidanceProfileUpdatedAt,
     kbStoreName: doc.kbStoreName,
     personalArchiveAccess,
     deletedAt: doc.deletedAt,
@@ -83,6 +89,7 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
         }
       : undefined,
     timeAwareReentryNoticeSeenAt: doc.kind === 'chamber' ? doc.timeAwareReentryNoticeSeenAt : undefined,
+    guidanceLastReflectedUserTurnCount: doc.kind === 'chamber' ? doc.guidanceLastReflectedUserTurnCount : undefined,
     title: doc.title,
     chamberMemberId: doc.chamberMemberId as string | undefined,
     deletedAt: doc.deletedAt,
@@ -187,6 +194,32 @@ function toConversationNotebook(doc: any): ConversationNotebook {
     updatedAt: doc.updatedAt,
     createdAt: doc._creationTime,
     archivedAt: doc.archivedAt,
+  };
+}
+
+function toConversationGuidanceDirective(doc: any): ConversationGuidanceDirective {
+  return {
+    id: doc._id,
+    conversationId: doc.conversationId,
+    memberId: doc.memberId,
+    source: doc.source,
+    triggerMessageId: doc.triggerMessageId,
+    note: doc.note,
+    createdAfterUserTurn: doc.createdAfterUserTurn,
+    expiresAfterUserTurn: doc.expiresAfterUserTurn,
+    createdAt: doc.createdAt ?? doc._creationTime,
+  };
+}
+
+function toMessageFeedback(doc: any): MessageFeedback {
+  return {
+    id: doc._id,
+    conversationId: doc.conversationId,
+    messageId: doc.messageId,
+    memberId: doc.memberId,
+    key: doc.key,
+    createdAt: doc.createdAt ?? doc._creationTime,
+    updatedAt: doc.updatedAt ?? doc._creationTime,
   };
 }
 
@@ -301,6 +334,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     const doc = await this.client.mutation(api.members.create, {
       name: input.name,
       systemPrompt: input.systemPrompt,
+      guidanceProfilePrompt: input.guidanceProfilePrompt,
       specialties: input.specialties,
       personalArchiveAccess: input.personalArchiveAccess,
     } as any);
@@ -327,6 +361,20 @@ class ConvexCouncilRepository implements CouncilRepository {
       memberId: memberId as Id<'members'>,
       storeName,
     });
+  }
+
+  async generateMemberGuidanceProfile(input: {
+    memberId: string;
+    systemPrompt: string;
+    specialties?: string[];
+    force?: boolean;
+  }): Promise<{ guidanceProfilePrompt: string; model: string }> {
+    return (await this.client.action(api.ai.guidance.generateMemberGuidanceProfile as any, {
+      memberId: input.memberId as Id<'members'>,
+      systemPrompt: input.systemPrompt,
+      specialties: input.specialties,
+      force: input.force,
+    })) as { guidanceProfilePrompt: string; model: string };
   }
 
   async generateUploadUrl(): Promise<string> {
@@ -593,6 +641,67 @@ class ConvexCouncilRepository implements CouncilRepository {
     });
   }
 
+  async listConversationGuidanceDirectives(conversationId: string): Promise<ConversationGuidanceDirective[]> {
+    const rows = await this.client.query(api.guidance.listConversationGuidanceDirectives, {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return rows.map(toConversationGuidanceDirective);
+  }
+
+  async listMessageFeedback(conversationId: string): Promise<MessageFeedback[]> {
+    const rows = await this.client.query(api.guidance.listMessageFeedback, {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return rows.map(toMessageFeedback);
+  }
+
+  async setMessageFeedback(input: {
+    messageId: string;
+    key: MessageFeedbackKey;
+    active: boolean;
+  }): Promise<MessageFeedback[]> {
+    const rows = await this.client.mutation(api.guidance.setMessageFeedback, {
+      messageId: input.messageId as Id<'messages'>,
+      key: input.key,
+      active: input.active,
+    });
+    return rows.map(toMessageFeedback);
+  }
+
+  async syncFeedbackGuidanceDirectives(input: {
+    messageId: string;
+  }): Promise<{ directivesCreated: number; activeKeys: MessageFeedbackKey[] }> {
+    return (await this.client.mutation(api.guidance.syncFeedbackGuidanceDirectives, {
+      messageId: input.messageId as Id<'messages'>,
+    })) as { directivesCreated: number; activeKeys: MessageFeedbackKey[] };
+  }
+
+  async upsertTimeAwareReentryGuidance(input: {
+    conversationId: string;
+    gapBucket: TimeAwareReentryGapBucket;
+    explicitContinuation: boolean;
+  }): Promise<{ directivesCreated: number }> {
+    return (await this.client.mutation(api.guidance.upsertTimeAwareReentryGuidance, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      gapBucket: input.gapBucket,
+      explicitContinuation: input.explicitContinuation,
+    })) as { directivesCreated: number };
+  }
+
+  async reflectChamberGuidance(input: {
+    conversationId: string;
+    trigger: 'interval' | 'feedback';
+    messageId?: string;
+    feedbackKeys?: MessageFeedbackKey[];
+  }): Promise<{ directivesCreated: number; model?: string; skippedReason?: string }> {
+    return (await this.client.action(api.ai.guidance.reflectChamberGuidance as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      trigger: input.trigger,
+      messageId: input.messageId as Id<'messages'> | undefined,
+      feedbackKeys: input.feedbackKeys,
+    })) as { directivesCreated: number; model?: string; skippedReason?: string };
+  }
+
   async listParticipants(conversationId: string, includeRemoved = false): Promise<ConversationParticipant[]> {
     const docs = await this.clientAny.query('conversations:listParticipants', {
       conversationId: conversationId as Id<'conversations'>,
@@ -695,9 +804,9 @@ class ConvexCouncilRepository implements CouncilRepository {
     };
   }
 
-  async appendMessages(input: AppendMessagesInput): Promise<void> {
+  async appendMessages(input: AppendMessagesInput): Promise<Message[]> {
     const conversationId = input.conversationId as Id<'conversations'>;
-    await this.client.mutation(api.messages.appendMany, {
+    const rows = await this.client.mutation(api.messages.appendMany, {
       messages: input.messages.map((message) => ({
         conversationId,
         role: message.role,
@@ -727,6 +836,7 @@ class ConvexCouncilRepository implements CouncilRepository {
         error: message.error,
       })),
     });
+    return rows.map(toMessage);
   }
 
   async replaceWithRefinement(input: {
@@ -883,6 +993,9 @@ class ConvexCouncilRepository implements CouncilRepository {
       repliesRemaining: 1 | 2;
       explicitContinuation: boolean;
     };
+    guidanceDirectives?: Array<{
+      note: string;
+    }>;
   }): Promise<MemberChatResult> {
     return (await this.client.action(api.ai.chat.chatWithMember as any, {
       conversationId: input.conversationId as Id<'conversations'>,
@@ -895,6 +1008,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       retrievalProfile: input.retrievalProfile,
       turnDirective: input.turnDirective,
       timeAwareReentry: input.timeAwareReentry,
+      guidanceDirectives: input.guidanceDirectives,
     })) as MemberChatResult;
   }
 

@@ -1,4 +1,4 @@
-import { AlignJustify, Brain, Check, Copy, Expand, MessageCircle, NotebookPen, Reply, Search, SlidersHorizontal, UserCircle2 } from 'lucide-react';
+import { AlignJustify, Brain, Check, Copy, Expand, MessageCircle, NotebookPen, Reply, Search, SlidersHorizontal, ThumbsDown, ThumbsUp, UserCircle2 } from 'lucide-react';
 import { useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,14 @@ import { RoutePill } from './RoutePill';
 import { MarkdownMessage } from './MarkdownMessage';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { cn } from '../../lib/utils';
+
+const FEEDBACK_OPTIONS = [
+  { key: 'helpful', label: 'Helpful', activeLabel: 'Helpful', Icon: ThumbsUp },
+  { key: 'not_helpful', label: 'Not helpful', activeLabel: 'Not helpful', Icon: ThumbsDown },
+  { key: 'shorter', label: 'Shorter', activeLabel: 'Shorter replies', Icon: AlignJustify },
+  { key: 'longer', label: 'Longer', activeLabel: 'Longer replies', Icon: Expand },
+  { key: 'more_direct', label: 'More direct', activeLabel: 'More direct', Icon: Reply },
+] as const;
 
 /** Format epoch ms → "HH:MM" */
 function formatClock(epochMs: number): string {
@@ -43,7 +51,9 @@ export function MessageBubble({ message }: { message: Message }) {
   const messages = useAppStore((state) => state.messages);
   const appendMessageToNotebook = useAppStore((state) => state.appendMessageToNotebook);
   const refiningActionByMessageId = useAppStore((state) => state.refiningActionByMessageId);
+  const messageFeedbackByMessageId = useAppStore((state) => state.messageFeedbackByMessageId);
   const refineLatestChamberResponse = useAppStore((state) => state.refineLatestChamberResponse);
+  const setMessageFeedback = useAppStore((state) => state.setMessageFeedback);
   const startHallFollowUpThread = useAppStore((state) => state.startHallFollowUpThread);
   const showToast = useAppStore((state) => state.showToast);
 
@@ -110,6 +120,8 @@ export function MessageBubble({ message }: { message: Message }) {
     !message.supersededAt &&
     !message.compacted
   );
+  const activeFeedback = new Set(messageFeedbackByMessageId[message.id] ?? []);
+  const activeFeedbackBadges = FEEDBACK_OPTIONS.filter(({ key }) => activeFeedback.has(key));
 
   if (isReplacementRefining) {
     return null;
@@ -170,100 +182,144 @@ export function MessageBubble({ message }: { message: Message }) {
             ) : null}
 
             {!isUser ? (
-              <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
-                {isChamber ? (
-                  <div className="flex flex-wrap items-center gap-1">
-                    {canRefine ? (
-                      <>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
-                              disabled={Boolean(activeRefinement)}
-                            >
-                              <SlidersHorizontal className="h-3 w-3" />
-                              Refine
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="w-44">
-                            <DropdownMenuLabel>Refine Reply</DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onSelect={(event) => {
-                                event.preventDefault();
-                                void refineLatestChamberResponse(message.conversationId, 'think_harder');
-                              }}
-                              className="gap-2"
-                            >
-                              <Brain className="h-3.5 w-3.5" />
-                              Think harder
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={(event) => {
-                                event.preventDefault();
-                                void refineLatestChamberResponse(message.conversationId, 'deep_dive');
-                              }}
-                              className="gap-2"
-                            >
-                              <Search className="h-3.5 w-3.5" />
-                              Deep dive
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={(event) => {
-                                event.preventDefault();
-                                void refineLatestChamberResponse(message.conversationId, 'shorter');
-                              }}
-                              className="gap-2"
-                            >
-                              <AlignJustify className="h-3.5 w-3.5" />
-                              Shorter
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
-                          onClick={() => void refineLatestChamberResponse(message.conversationId, 'elaborate')}
-                          disabled={Boolean(activeRefinement)}
-                        >
-                          <Expand className="h-3 w-3" />
-                          Elaborate
-                        </Button>
-                      </>
-                    ) : null}
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
-                      <NotebookPen className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
-                      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                    </Button>
+              <>
+                <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
+                  {isChamber ? (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {canRefine ? (
+                        <>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                                disabled={Boolean(activeRefinement)}
+                              >
+                                <SlidersHorizontal className="h-3 w-3" />
+                                Refine
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-44">
+                              <DropdownMenuLabel>Refine Reply</DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void refineLatestChamberResponse(message.conversationId, 'think_harder');
+                                }}
+                                className="gap-2"
+                              >
+                                <Brain className="h-3.5 w-3.5" />
+                                Think harder
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void refineLatestChamberResponse(message.conversationId, 'deep_dive');
+                                }}
+                                className="gap-2"
+                              >
+                                <Search className="h-3.5 w-3.5" />
+                                Deep dive
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void refineLatestChamberResponse(message.conversationId, 'shorter');
+                                }}
+                                className="gap-2"
+                              >
+                                <AlignJustify className="h-3.5 w-3.5" />
+                                Shorter
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                            onClick={() => void refineLatestChamberResponse(message.conversationId, 'elaborate')}
+                            disabled={Boolean(activeRefinement)}
+                          >
+                            <Expand className="h-3 w-3" />
+                            Elaborate
+                          </Button>
+                        </>
+                      ) : null}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                          >
+                            Feedback
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-48">
+                          <DropdownMenuLabel>Guide Next Replies</DropdownMenuLabel>
+                          {FEEDBACK_OPTIONS.map(({ key, label, Icon }) => {
+                            const selected = activeFeedback.has(key as any);
+                            return (
+                              <DropdownMenuItem
+                                key={key}
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void setMessageFeedback(message.id, key as any, !selected);
+                                }}
+                                className="gap-2"
+                              >
+                                <Icon className="h-3.5 w-3.5" />
+                                <span>{label}</span>
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
+                        <NotebookPen className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
+                        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><Reply className="h-3 w-3" /></Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground"
+                        onClick={() => setFollowUpDialogOpen(true)}
+                        title="Start private follow-up"
+                        aria-label="Start private follow-up"
+                        disabled={!canStartHallFollowUp || startingFollowUp}
+                      >
+                        <MessageCircle className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
+                        <NotebookPen className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
+                        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                  )}
+                  <span className={cn('text-[10px] text-muted-foreground', isChamber && canRefine ? 'ml-auto' : '')}>{timeLabel}</span>
+                </div>
+                {isChamber && activeFeedbackBadges.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {activeFeedbackBadges.map(({ key, activeLabel }) => (
+                      <span
+                        key={key}
+                        className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                      >
+                        {activeLabel}
+                      </span>
+                    ))}
                   </div>
-                ) : (
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><Reply className="h-3 w-3" /></Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-muted-foreground"
-                      onClick={() => setFollowUpDialogOpen(true)}
-                      title="Start private follow-up"
-                      aria-label="Start private follow-up"
-                      disabled={!canStartHallFollowUp || startingFollowUp}
-                    >
-                      <MessageCircle className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
-                      <NotebookPen className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
-                      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                    </Button>
-                  </div>
-                )}
-                <span className={cn('text-[10px] text-muted-foreground', isChamber && canRefine ? 'ml-auto' : '')}>{timeLabel}</span>
-              </div>
+                ) : null}
+              </>
             ) : (
               <div className="mt-2 flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
                 <span className="text-[10px] text-background/70">{timeLabel}</span>

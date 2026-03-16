@@ -14,6 +14,7 @@ interface MemberFormState {
   name: string;
   specialties: string;
   systemPrompt: string;
+  guidanceProfilePrompt: string;
   personalArchiveAccess: PersonalArchiveAccess;
 }
 
@@ -32,6 +33,7 @@ const emptyForm: MemberFormState = {
   name: '',
   specialties: '',
   systemPrompt: '',
+  guidanceProfilePrompt: '',
   personalArchiveAccess: {
     reflection: false,
     cookieJar: false,
@@ -45,6 +47,7 @@ export function MembersPage() {
   const members = useAppStore((state) => state.members);
   const createMember = useAppStore((state) => state.createMember);
   const updateMember = useAppStore((state) => state.updateMember);
+  const generateMemberGuidanceProfile = useAppStore((state) => state.generateMemberGuidanceProfile);
   const archiveMember = useAppStore((state) => state.archiveMember);
   const uploadDocsForMember = useAppStore((state) => state.uploadDocsForMember);
   const fetchDocsForMember = useAppStore((state) => state.fetchDocsForMember);
@@ -66,6 +69,9 @@ export function MembersPage() {
   const [pendingAvatarBlob, setPendingAvatarBlob] = useState<Blob | null>(null);
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
   const [promptDialogValue, setPromptDialogValue] = useState('');
+  const [isGuidanceDialogOpen, setIsGuidanceDialogOpen] = useState(false);
+  const [guidanceDialogValue, setGuidanceDialogValue] = useState('');
+  const [isGeneratingGuidance, setIsGeneratingGuidance] = useState(false);
   const [kbDigests, setKbDigests] = useState<KBDigestMetadata[]>([]);
   const [isDigestLoading, setIsDigestLoading] = useState(false);
   const [digestLoadError, setDigestLoadError] = useState<string | null>(null);
@@ -163,6 +169,7 @@ export function MembersPage() {
       name: member.name,
       specialties: member.specialties.join(', '),
       systemPrompt: member.systemPrompt,
+      guidanceProfilePrompt: member.guidanceProfilePrompt ?? '',
       personalArchiveAccess: member.personalArchiveAccess,
     });
     setIsCreating(false);
@@ -179,6 +186,8 @@ export function MembersPage() {
     setPendingAvatarBlob(null);
     setIsPromptDialogOpen(false);
     setPromptDialogValue('');
+    setIsGuidanceDialogOpen(false);
+    setGuidanceDialogValue('');
     setKbDigests([]);
     setDigestLoadError(null);
     setKbPanelError(null);
@@ -212,6 +221,7 @@ export function MembersPage() {
     const payload = {
       name,
       systemPrompt: prompt,
+      guidanceProfilePrompt: form.guidanceProfilePrompt.trim() || undefined,
       specialties: form.specialties
         .split(',')
         .map((item) => item.trim())
@@ -233,6 +243,7 @@ export function MembersPage() {
         name: created.name,
         specialties: created.specialties.join(', '),
         systemPrompt: created.systemPrompt,
+        guidanceProfilePrompt: created.guidanceProfilePrompt ?? '',
         personalArchiveAccess: created.personalArchiveAccess,
       });
       return;
@@ -324,6 +335,29 @@ export function MembersPage() {
   const savePromptDialog = () => {
     setForm((current) => ({ ...current, systemPrompt: promptDialogValue }));
     setIsPromptDialogOpen(false);
+  };
+
+  const openGuidanceDialog = () => {
+    setGuidanceDialogValue(form.guidanceProfilePrompt);
+    setIsGuidanceDialogOpen(true);
+  };
+
+  const saveGuidanceDialog = () => {
+    setForm((current) => ({ ...current, guidanceProfilePrompt: guidanceDialogValue }));
+    setIsGuidanceDialogOpen(false);
+  };
+
+  const generateGuidance = async () => {
+    const targetMemberId = editingMemberId;
+    if (!targetMemberId) return;
+    setIsGeneratingGuidance(true);
+    try {
+      const result = await generateMemberGuidanceProfile(targetMemberId, true);
+      setForm((current) => ({ ...current, guidanceProfilePrompt: result.guidanceProfilePrompt }));
+      setGuidanceDialogValue(result.guidanceProfilePrompt);
+    } finally {
+      setIsGeneratingGuidance(false);
+    }
   };
 
   const listToText = (items: string[]) => items.join(', ');
@@ -553,6 +587,48 @@ export function MembersPage() {
                   onChange={(event) => setForm((current) => ({ ...current, systemPrompt: event.target.value }))}
                   placeholder="Direct instructions for this member..."
                 />
+              </label>
+
+              <label className="grid gap-1.5 font-mono text-xs">
+                <span className="flex items-center justify-between gap-2">
+                  <span>Guidance profile</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                      onClick={() => void generateGuidance()}
+                      disabled={!editingMemberId || isGeneratingGuidance}
+                      title="Generate guidance profile"
+                    >
+                      {isGeneratingGuidance ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                      {isGeneratingGuidance ? 'Working…' : 'Generate'}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                      onClick={openGuidanceDialog}
+                      title="Expand guidance profile editor"
+                    >
+                      <Expand className="h-3 w-3" />
+                      Expand
+                    </Button>
+                  </div>
+                </span>
+                <textarea
+                  className="min-h-32 rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                  value={form.guidanceProfilePrompt}
+                  onChange={(event) => setForm((current) => ({ ...current, guidanceProfilePrompt: event.target.value }))}
+                  placeholder="Generated from the system prompt after save"
+                />
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {form.guidanceProfilePrompt.trim().length > 0
+                    ? 'Guidance profile is editable and will not auto-refresh when the system prompt changes. Press Generate to replace it.'
+                    : 'Generated from the system prompt after save. Existing members can generate it manually.'}
+                </p>
               </label>
 
               <section className="rounded-md border border-border bg-background/50 p-3">
@@ -797,6 +873,40 @@ export function MembersPage() {
                   />
                   <div className="mt-4 flex items-center gap-2">
                     <Button type="button" className="h-8 gap-2 rounded-md text-xs" onClick={savePromptDialog}>
+                      <Save className="h-3.5 w-3.5" />
+                      Save changes
+                    </Button>
+                    <DialogPrimitive.Close asChild>
+                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs">
+                        Cancel
+                      </Button>
+                    </DialogPrimitive.Close>
+                  </div>
+                </DialogPrimitive.Content>
+              </DialogPrimitive.Portal>
+            </DialogPrimitive.Root>
+
+            <DialogPrimitive.Root
+              open={isGuidanceDialogOpen}
+              onOpenChange={(open) => {
+                setIsGuidanceDialogOpen(open);
+              }}
+            >
+              <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(86vh,820px)] w-[min(95vw,920px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-background p-4 shadow-lg focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-mono text-lg font-semibold tracking-tight">Edit guidance profile</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    Private member guidance used for background calibration and short-lived directives.
+                  </DialogPrimitive.Description>
+                  <textarea
+                    className="mt-4 min-h-0 flex-1 resize-none overflow-y-auto rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    value={guidanceDialogValue}
+                    onChange={(event) => setGuidanceDialogValue(event.target.value)}
+                    placeholder="Generated from the system prompt after save"
+                  />
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button type="button" className="h-8 gap-2 rounded-md text-xs" onClick={saveGuidanceDialog}>
                       <Save className="h-3.5 w-3.5" />
                       Save changes
                     </Button>

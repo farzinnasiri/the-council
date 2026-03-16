@@ -26,6 +26,9 @@ export default defineSchema({
     avatarId: v.optional(v.id('_storage')),
     specialties: v.array(v.string()),
     systemPrompt: v.string(),
+    guidanceProfilePrompt: v.optional(v.string()),
+    guidanceProfileGeneratedAt: v.optional(v.number()),
+    guidanceProfileUpdatedAt: v.optional(v.number()),
     kbStoreName: v.optional(v.string()),
     personalArchiveAccess: v.optional(personalArchiveAccessValidator),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
@@ -62,6 +65,7 @@ export default defineSchema({
       })
     ),
     timeAwareReentryNoticeSeenAt: v.optional(v.number()),
+    guidanceLastReflectedUserTurnCount: v.optional(v.number()),
     title: v.string(),
     chamberMemberId: v.optional(v.id('members')),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
@@ -141,6 +145,47 @@ export default defineSchema({
   })
     .index('by_conversation', ['conversationId'])
     .index('by_user_conversation', ['userId', 'conversationId']),
+
+  conversationGuidanceDirectives: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    memberId: v.id('members'),
+    source: v.union(
+      v.literal('background_reflection'),
+      v.literal('feedback'),
+      v.literal('system_rule')
+    ),
+    triggerMessageId: v.optional(v.id('messages')),
+    note: v.string(),
+    createdAfterUserTurn: v.number(),
+    expiresAfterUserTurn: v.number(),
+    createdAt: v.number(),
+  })
+    .index('by_conversation', ['conversationId'])
+    .index('by_conversation_expiry', ['conversationId', 'expiresAfterUserTurn']),
+
+  messageFeedback: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    messageId: v.id('messages'),
+    memberId: v.id('members'),
+    key: v.union(
+      v.literal('like'),
+      v.literal('dislike'),
+      v.literal('helpful'),
+      v.literal('not_helpful'),
+      v.literal('shorter'),
+      v.literal('longer'),
+      v.literal('clearer'),
+      v.literal('more_direct'),
+      v.literal('softer'),
+      v.literal('harder')
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_conversation', ['conversationId'])
+    .index('by_message_key', ['messageId', 'key']),
 
   messages: defineTable({
     userId: v.id('users'),

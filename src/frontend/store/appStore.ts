@@ -7,6 +7,7 @@ import type {
   ConversationType,
   Member,
   Message,
+  MessageFeedbackKey,
   MessageRouting,
   PersonalArchiveAccess,
   RoundtableState,
@@ -44,6 +45,7 @@ import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
 interface CreateMemberPayload {
   name: string;
   systemPrompt: string;
+  guidanceProfilePrompt?: string;
   specialties?: string[];
   personalArchiveAccess?: PersonalArchiveAccess;
 }
@@ -78,6 +80,7 @@ interface AppState {
   roundtableStateByConversation: Record<string, RoundtableState | null>;
   roundtablePreparingByConversation: Record<string, boolean>;
   hallSummaryFailureCountByConversation: Record<string, number>;
+  messageFeedbackByMessageId: Record<string, MessageFeedbackKey[]>;
   conversationNotebooksByConversation: Record<string, ConversationNotebook>;
   notebookDraftByConversation: Record<string, string>;
   notebookSaveStateByConversation: Record<string, NotebookSaveState>;
@@ -167,6 +170,8 @@ interface AppState {
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
+  generateMemberGuidanceProfile: (memberId: string, force?: boolean) => Promise<{ guidanceProfilePrompt: string; model: string }>;
+  setMessageFeedback: (messageId: string, key: MessageFeedbackKey, active: boolean) => Promise<void>;
   archiveMember: (memberId: string) => Promise<void>;
   uploadDocsForMember: (memberId: string, files: File[]) => Promise<void>;
   fetchDocsForMember: (memberId: string) => Promise<void>;
@@ -267,6 +272,32 @@ const EXPLICIT_CONTINUATION_PATTERNS = [
   /\babout that\b/i,
 ];
 
+const FEEDBACK_LABELS: Record<MessageFeedbackKey, string> = {
+  like: 'Liked',
+  dislike: 'Not helpful',
+  helpful: 'Helpful',
+  not_helpful: 'Not helpful',
+  shorter: 'Shorter replies',
+  longer: 'Longer replies',
+  clearer: 'Clearer replies',
+  more_direct: 'More direct replies',
+  softer: 'Softer replies',
+  harder: 'Harder replies',
+};
+
+function feedbackToastMessage(key: MessageFeedbackKey, active: boolean) {
+  const label = FEEDBACK_LABELS[key];
+  return active ? `${label} activated` : `${label} removed`;
+}
+
+function mapFeedbackRows(rows: Array<{ messageId: string; key: MessageFeedbackKey }>) {
+  const grouped: Record<string, MessageFeedbackKey[]> = {};
+  for (const row of rows) {
+    grouped[row.messageId] = [...(grouped[row.messageId] ?? []), row.key];
+  }
+  return grouped;
+}
+
 function getLatestActiveNonSystemMessageAt(messages: Message[], conversationId: string): number | undefined {
   let latest = 0;
   for (const message of messages) {
@@ -313,6 +344,24 @@ function buildMessage(input: BuildMessageInput): Message {
     compacted: false,
     createdAt: Date.now(),
   };
+}
+
+function replaceOptimisticMessages(
+  messages: Message[],
+  optimisticMessages: Message[],
+  persistedMessages: Message[]
+): Message[] {
+  const replacements = new Map<string, Message>();
+  optimisticMessages.forEach((message, index) => {
+    const persisted = persistedMessages[index];
+    if (persisted) {
+      replacements.set(message.id, persisted);
+    }
+  });
+  if (replacements.size === 0) {
+    return messages;
+  }
+  return messages.map((message) => replacements.get(message.id) ?? message);
 }
 
 function patchConversationEverywhere(
@@ -675,6 +724,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   roundtableStateByConversation: {},
   roundtablePreparingByConversation: {},
   hallSummaryFailureCountByConversation: {},
+  messageFeedbackByMessageId: {},
   conversationNotebooksByConversation: {},
   notebookDraftByConversation: {},
   notebookSaveStateByConversation: {},
@@ -927,7 +977,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadMessages: async (conversationId) => {
-    const page = await councilRepository.listMessagesPage(conversationId, { limit: 40 });
+    const [page, feedbackRows] = await Promise.all([
+      councilRepository.listMessagesPage(conversationId, { limit: 40 }),
+      councilRepository.listMessageFeedback(conversationId),
+    ]);
     const msgs = page.messages;
     set((state) => ({
       messages: [
@@ -941,6 +994,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           hasOlder: page.hasMore,
           isLoadingOlder: false,
         },
+      },
+      messageFeedbackByMessageId: {
+        ...state.messageFeedbackByMessageId,
+        ...mapFeedbackRows(feedbackRows),
       },
     }));
     void get().evaluateChamberCompactionOnLoad(conversationId);
@@ -964,10 +1021,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const page = await councilRepository.listMessagesPage(conversationId, {
-        beforeCreatedAt: pagination.oldestLoadedAt,
-        limit: 30,
-      });
+      const [page, feedbackRows] = await Promise.all([
+        councilRepository.listMessagesPage(conversationId, {
+          beforeCreatedAt: pagination.oldestLoadedAt,
+          limit: 30,
+        }),
+        councilRepository.listMessageFeedback(conversationId),
+      ]);
 
       set((state) => {
         const existing = state.messages.filter((m) => m.conversationId === conversationId);
@@ -983,6 +1043,10 @@ export const useAppStore = create<AppState>((set, get) => ({
               hasOlder: page.hasMore,
               isLoadingOlder: false,
             },
+          },
+          messageFeedbackByMessageId: {
+            ...state.messageFeedbackByMessageId,
+            ...mapFeedbackRows(feedbackRows),
           },
         };
       });
@@ -1214,10 +1278,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...updateConversationStamp(state, conversationId, true),
       }));
 
-      await councilRepository.appendMessages({
+      const persistedReplies = await councilRepository.appendMessages({
         conversationId,
         messages: [reply],
       });
+      set((state) => ({
+        messages: replaceOptimisticMessages(state.messages, [reply], persistedReplies),
+      }));
 
       const refreshed = await refreshRoundtableRound({
         conversationId,
@@ -1437,10 +1504,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   archiveConversation: async (conversationId) => {
     await councilRepository.archiveConversation(conversationId);
     set((state) => {
+      const conversationMessageIds = new Set(
+        state.messages
+          .filter((message) => message.conversationId === conversationId)
+          .map((message) => message.id)
+      );
       const nextConversations = state.conversations.filter((item) => item.id !== conversationId);
       const { [conversationId]: _removed, ...nextParticipants } = state.hallParticipantsByConversation;
       const { [conversationId]: _removedRoundtable, ...nextRoundtable } = state.roundtableStateByConversation;
       const { [conversationId]: _removedPreparing, ...nextPreparing } = state.roundtablePreparingByConversation;
+      const nextFeedback = Object.fromEntries(
+        Object.entries(state.messageFeedbackByMessageId).filter(([messageId]) => !conversationMessageIds.has(messageId))
+      );
       return {
         conversations: nextConversations,
         hallParticipantsByConversation: nextParticipants,
@@ -1451,6 +1526,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         notebookSaveStateByConversation: removeKey(state.notebookSaveStateByConversation, conversationId),
         notebookErrorByConversation: removeKey(state.notebookErrorByConversation, conversationId),
         notebookLoadedByConversation: removeKey(state.notebookLoadedByConversation, conversationId),
+        messageFeedbackByMessageId: nextFeedback,
         selectedConversationId:
           state.selectedConversationId === conversationId
             ? (nextConversations[0]?.id ?? '')
@@ -1631,10 +1707,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...updateConversationStamp(state, conversationId, true),
     }));
 
-    await councilRepository.appendMessages({
+    const persistedMessages = await councilRepository.appendMessages({
       conversationId,
       messages: [message],
     });
+    set((state) => ({
+      messages: replaceOptimisticMessages(state.messages, [message], persistedMessages),
+    }));
 
     if (shouldAutoTitle) {
       void suggestChamberTitle({ message: text })
@@ -1649,7 +1728,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         .catch(() => undefined);
     }
 
-    return { messageId: message.id, previousActiveMessageAt };
+    return { messageId: persistedMessages[0]?.id ?? message.id, previousActiveMessageAt };
   },
 
   generateDeterministicReplies: async (
@@ -1757,7 +1836,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...updateConversationStamp(current, conversationId, true),
         }));
 
-        await councilRepository.appendMessages({ conversationId, messages: [routeMessage] });
+        const persistedRouteMessages = await councilRepository.appendMessages({
+          conversationId,
+          messages: [routeMessage],
+        });
+        set((current) => ({
+          messages: replaceOptimisticMessages(current.messages, [routeMessage], persistedRouteMessages),
+        }));
       }
 
       if (activeParticipantIds.length === 0) {
@@ -1886,10 +1971,13 @@ export const useAppStore = create<AppState>((set, get) => ({
                     },
                   }));
 
-                  await councilRepository.appendMessages({
+                  const persistedReplies = await councilRepository.appendMessages({
                     conversationId,
                     messages: [reply],
                   });
+                  set((current) => ({
+                    messages: replaceOptimisticMessages(current.messages, [reply], persistedReplies),
+                  }));
                 })
               );
 
@@ -2036,7 +2124,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           messages: [...current.messages, routeMessage],
           ...updateConversationStamp(current, conversationId, true),
         }));
-        await councilRepository.appendMessages({ conversationId, messages: [routeMessage] });
+        const persistedRouteMessages = await councilRepository.appendMessages({
+          conversationId,
+          messages: [routeMessage],
+        });
+        set((current) => ({
+          messages: replaceOptimisticMessages(current.messages, [routeMessage], persistedRouteMessages),
+        }));
       } else if (routingOverride.mode === 'manual') {
         const allowed = new Set(
           state.members.filter((member) => !member.deletedAt).map((member) => member.id)
@@ -2101,6 +2195,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           });
           conversation = updatedConversation;
           activeTimeAwareReentryState = updatedConversation.timeAwareReentryState;
+          void councilRepository.upsertTimeAwareReentryGuidance({
+            conversationId,
+            gapBucket: effectiveBucket,
+            explicitContinuation,
+          }).catch(() => undefined);
           set((current) => ({
             conversations: current.conversations.map((item) =>
               item.id === conversationId ? updatedConversation : item
@@ -2180,14 +2279,6 @@ export const useAppStore = create<AppState>((set, get) => ({
                 : undefined,
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
             retrievalProfile: conversation.kind === 'chamber' ? chamberGeneration.retrievalProfile : undefined,
-            timeAwareReentry:
-              conversation.kind === 'chamber' && activeTimeAwareReentryState
-                ? {
-                    gapBucket: activeTimeAwareReentryState.gapBucket,
-                    repliesRemaining: activeTimeAwareReentryState.repliesRemaining,
-                    explicitContinuation: activeTimeAwareReentryState.explicitContinuation,
-                  }
-                : undefined,
           });
 
           reply = buildMessage({
@@ -2230,7 +2321,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
       }));
 
-      await councilRepository.appendMessages({ conversationId, messages: [reply] });
+      const persistedReplies = await councilRepository.appendMessages({
+        conversationId,
+        messages: [reply],
+      });
+      set((current) => ({
+        messages: replaceOptimisticMessages(current.messages, [reply], persistedReplies),
+      }));
 
       if (conversation.kind === 'chamber' && reply.status === 'sent' && activeTimeAwareReentryState) {
         const nextGapBucket =
@@ -2260,6 +2357,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     await Promise.all(replyTasks);
+    if (conversation.kind === 'chamber') {
+      void councilRepository.reflectChamberGuidance({
+        conversationId,
+        trigger: 'interval',
+      }).catch(() => undefined);
+    }
     if (conversation.kind === 'hall') {
       await get().syncHallRoundSummaries(conversationId);
     }
@@ -2353,6 +2456,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         delete nextNotebookLoaded[id];
       }
 
+      const targetMessageIds = new Set(
+        state.messages.filter((message) => targetSet.has(message.conversationId)).map((message) => message.id)
+      );
+
       return {
         conversations: nextConversations,
         messages: state.messages.filter((message) => !targetSet.has(message.conversationId)),
@@ -2368,6 +2475,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         notebookErrorByConversation: nextNotebookErrors,
         notebookLoadedByConversation: nextNotebookLoaded,
         messagePaginationByConversation: nextPagination,
+        messageFeedbackByMessageId: Object.fromEntries(
+          Object.entries(state.messageFeedbackByMessageId).filter(([messageId]) => !targetMessageIds.has(messageId))
+        ),
         selectedConversationId: targetSet.has(state.selectedConversationId)
           ? (nextConversations[0]?.id ?? '')
           : state.selectedConversationId,
@@ -2522,16 +2632,93 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createMember: async (payload) => {
     const created = await councilRepository.createMember(payload);
-    set((state) => ({ members: [created, ...state.members] }));
-    return created;
+    let nextMember = created;
+    if (!created.guidanceProfilePrompt?.trim()) {
+      try {
+        const generated = await councilRepository.generateMemberGuidanceProfile({
+          memberId: created.id,
+          systemPrompt: created.systemPrompt,
+          specialties: created.specialties,
+        });
+        nextMember = {
+          ...created,
+          guidanceProfilePrompt: generated.guidanceProfilePrompt,
+          guidanceProfileGeneratedAt: Date.now(),
+          guidanceProfileUpdatedAt: Date.now(),
+        };
+      } catch {
+        nextMember = created;
+      }
+    }
+    set((state) => ({ members: [nextMember, ...state.members.filter((member) => member.id !== created.id)] }));
+    return nextMember;
   },
 
   updateMember: async (memberId, patch) => {
     const updated = await councilRepository.updateMember(memberId, patch);
+    let nextMember = updated;
+    if (!updated.guidanceProfilePrompt?.trim()) {
+      try {
+        const generated = await councilRepository.generateMemberGuidanceProfile({
+          memberId,
+          systemPrompt: updated.systemPrompt,
+          specialties: updated.specialties,
+        });
+        nextMember = {
+          ...updated,
+          guidanceProfilePrompt: generated.guidanceProfilePrompt,
+          guidanceProfileGeneratedAt: Date.now(),
+          guidanceProfileUpdatedAt: Date.now(),
+        };
+      } catch {
+        nextMember = updated;
+      }
+    }
     set((state) => ({
-      members: state.members.map((m) => (m.id === memberId ? updated : m)),
+      members: state.members.map((m) => (m.id === memberId ? nextMember : m)),
     }));
-    return updated;
+    return nextMember;
+  },
+
+  generateMemberGuidanceProfile: async (memberId, force = true) => {
+    const member = get().members.find((item) => item.id === memberId);
+    if (!member) {
+      throw new Error('Member not found');
+    }
+    const generated = await councilRepository.generateMemberGuidanceProfile({
+      memberId,
+      systemPrompt: member.systemPrompt,
+      specialties: member.specialties,
+      force,
+    });
+    set((state) => ({
+      members: state.members.map((item) =>
+        item.id === memberId
+          ? {
+              ...item,
+              guidanceProfilePrompt: generated.guidanceProfilePrompt,
+              guidanceProfileGeneratedAt: Date.now(),
+              guidanceProfileUpdatedAt: Date.now(),
+            }
+          : item
+      ),
+    }));
+    return generated;
+  },
+
+  setMessageFeedback: async (messageId, key, active) => {
+    const message = get().messages.find((item) => item.id === messageId);
+    if (!message) return;
+    const feedbackRows = await councilRepository.setMessageFeedback({ messageId, key, active });
+    const feedbackByMessage = mapFeedbackRows(feedbackRows);
+    set((state) => ({
+      messageFeedbackByMessageId: {
+        ...state.messageFeedbackByMessageId,
+        ...feedbackByMessage,
+      },
+    }));
+    await councilRepository.syncFeedbackGuidanceDirectives({ messageId });
+    get().showToast(feedbackToastMessage(key, active));
   },
 
   archiveMember: async (memberId) => {
