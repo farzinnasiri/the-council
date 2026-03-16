@@ -106,7 +106,6 @@ export function MembersPage() {
     void convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
       .then((rows) => setKbDigests(rows))
       .catch((error) => {
-        console.error('Failed to load KB metadata', error);
         setKbDigests([]);
         setDigestLoadError('Could not load metadata. Please reopen edit mode or refresh.');
       })
@@ -265,7 +264,6 @@ export function MembersPage() {
       setDigestLoadError(null);
       setKbPanelError(null);
     } catch (error) {
-      console.error('Failed to upload documents', error);
       setKbPanelError(error instanceof Error ? error.message : 'Upload failed');
     } finally {
       setBusyMemberId(null);

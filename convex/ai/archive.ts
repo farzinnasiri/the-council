@@ -15,6 +15,8 @@ import { modelRegistry } from './runtime/modelRegistry';
 import { invokeStructured } from './runtime/structured';
 import { indexPersonalArchiveEntry, deletePersonalArchiveEntryIndex } from './personalArchiveStore';
 import type { PersonalArchiveBucket } from '../personalArchiveShared';
+import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
+import { wideEventError } from '../observability/errors';
 
 const previewResultValidator = v.object({
   captureId: v.id('personalArchiveCaptures'),
@@ -99,7 +101,12 @@ export const previewCapture = action({
     forcedBucket: v.optional(personalArchiveBucketValidator),
   },
   returns: previewResultValidator,
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.archive.previewCapture', async (ctx, args) => {
+    setMainSpanAttributes({
+      'archive.source_type': args.sourceType,
+      'archive.forced_bucket': args.forcedBucket ?? 'none',
+      'archive.has_storage': Boolean(args.storageId),
+    });
     await requireAuthUser(ctx);
     const captureId = await (ctx.runMutation as any)('personalArchive:createCapture', {
       sourceType: args.sourceType,
@@ -120,7 +127,7 @@ export const previewCapture = action({
         : normalizeArchiveText(args.rawText ?? '');
 
       if (!extracted) {
-        throw new Error('No text could be extracted from this capture.');
+        throw wideEventError('archive-capture-text-missing', 'No text could be extracted from this capture.');
       }
 
       let proposedEntries;
@@ -173,7 +180,7 @@ export const previewCapture = action({
         rawText: capture.rawText ?? '',
       };
     }
-  },
+  }),
 });
 
 export const commitCaptureEntries = action({
@@ -182,16 +189,22 @@ export const commitCaptureEntries = action({
     entries: v.array(personalArchiveProposedEntryValidator),
   },
   returns: v.array(v.id('personalArchiveEntries')),
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.archive.commitCaptureEntries', async (ctx, args) => {
+    setMainSpanAttributes({
+      'archive.capture_id': String(args.captureId),
+      'archive.entry_count': args.entries.length,
+    });
     await requireAuthUser(ctx);
     const capture = await (ctx.runQuery as any)('personalArchive:getCapture', {
       captureId: args.captureId,
     });
     if (!capture) {
-      throw new Error('Capture not found');
+      throw wideEventError('archive-capture-not-found', 'Capture not found', { statusCode: 404 });
     }
     if (capture.parseStatus === 'committed') {
-      throw new Error('Capture already committed');
+      throw wideEventError('archive-capture-already-committed', 'Capture already committed', {
+        statusCode: 409,
+      });
     }
 
     const entryIds: Array<any> = [];
@@ -218,7 +231,7 @@ export const commitCaptureEntries = action({
       proposedEntries: args.entries,
     });
     return entryIds;
-  },
+  }),
 });
 
 export const updateEntry = action({
@@ -232,7 +245,11 @@ export const updateEntry = action({
     entryId: v.id('personalArchiveEntries'),
     chunkCount: v.number(),
   }),
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.archive.updateEntry', async (ctx, args) => {
+    setMainSpanAttributes({
+      'archive.entry_id': String(args.entryId),
+      'archive.bucket': args.bucket,
+    });
     await requireAuthUser(ctx);
     const updated = await (ctx.runMutation as any)('personalArchive:updateEntry', {
       entryId: args.entryId,
@@ -250,7 +267,7 @@ export const updateEntry = action({
       entryId: updated._id,
       chunkCount: indexed.chunkCount,
     };
-  },
+  }),
 });
 
 export const archiveEntry = action({
@@ -258,7 +275,8 @@ export const archiveEntry = action({
     entryId: v.id('personalArchiveEntries'),
   },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.archive.archiveEntry', async (ctx, args) => {
+    setMainSpanAttributes({ 'archive.entry_id': String(args.entryId) });
     await requireAuthUser(ctx);
     await (ctx.runMutation as any)('personalArchive:updateEntry', {
       entryId: args.entryId,
@@ -266,7 +284,7 @@ export const archiveEntry = action({
     });
     await deletePersonalArchiveEntryIndex(ctx, { entryId: args.entryId });
     return null;
-  },
+  }),
 });
 
 export const deleteEntry = action({
@@ -274,7 +292,8 @@ export const deleteEntry = action({
     entryId: v.id('personalArchiveEntries'),
   },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.archive.deleteEntry', async (ctx, args) => {
+    setMainSpanAttributes({ 'archive.entry_id': String(args.entryId) });
     await requireAuthUser(ctx);
     await (ctx.runMutation as any)('personalArchive:updateEntry', {
       entryId: args.entryId,
@@ -282,5 +301,5 @@ export const deleteEntry = action({
     });
     await deletePersonalArchiveEntryIndex(ctx, { entryId: args.entryId });
     return null;
-  },
+  }),
 });

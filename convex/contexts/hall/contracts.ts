@@ -68,7 +68,6 @@ export type RoundtableSingleSpeakerResponse = {
   model: string;
   retrievalModel: string;
   usedKnowledgeBase: boolean;
-  debug?: unknown;
   intent: 'speak' | 'challenge' | 'support';
   targetMemberId?: Id<'members'>;
 };

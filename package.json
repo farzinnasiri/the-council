@@ -8,6 +8,7 @@
     "dev:client": "vite",
     "ops:help": "make help",
     "check:convex": "convex codegen --typecheck enable --dry-run",
+    "check:wide-events": "tsx scripts/verify-wide-events.ts",
     "build": "npm run build:client",
     "build:client": "vite build",
     "start": "vite preview",

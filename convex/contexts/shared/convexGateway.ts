@@ -9,6 +9,8 @@ import type {
 import { listMemberChunkDocuments, searchMemberChunks } from '../../ai/ragStore';
 import { searchPersonalArchiveChunks } from '../../ai/personalArchiveStore';
 import type { ActionCtxLike, KBDigestRow } from './types';
+import { setMainSpanAttributes } from '../../observability/wideEvents';
+import { wideEventError } from '../../observability/errors';
 
 export async function runApiQuery<TResult>(
   ctx: ActionCtxLike,
@@ -38,7 +40,7 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Pr
   return await Promise.race([
     promise,
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs)
+      setTimeout(() => reject(wideEventError('runtime-timeout', `Timed out after ${timeoutMs}ms`)), timeoutMs)
     ),
   ]);
 }
@@ -63,12 +65,17 @@ export function createKnowledgeRetriever(ctx: ActionCtxLike, memberId: Id<'membe
       limit?: number;
       metadataFilter?: string;
       traceId: string;
-    }) =>
-      await searchMemberChunks(ctx, {
+    }) => {
+      setMainSpanAttributes({
+        'knowledge.member_id': String(memberId),
+        'knowledge.query.length': query.trim().length,
+      });
+      return await searchMemberChunks(ctx, {
         memberId,
         query,
         limit,
-      }),
+      });
+    },
   };
 }
 
@@ -90,13 +97,18 @@ export function createPersonalArchiveRetriever(ctx: ActionCtxLike & { vectorSear
       buckets: Array<'reflection' | 'cookie_jar' | 'accountability' | 'world_model'>;
       limit?: number;
       traceId: string;
-    }) =>
-      await searchPersonalArchiveChunks(ctx, {
+    }) => {
+      setMainSpanAttributes({
+        'archive.bucket_count': buckets.length,
+        'archive.query.length': query.trim().length,
+      });
+      return await searchPersonalArchiveChunks(ctx, {
         userId,
         query,
         allowedBuckets: buckets,
         limit,
-      }),
+      });
+    },
   };
 }
 

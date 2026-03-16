@@ -13,6 +13,8 @@ import { listActiveMessages, listAllMessages } from '../infrastructure/messagesR
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
 import { getRoundtableState } from '../infrastructure/roundtableRepo';
 import { buildRoundtableHallContext } from './chatRoundtableSpeakers';
+import { setMainSpanAttributes } from '../../../observability/wideEvents';
+import { wideEventError } from '../../../observability/errors';
 
 export async function chatRoundtableSpeakerUseCase(
   ctx: any,
@@ -24,31 +26,33 @@ export async function chatRoundtableSpeakerUseCase(
   ]);
 
   if (conversation.kind !== 'hall') {
-    throw new Error('Roundtable speaking is only supported for hall conversations');
+    throw wideEventError('roundtable-conversation-kind-invalid', 'Roundtable speaking is only supported for hall conversations', {
+      statusCode: 400,
+    });
   }
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
-    throw new Error('Conversation is not in roundtable mode');
+    throw wideEventError('roundtable-mode-invalid', 'Conversation is not in roundtable mode', { statusCode: 400 });
   }
 
   const state = await getRoundtableState(ctx, args.conversationId);
 
   if (!state || state.round.roundNumber !== args.roundNumber) {
-    throw new Error('Round not found');
+    throw wideEventError('roundtable-round-not-found', 'Round not found', { statusCode: 404 });
   }
 
   if (state.round.status !== 'awaiting_user' && state.round.status !== 'in_progress') {
-    throw new Error('Round is not open for speaking');
+    throw wideEventError('roundtable-round-not-open', 'Round is not open for speaking', { statusCode: 409 });
   }
 
   const persistedIntentRow = state.intents.find((row) => row.memberId === args.memberId);
 
   if (!persistedIntentRow) {
-    throw new Error('Member is not part of this round');
+    throw wideEventError('roundtable-member-not-in-round', 'Member is not part of this round', { statusCode: 404 });
   }
 
   if (!persistedIntentRow.selected && !args.force) {
-    throw new Error('Member is not selected for this round');
+    throw wideEventError('roundtable-member-not-selected', 'Member is not selected for this round', { statusCode: 409 });
   }
 
   const intentRow: typeof persistedIntentRow = persistedIntentRow.selected
@@ -84,10 +88,15 @@ export async function chatRoundtableSpeakerUseCase(
   });
   const member = membersById.get(args.memberId as string);
   if (!member) {
-    throw new Error('Member not found');
+    throw wideEventError('roundtable-member-not-found', 'Member not found', { statusCode: 404 });
   }
 
   const effectiveIntent = intentRow.intent === 'pass' ? 'speak' : intentRow.intent;
+  setMainSpanAttributes({
+    'hall.round_number': args.roundNumber,
+    'hall.intent': effectiveIntent,
+    'hall.force': Boolean(args.force),
+  });
   const targetName = intentRow.targetMemberId
     ? (membersById.get(intentRow.targetMemberId as string)?.name ?? 'another member')
     : undefined;
@@ -133,7 +142,6 @@ export async function chatRoundtableSpeakerUseCase(
     model: single.model ?? resolveModel('chatResponse', args.chatModel),
     retrievalModel: single.retrievalModel ?? resolveModel('retrieval', args.retrievalModel),
     usedKnowledgeBase: typeof single.usedKnowledgeBase === 'boolean' ? single.usedKnowledgeBase : true,
-    debug: single.debug,
     intent: effectiveIntent,
     targetMemberId: intentRow.targetMemberId,
   };

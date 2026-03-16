@@ -19,6 +19,8 @@ import { KB_RETENTION_MS, ensureMemberStore } from './kbIngest';
 import { extractTextFromStorage } from './ragExtraction';
 import { deleteDocumentChunks, indexDocumentChunks, listMemberChunkDocuments, searchMemberChunks, splitIntoChunks } from './ragStore';
 import { sanitizeLabel } from './graphs/utils';
+import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
+import { wideEventError } from '../observability/errors';
 
 const DIGEST_SAMPLE_CHAR_LIMIT = 6000;
 
@@ -46,12 +48,16 @@ async function processKbDocumentLifecycle(
   kbDocumentId: Id<'kbDocuments'>,
   mode: ProcessingMode
 ): Promise<KbDocumentRow | null> {
+  setMainSpanAttributes({
+    'knowledge.document_id': String(kbDocumentId),
+    'knowledge.process.mode': mode,
+  });
   const row = (await ctx.runQuery(api.kbDocuments.getById as any, {
     kbDocumentId,
     includeDeleted: false,
   })) as KbDocumentRow | null;
   if (!row) {
-    throw new Error('KB document not found');
+    throw wideEventError('knowledge-document-not-found', 'KB document not found', { statusCode: 404 });
   }
 
   await requireOwnedMember(ctx, row.memberId);
@@ -208,7 +214,10 @@ export const ensureMemberKnowledgeStore = action({
   args: {
     memberId: v.id('members'),
   },
-  handler: async (ctx, args) => await ensureMemberKnowledgeStoreUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.ensureMemberKnowledgeStore', async (ctx, args) => {
+    setMainSpanAttributes({ 'member.id': String(args.memberId) });
+    return await ensureMemberKnowledgeStoreUseCase(ctx, args);
+  }),
 });
 
 export const uploadMemberDocuments = action({
@@ -216,14 +225,23 @@ export const uploadMemberDocuments = action({
     memberId: v.id('members'),
     stagedFiles: v.array(stagedUploadInputValidator),
   },
-  handler: async (ctx, args) => await uploadMemberDocumentsUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.uploadMemberDocuments', async (ctx, args) => {
+    setMainSpanAttributes({
+      'member.id': String(args.memberId),
+      'knowledge.docs_count': args.stagedFiles.length,
+    });
+    return await uploadMemberDocumentsUseCase(ctx, args);
+  }),
 });
 
 export const listMemberKnowledgeDocuments = action({
   args: {
     memberId: v.id('members'),
   },
-  handler: async (ctx, args) => await listMemberKnowledgeDocumentsUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.listMemberKnowledgeDocuments', async (ctx, args) => {
+    setMainSpanAttributes({ 'member.id': String(args.memberId) });
+    return await listMemberKnowledgeDocumentsUseCase(ctx, args);
+  }),
 });
 
 export const deleteMemberKnowledgeDocument = action({
@@ -231,7 +249,13 @@ export const deleteMemberKnowledgeDocument = action({
     memberId: v.id('members'),
     documentName: v.string(),
   },
-  handler: async (ctx, args) => await deleteMemberKnowledgeDocumentUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.deleteMemberKnowledgeDocument', async (ctx, args) => {
+    setMainSpanAttributes({
+      'member.id': String(args.memberId),
+      'knowledge.document_name.length': args.documentName.trim().length,
+    });
+    return await deleteMemberKnowledgeDocumentUseCase(ctx, args);
+  }),
 });
 
 export const rehydrateMemberKnowledgeStore = action({
@@ -239,21 +263,33 @@ export const rehydrateMemberKnowledgeStore = action({
     memberId: v.id('members'),
     mode: v.optional(v.union(v.literal('missing-only'), v.literal('all'))),
   },
-  handler: async (ctx, args) => await rehydrateMemberKnowledgeStoreUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.rehydrateMemberKnowledgeStore', async (ctx, args) => {
+    setMainSpanAttributes({
+      'member.id': String(args.memberId),
+      'knowledge.process.mode': args.mode ?? 'missing-only',
+    });
+    return await rehydrateMemberKnowledgeStoreUseCase(ctx, args);
+  }),
 });
 
 export const purgeExpiredStagedKnowledgeDocuments = action({
   args: {
     memberId: v.optional(v.id('members')),
   },
-  handler: async (ctx, args) => await purgeExpiredStagedKnowledgeDocumentsUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.purgeExpiredStagedKnowledgeDocuments', async (ctx, args) => {
+    setMainSpanAttributes({ 'member.id': args.memberId ? String(args.memberId) : 'all' });
+    return await purgeExpiredStagedKnowledgeDocumentsUseCase(ctx, args);
+  }),
 });
 
 export const rebuildMemberKnowledgeDigests = action({
   args: {
     memberId: v.id('members'),
   },
-  handler: async (ctx, args) => await rebuildMemberKnowledgeDigestsUseCase(ctx, args),
+  handler: observeAction('ai.knowledge.rebuildMemberKnowledgeDigests', async (ctx, args) => {
+    setMainSpanAttributes({ 'member.id': String(args.memberId) });
+    return await rebuildMemberKnowledgeDigestsUseCase(ctx, args);
+  }),
 });
 
 export const createKbDocumentRecord = action({
@@ -261,10 +297,14 @@ export const createKbDocumentRecord = action({
     memberId: v.id('members'),
     stagedFile: stagedUploadInputValidator,
   },
-  handler: async (
+  handler: observeAction('ai.knowledge.createKbDocumentRecord', async (
     ctx,
     args
   ): Promise<{ kbDocumentId: Id<'kbDocuments'>; document: KbDocumentRow | null }> => {
+    setMainSpanAttributes({
+      'member.id': String(args.memberId),
+      'knowledge.docs_count': 1,
+    });
     const ensured = await ensureMemberStore(ctx, args.memberId);
     const storeName = ensured.storeName;
     const documentName = buildDocumentName(storeName, {
@@ -304,57 +344,58 @@ export const createKbDocumentRecord = action({
       kbDocumentId,
       document: row,
     };
-  },
+  }),
 });
 
 export const startKbDocumentProcessing = action({
   args: {
     kbDocumentId: v.id('kbDocuments'),
   },
-  handler: async (ctx, args): Promise<{ ok: true; document: KbDocumentRow | null }> => ({
+  handler: observeAction('ai.knowledge.startKbDocumentProcessing', async (ctx, args): Promise<{ ok: true; document: KbDocumentRow | null }> => ({
     ok: true,
     document: await processKbDocumentLifecycle(ctx, args.kbDocumentId, 'all'),
-  }),
+  })),
 });
 
 export const retryKbDocumentIndexing = action({
   args: {
     kbDocumentId: v.id('kbDocuments'),
   },
-  handler: async (ctx, args): Promise<{ ok: true; document: KbDocumentRow | null }> => ({
+  handler: observeAction('ai.knowledge.retryKbDocumentIndexing', async (ctx, args): Promise<{ ok: true; document: KbDocumentRow | null }> => ({
     ok: true,
     document: await processKbDocumentLifecycle(ctx, args.kbDocumentId, 'index-only'),
-  }),
+  })),
 });
 
 export const retryKbDocumentMetadata = action({
   args: {
     kbDocumentId: v.id('kbDocuments'),
   },
-  handler: async (ctx, args): Promise<{ ok: true; document: KbDocumentRow | null }> => ({
+  handler: observeAction('ai.knowledge.retryKbDocumentMetadata', async (ctx, args): Promise<{ ok: true; document: KbDocumentRow | null }> => ({
     ok: true,
     document: await processKbDocumentLifecycle(ctx, args.kbDocumentId, 'metadata-only'),
-  }),
+  })),
 });
 
 export const listKbDocumentsByMember = action({
   args: {
     memberId: v.id('members'),
   },
-  handler: async (ctx, args): Promise<KbDocumentRow[]> => {
+  handler: observeAction('ai.knowledge.listKbDocumentsByMember', async (ctx, args): Promise<KbDocumentRow[]> => {
+    setMainSpanAttributes({ 'member.id': String(args.memberId) });
     await requireOwnedMember(ctx, args.memberId);
     return (await ctx.runQuery(api.kbDocuments.listByMember as any, {
       memberId: args.memberId,
       includeDeleted: false,
     })) as KbDocumentRow[];
-  },
+  }),
 });
 
 export const deleteKbDocument = action({
   args: {
     kbDocumentId: v.id('kbDocuments'),
   },
-  handler: async (
+  handler: observeAction('ai.knowledge.deleteKbDocument', async (
     ctx,
     args
   ): Promise<
@@ -362,6 +403,7 @@ export const deleteKbDocument = action({
     | { ok: true; alreadyDeleted: false; deletedChunkCount: number; clearedStoreName: boolean }
     | { ok: false; error: string }
   > => {
+    setMainSpanAttributes({ 'knowledge.document_id': String(args.kbDocumentId) });
     const row = (await ctx.runQuery(api.kbDocuments.getById as any, {
       kbDocumentId: args.kbDocumentId,
       includeDeleted: true,
@@ -424,7 +466,7 @@ export const deleteKbDocument = action({
         error: error instanceof Error ? error.message : 'Delete failed',
       };
     }
-  },
+  }),
 });
 
 export const queryMemberKnowledgeChunks = action({
@@ -433,7 +475,11 @@ export const queryMemberKnowledgeChunks = action({
     query: v.string(),
     limit: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.knowledge.queryMemberKnowledgeChunks', async (ctx, args) => {
+    setMainSpanAttributes({
+      'member.id': String(args.memberId),
+      'knowledge.query.length': args.query.trim().length,
+    });
     await requireOwnedMember(ctx, args.memberId);
 
     const docs = await listMemberChunkDocuments(ctx, { memberId: args.memberId });
@@ -447,5 +493,5 @@ export const queryMemberKnowledgeChunks = action({
       docsCount: docs.length,
       ...evidence,
     };
-  },
+  }),
 });

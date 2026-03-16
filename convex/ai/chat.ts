@@ -13,6 +13,8 @@ import {
 import { startHallFollowUpThreadUseCase } from '../contexts/chamber/application/startHallFollowUpThread';
 import { createAiProvider } from '../contexts/shared/convexGateway';
 import { requireAuthUser, requireOwnedConversation } from '../contexts/shared/auth';
+import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
+import { wideEventError } from '../observability/errors';
 
 export const chatWithMember = action({
   args: {
@@ -32,7 +34,13 @@ export const chatWithMember = action({
     timeAwareReentry: v.optional(timeAwareReentryDirectiveValidator),
     guidanceDirectives: v.optional(v.array(activeGuidanceDirectiveValidator)),
   },
-  handler: async (ctx, args) => await chatWithMemberUseCase(ctx, args),
+  handler: observeAction('ai.chat.chatWithMember', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'member.id': String(args.memberId),
+    });
+    return await chatWithMemberUseCase(ctx, args);
+  }),
 });
 
 export const compactConversation = action({
@@ -50,7 +58,14 @@ export const compactConversation = action({
       })
     ),
   },
-  handler: async (ctx, args) => await compactConversationUseCase(ctx, args),
+  handler: observeAction('ai.chat.compactConversation', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'memory.scope': args.memoryScope ?? 'unknown',
+      'stats.message.count': args.messages.length,
+    });
+    return await compactConversationUseCase(ctx, args);
+  }),
 });
 
 export const summarizeHallRound = action({
@@ -66,11 +81,20 @@ export const summarizeHallRound = action({
     model: v.optional(v.string()),
   },
   returns: v.object({ summary: v.string() }),
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.chat.summarizeHallRound', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'hall.round_number': args.roundNumber,
+      'stats.message.count': args.messages.length,
+    });
     await requireAuthUser(ctx);
     const conversation = await requireOwnedConversation(ctx, args.conversationId);
     if (conversation.kind !== 'hall') {
-      throw new Error('Hall round summaries are only supported for hall conversations');
+      throw wideEventError(
+        'hall-round-summary-conversation-invalid',
+        'Hall round summaries are only supported for hall conversations',
+        { statusCode: 400 }
+      );
     }
     const provider = createAiProvider();
     const summary = await provider.summarizeHallRound({
@@ -79,7 +103,7 @@ export const summarizeHallRound = action({
       model: args.model,
     });
     return { summary };
-  },
+  }),
 });
 
 export const startHallFollowUpThread = action({
@@ -87,6 +111,11 @@ export const startHallFollowUpThread = action({
     hallConversationId: v.id('conversations'),
     hallMessageId: v.id('messages'),
   },
-  handler: async (ctx, args): Promise<StartHallFollowUpThreadResult> =>
-    await startHallFollowUpThreadUseCase(ctx, args),
+  handler: observeAction('ai.chat.startHallFollowUpThread', async (ctx, args): Promise<StartHallFollowUpThreadResult> => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.hallConversationId),
+      'message.id': String(args.hallMessageId),
+    });
+    return await startHallFollowUpThreadUseCase(ctx, args);
+  }),
 });

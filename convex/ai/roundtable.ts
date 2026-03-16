@@ -10,6 +10,7 @@ import {
 import { prepareRoundtableRoundUseCase } from '../contexts/hall/application/prepareRoundtableRound';
 import { refreshRoundtableRoundUseCase } from '../contexts/hall/application/refreshRoundtableRound';
 import { chatRoundtableSpeakerUseCase } from '../contexts/hall/application/chatRoundtableSpeaker';
+import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
 
 export const prepareRoundtableRound = action({
   args: {
@@ -54,7 +55,14 @@ export const prepareRoundtableRound = action({
       })
     ),
   }),
-  handler: async (ctx, args) => await prepareRoundtableRoundUseCase(ctx, args),
+  handler: observeAction('ai.roundtable.prepareRoundtableRound', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'hall.round.trigger': args.trigger,
+      'hall.round.mentioned_member_count': args.mentionedMemberIds?.length ?? 0,
+    });
+    return await prepareRoundtableRoundUseCase(ctx, args);
+  }),
 });
 
 export const refreshRoundtableRound = action({
@@ -98,7 +106,13 @@ export const refreshRoundtableRound = action({
       })
     ),
   }),
-  handler: async (ctx, args) => await refreshRoundtableRoundUseCase(ctx, args),
+  handler: observeAction('ai.roundtable.refreshRoundtableRound', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'hall.round_number': args.roundNumber,
+    });
+    return await refreshRoundtableRoundUseCase(ctx, args);
+  }),
 });
 
 export const chatRoundtableSpeaker = action({
@@ -117,9 +131,16 @@ export const chatRoundtableSpeaker = action({
     model: v.string(),
     retrievalModel: v.string(),
     usedKnowledgeBase: v.boolean(),
-    debug: v.optional(v.any()),
     intent: v.union(v.literal('speak'), v.literal('challenge'), v.literal('support')),
     targetMemberId: v.optional(v.id('members')),
   }),
-  handler: async (ctx, args) => await chatRoundtableSpeakerUseCase(ctx, args),
+  handler: observeAction('ai.roundtable.chatRoundtableSpeaker', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'hall.round_number': args.roundNumber,
+      'member.id': String(args.memberId),
+      'hall.force': Boolean(args.force),
+    });
+    return await chatRoundtableSpeakerUseCase(ctx, args);
+  }),
 });

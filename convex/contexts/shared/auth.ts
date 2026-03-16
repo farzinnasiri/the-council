@@ -3,6 +3,8 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import type { Id } from '../../_generated/dataModel';
 import { api } from '../../_generated/api';
+import { setMainSpanAttributes } from '../../observability/wideEvents';
+import { wideEventError } from '../../observability/errors';
 
 export interface OwnedMember {
   _id: Id<'members'>;
@@ -35,8 +37,9 @@ export interface OwnedConversation {
 export async function requireAuthUser(ctx: any): Promise<Id<'users'>> {
   const userId = await getAuthUserId(ctx);
   if (!userId) {
-    throw new Error('Not authenticated');
+    throw wideEventError('auth-user-not-authenticated', 'Not authenticated', { statusCode: 401 });
   }
+  setMainSpanAttributes({ 'user.id': String(userId) });
   return userId;
 }
 
@@ -51,8 +54,9 @@ export async function requireOwnedMember(
     includeArchived: options?.includeArchived ?? false,
   });
   if (!member) {
-    throw new Error('Member not found');
+    throw wideEventError('member-not-found', 'Member not found', { statusCode: 404 });
   }
+  setMainSpanAttributes({ 'member.id': String(member._id) });
   return member as OwnedMember;
 }
 
@@ -63,7 +67,11 @@ export async function requireOwnedConversation(
   await requireAuthUser(ctx);
   const conversation = await ctx.runQuery(api.conversations.getById, { conversationId });
   if (!conversation) {
-    throw new Error('Conversation not found');
+    throw wideEventError('conversation-not-found', 'Conversation not found', { statusCode: 404 });
   }
+  setMainSpanAttributes({
+    'conversation.id': String(conversation._id),
+    'conversation.kind': conversation.kind,
+  });
   return conversation as OwnedConversation;
 }

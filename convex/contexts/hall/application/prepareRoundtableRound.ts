@@ -13,6 +13,8 @@ import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
 import { createRoundWithIntents, getRoundtableState } from '../infrastructure/roundtableRepo';
+import { setMainSpanAttributes } from '../../../observability/wideEvents';
+import { wideEventError } from '../../../observability/errors';
 
 export async function prepareRoundtableRoundUseCase(
   ctx: any,
@@ -22,12 +24,17 @@ export async function prepareRoundtableRoundUseCase(
   const conversation = await requireOwnedConversation(ctx, args.conversationId);
 
   if (conversation.kind !== 'hall') {
-    throw new Error('Roundtable rounds are only supported for hall conversations');
+    throw wideEventError('roundtable-prepare-conversation-kind-invalid', 'Roundtable rounds are only supported for hall conversations', {
+      statusCode: 400,
+    });
   }
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
-    throw new Error('Conversation is not in roundtable mode');
+    throw wideEventError('roundtable-prepare-mode-invalid', 'Conversation is not in roundtable mode', {
+      statusCode: 400,
+    });
   }
+  setMainSpanAttributes({ 'hall.round.trigger': args.trigger });
 
   const [membersById, participants, activeMessages] = await Promise.all([
     loadActiveMembersMap(ctx),

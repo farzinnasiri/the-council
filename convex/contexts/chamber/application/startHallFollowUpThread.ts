@@ -8,6 +8,7 @@ import type { StartHallFollowUpThreadInput, StartHallFollowUpThreadResult } from
 import { listAllMessages } from '../../hall/infrastructure/messagesRepo';
 import { listActiveParticipants } from '../../hall/infrastructure/participantsRepo';
 import { listHallRoundSummaries } from '../../hall/infrastructure/memoryRepo';
+import { wideEventError } from '../../../observability/errors';
 
 function isActiveMessage(message: MessageRow) {
   return !message.deletedAt && !message.compacted && message.status !== 'error';
@@ -47,7 +48,7 @@ export async function startHallFollowUpThreadUseCase(
   const userId = await requireAuthUser(ctx);
   const conversation = await requireOwnedConversation(ctx, args.hallConversationId);
   if (conversation.kind !== 'hall') {
-    throw new Error('Hall conversation not found');
+    throw wideEventError('hall-follow-up-conversation-not-found', 'Hall conversation not found', { statusCode: 404 });
   }
 
   const [messages, participants, roundSummaries] = await Promise.all([
@@ -58,7 +59,7 @@ export async function startHallFollowUpThreadUseCase(
 
   const anchorMessage = messages.find((message) => message._id === args.hallMessageId);
   if (!anchorMessage || !isActiveMessage(anchorMessage) || anchorMessage.role !== 'member' || !anchorMessage.authorMemberId) {
-    throw new Error('Hall member message not found');
+    throw wideEventError('hall-follow-up-message-not-found', 'Hall member message not found', { statusCode: 404 });
   }
 
   const memberIds = Array.from(

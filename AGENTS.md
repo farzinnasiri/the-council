@@ -24,6 +24,7 @@ The role of this file is to describe common mistakes and confusion points that a
 ## Known Confusion Points
 
 1. The workspace path currently includes trailing spaces (`.../the-council  `). Absolute-path tooling can fail with `Not a directory` unless paths preserve those trailing spaces exactly. Prefer repo-relative paths in shell/apply_patch commands.
+2. Wide events default to essential-only output. Set `WIDE_EVENTS_VERBOSE=1` when you need the full debugging payload instead of just the baseline event plus `llm.calls`.
 
 ## Required Validation Before Finalizing
 

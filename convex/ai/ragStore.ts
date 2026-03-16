@@ -11,6 +11,7 @@ import {
   SEARCH_LIMIT_MAX,
   UPSERT_BATCH_SIZE,
 } from './ragConfig';
+import { wideEventError } from '../observability/errors';
 
 export interface RAGGroundedSnippet {
   text: string;
@@ -48,12 +49,13 @@ export async function indexDocumentChunks(
 ): Promise<{ chunkCount: number }> {
   const cleaned = input.text.trim();
   if (!cleaned) {
-    throw new Error(`No text to index for "${input.displayName}"`);
+    throw wideEventError('knowledge-index-text-missing', `No text to index for "${input.displayName}"`);
   }
 
   const splitChunks = splitIntoChunks(cleaned);
   if (splitChunks.length > MAX_INDEXED_CHUNKS) {
-    throw new Error(
+    throw wideEventError(
+      'knowledge-index-too-large',
       `Document "${input.displayName}" is too large to index (${splitChunks.length} chunks > ${MAX_INDEXED_CHUNKS}).`
     );
   }
@@ -66,7 +68,7 @@ export async function indexDocumentChunks(
     .filter((chunk) => chunk.text.length > 0);
 
   if (chunkSpecs.length === 0) {
-    throw new Error(`No non-empty chunks generated for "${input.displayName}"`);
+    throw wideEventError('knowledge-index-chunks-empty', `No non-empty chunks generated for "${input.displayName}"`);
   }
 
   await deleteDocumentChunks(ctx, {

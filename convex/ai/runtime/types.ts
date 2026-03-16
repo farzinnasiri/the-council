@@ -8,11 +8,4 @@ export interface CouncilContextMessage {
   content: string;
 }
 
-export interface TraceState {
-  traceId: string;
-  mode: 'with-context' | 'prompt-only';
-  reason?: string;
-  answerPrompt: string;
-}
-
 export type ChatModel = BaseChatModel;

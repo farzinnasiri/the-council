@@ -6,12 +6,16 @@ import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider } from '../../shared/convexGateway';
 import { listActiveMembers } from '../infrastructure/membersRepo';
 import type { RouteHallMembersInput, RouteHallMembersResult, NormalizedRouteCandidate } from '../contracts';
+import { setMainSpanAttributes } from '../../../observability/wideEvents';
+import { wideEventError } from '../../../observability/errors';
 
 export async function routeHallMembersUseCase(ctx: any, args: RouteHallMembersInput): Promise<RouteHallMembersResult> {
   await requireAuthUser(ctx);
   const conversation = await requireOwnedConversation(ctx, args.conversationId);
   if (conversation.kind !== 'hall') {
-    throw new Error('Routing is only supported for hall conversations');
+    throw wideEventError('hall-routing-conversation-kind-invalid', 'Routing is only supported for hall conversations', {
+      statusCode: 400,
+    });
   }
 
   const candidates = await listActiveMembers(ctx);
@@ -43,6 +47,7 @@ export async function routeHallMembersUseCase(ctx: any, args: RouteHallMembersIn
 
     const chosen = routed.chosenMemberIds.filter((id) => normalizedCandidates.some((candidate) => candidate.id === id));
     if (chosen.length === 0) {
+      setMainSpanAttributes({ 'routing.source': 'fallback' });
       return {
         chosenMemberIds: fallbackRouteMemberIds(args.message, normalizedCandidates, maxSelections),
         model: routed.model,
@@ -50,12 +55,14 @@ export async function routeHallMembersUseCase(ctx: any, args: RouteHallMembersIn
       };
     }
 
+    setMainSpanAttributes({ 'routing.source': 'llm' });
     return {
       chosenMemberIds: chosen.slice(0, maxSelections),
       model: routed.model,
       source: 'llm',
     };
   } catch {
+    setMainSpanAttributes({ 'routing.source': 'fallback' });
     return {
       chosenMemberIds: fallbackRouteMemberIds(args.message, normalizedCandidates, maxSelections),
       model: resolveModel('router'),

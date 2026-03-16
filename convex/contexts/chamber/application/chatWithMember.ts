@@ -7,6 +7,8 @@ import type { ChatWithMemberInput, ChatWithMemberResult } from '../contracts';
 import { ensureChamberMemberStore, listMemberDigests } from '../infrastructure/chamberRepo';
 import { getPersonalArchiveProfile } from '../../personalArchive/infrastructure/archiveRepo';
 import { defaultPersonalArchiveAccess } from '../../../personalArchiveShared';
+import { setMainSpanAttributes } from '../../../observability/wideEvents';
+import { wideEventError } from '../../../observability/errors';
 
 function buildEffectiveSystemPrompt(input: {
   systemPrompt: string;
@@ -36,8 +38,16 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
   const effectiveStoreName = ensured.storeName;
 
   if (conversation.kind === 'chamber' && conversation.chamberMemberId !== args.memberId) {
-    throw new Error('Member does not match chamber conversation');
+    throw wideEventError('chamber-member-conversation-mismatch', 'Member does not match chamber conversation', {
+      statusCode: 400,
+    });
   }
+  setMainSpanAttributes({
+    'conversation.id': String(args.conversationId),
+    'conversation.kind': conversation.kind,
+    'member.id': String(args.memberId),
+    'guidance.input_count': args.guidanceDirectives?.length ?? 0,
+  });
 
   const hallBlock = args.hallContext?.trim()
     ? `[Hall Context Addendum]\n${args.hallContext.trim()}`
@@ -118,12 +128,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     if (!hasGuidance) {
       throw error;
     }
-
-    console.error('[guidance-fallback] Chamber reply failed with guidance; retrying without guidance.', {
-      conversationId: String(args.conversationId),
-      memberId: String(args.memberId),
-      error: error instanceof Error ? error.message : String(error),
-    });
+    setMainSpanAttributes({ 'guidance.retry_without_guidance': true });
 
     return await provider.chatMember({
       ...providerInput,

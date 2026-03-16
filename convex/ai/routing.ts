@@ -6,6 +6,7 @@ import { routeHallMembersUseCase } from '../contexts/hall/application/routeHallM
 import { suggestHallTitleUseCase } from '../contexts/hall/application/suggestHallTitle';
 import { suggestMemberSpecialtiesUseCase } from '../contexts/hall/application/suggestMemberSpecialties';
 import { suggestChamberTitleUseCase } from '../contexts/chamber/application/suggestChamberTitle';
+import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
 
 export const routeHallMembers = action({
   args: {
@@ -13,7 +14,14 @@ export const routeHallMembers = action({
     message: v.string(),
     maxSelections: v.optional(v.number()),
   },
-  handler: async (ctx, args) => await routeHallMembersUseCase(ctx, args),
+  handler: observeAction('ai.routing.routeHallMembers', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'routing.max_selections': args.maxSelections ?? 3,
+      'routing.message.length': args.message.trim().length,
+    });
+    return await routeHallMembersUseCase(ctx, args);
+  }),
 });
 
 export const suggestHallTitle = action({
@@ -21,7 +29,10 @@ export const suggestHallTitle = action({
     message: v.string(),
     model: v.optional(v.string()),
   },
-  handler: async (ctx, args) => await suggestHallTitleUseCase(ctx, args),
+  handler: observeAction('ai.routing.suggestHallTitle', async (ctx, args) => {
+    setMainSpanAttributes({ 'routing.message.length': args.message.trim().length });
+    return await suggestHallTitleUseCase(ctx, args);
+  }),
 });
 
 export const suggestChamberTitle = action({
@@ -29,7 +40,10 @@ export const suggestChamberTitle = action({
     message: v.string(),
     model: v.optional(v.string()),
   },
-  handler: async (ctx, args) => await suggestChamberTitleUseCase(ctx, args),
+  handler: observeAction('ai.routing.suggestChamberTitle', async (ctx, args) => {
+    setMainSpanAttributes({ 'routing.message.length': args.message.trim().length });
+    return await suggestChamberTitleUseCase(ctx, args);
+  }),
 });
 
 export const suggestMemberSpecialties = action({
@@ -38,5 +52,11 @@ export const suggestMemberSpecialties = action({
     systemPrompt: v.string(),
     model: v.optional(v.string()),
   },
-  handler: async (ctx, args) => await suggestMemberSpecialtiesUseCase(ctx, args),
+  handler: observeAction('ai.routing.suggestMemberSpecialties', async (ctx, args) => {
+    setMainSpanAttributes({
+      'member.name.length': args.name.trim().length,
+      'member.system_prompt.length': args.systemPrompt.trim().length,
+    });
+    return await suggestMemberSpecialtiesUseCase(ctx, args);
+  }),
 });

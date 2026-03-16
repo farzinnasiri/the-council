@@ -10,6 +10,8 @@ import type { RefreshRoundtableRoundInput } from '../contracts';
 import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages } from '../infrastructure/messagesRepo';
 import { updateRoundAfterTurn, getRoundtableState } from '../infrastructure/roundtableRepo';
+import { setMainSpanAttributes } from '../../../observability/wideEvents';
+import { wideEventError } from '../../../observability/errors';
 
 export async function refreshRoundtableRoundUseCase(
   ctx: any,
@@ -19,11 +21,15 @@ export async function refreshRoundtableRoundUseCase(
   const conversation = await requireOwnedConversation(ctx, args.conversationId);
 
   if (conversation.kind !== 'hall') {
-    throw new Error('Roundtable rounds are only supported for hall conversations');
+    throw wideEventError('roundtable-refresh-conversation-kind-invalid', 'Roundtable rounds are only supported for hall conversations', {
+      statusCode: 400,
+    });
   }
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
-    throw new Error('Conversation is not in roundtable mode');
+    throw wideEventError('roundtable-refresh-mode-invalid', 'Conversation is not in roundtable mode', {
+      statusCode: 400,
+    });
   }
 
   const [state, membersById, activeMessages] = await Promise.all([
@@ -33,12 +39,13 @@ export async function refreshRoundtableRoundUseCase(
   ]);
 
   if (!state || state.round.roundNumber !== args.roundNumber) {
-    throw new Error('Round not found');
+    throw wideEventError('roundtable-refresh-round-not-found', 'Round not found', { statusCode: 404 });
   }
 
   if (state.round.status !== 'in_progress' && state.round.status !== 'awaiting_user') {
-    throw new Error('Round is not open for refresh');
+    throw wideEventError('roundtable-refresh-round-not-open', 'Round is not open for refresh', { statusCode: 409 });
   }
+  setMainSpanAttributes({ 'hall.round_number': args.roundNumber });
 
   const spokenSet = new Set(state.spokenMemberIds.map((memberId) => memberId as string));
   const recentMessages = activeMessages

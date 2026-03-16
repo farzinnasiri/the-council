@@ -35,7 +35,6 @@ interface RunRoundtableSpeakerOptions {
 }
 
 export interface RoundtableSpeakerContribution extends RoundtableSpeakerResult {
-  debug?: unknown;
   model?: string;
   retrievalModel?: string;
   usedKnowledgeBase?: boolean;
@@ -180,7 +179,6 @@ export async function runRoundtableSpeakerContribution(
       answer: stripLeadingSpeakerLabel(result.answer, member.name),
       intent: effectiveIntent,
       targetMemberId: options.intentRow.targetMemberId,
-      debug: result.debug,
       model: result.model,
       retrievalModel: result.retrievalModel,
       usedKnowledgeBase: result.usedKnowledgeBase,

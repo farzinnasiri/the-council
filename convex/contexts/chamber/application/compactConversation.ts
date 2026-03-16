@@ -3,6 +3,7 @@
 import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider } from '../../shared/convexGateway';
 import type { CompactConversationInput, CompactConversationResult } from '../contracts';
+import { wideEventError } from '../../../observability/errors';
 
 export async function compactConversationUseCase(
   ctx: any,
@@ -12,7 +13,9 @@ export async function compactConversationUseCase(
   await requireOwnedConversation(ctx, args.conversationId);
 
   if (!args.messages.length || !args.messageIds.length) {
-    throw new Error('messages and messageIds are required');
+    throw wideEventError('conversation-compaction-input-invalid', 'messages and messageIds are required', {
+      statusCode: 400,
+    });
   }
 
   const provider = createAiProvider();

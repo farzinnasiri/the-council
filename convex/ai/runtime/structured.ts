@@ -3,9 +3,22 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { HumanMessage } from '@langchain/core/messages';
 import type { ZodType } from 'zod';
+import { appendMainList, measureMainStage, incrementMainStat } from '../../observability/wideEvents';
+
+function resolveModelName(model: BaseChatModel): string {
+  const candidate =
+    (model as { model?: string }).model ??
+    (model as { modelName?: string }).modelName ??
+    ((model as { lc_kwargs?: { model?: string; modelName?: string } }).lc_kwargs?.model ??
+      (model as { lc_kwargs?: { model?: string; modelName?: string } }).lc_kwargs?.modelName);
+  return candidate ? String(candidate) : 'unknown';
+}
 
 export async function invokeText(model: BaseChatModel, prompt: string): Promise<string> {
-  const response = await model.invoke([new HumanMessage(prompt)]);
+  incrementMainStat('stats.ai.text.count', 1);
+  const response = await measureMainStage('external_ai.text', async () =>
+    await model.invoke([new HumanMessage(prompt)])
+  );
   const content = typeof response.content === 'string'
     ? response.content
     : Array.isArray(response.content)
@@ -19,7 +32,14 @@ export async function invokeText(model: BaseChatModel, prompt: string): Promise<
           })
           .join('')
       : '';
-  return content.trim();
+  const trimmed = content.trim();
+  appendMainList('llm.calls', {
+    kind: 'text',
+    model: resolveModelName(model),
+    prompt,
+    response: trimmed,
+  });
+  return trimmed;
 }
 
 export async function invokeStructured<T>(
@@ -28,7 +48,17 @@ export async function invokeStructured<T>(
   schema: ZodType<T>,
 ): Promise<T> {
   const runnable = model.withStructuredOutput(schema);
-  return (await runnable.invoke([new HumanMessage(prompt)])) as T;
+  incrementMainStat('stats.ai.structured.count', 1);
+  const output = (await measureMainStage('external_ai.structured', async () =>
+    await runnable.invoke([new HumanMessage(prompt)])
+  )) as T;
+  appendMainList('llm.calls', {
+    kind: 'structured',
+    model: resolveModelName(model),
+    prompt,
+    response: JSON.stringify(output),
+  });
+  return output;
 }
 
 export function tryParseJson<T>(raw: string): T | null {

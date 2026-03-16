@@ -19,7 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
     sendBtn.addEventListener('click', () => {
       const message = messageInput.value.trim();
       if (message) {
-        console.log('Message sent:', message);
         messageInput.value = '';
         messageInput.style.height = 'auto';
         // Show a subtle feedback
@@ -45,7 +44,6 @@ document.addEventListener('DOMContentLoaded', () => {
     item.addEventListener('click', () => {
       sessionItems.forEach(s => s.classList.remove('active'));
       item.classList.add('active');
-      console.log('Session selected:', item.querySelector('.session-title, .orbit-session-title, .glass-session-title, .canvas-convo-title, .terminal-session-title')?.textContent);
     });
   });
 
@@ -55,8 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
     card.addEventListener('click', (e) => {
       // Don't trigger if clicking a button inside
       if (e.target.tagName === 'BUTTON') return;
-      
-      console.log('Member selected:', card.querySelector('.member-name, .star-info h3, .glass-member-name, .canvas-member-name, .terminal-member-name')?.textContent);
     });
   });
 
@@ -79,6 +75,4 @@ document.addEventListener('DOMContentLoaded', () => {
       messagesArea.scrollTop = messagesArea.scrollHeight;
     }, 100);
   }
-
-  console.log('✨ The Council mockup is interactive');
 });

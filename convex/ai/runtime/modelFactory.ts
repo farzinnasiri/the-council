@@ -4,11 +4,15 @@ import { ChatGoogle } from '@langchain/google';
 import { ChatOpenAI } from '@langchain/openai';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ModelTarget } from '../modelConfig';
+import { wideEventError } from '../../observability/errors';
 
 function resolveOpenAiKey(): string {
   const key = process.env.OPENAI_KEY ?? process.env.OPENAI_API_KEY;
   if (!key) {
-    throw new Error('OPENAI_KEY (or OPENAI_API_KEY) is not set in Convex runtime env');
+    throw wideEventError(
+      'runtime-openai-key-missing',
+      'OPENAI_KEY (or OPENAI_API_KEY) is not set in Convex runtime env'
+    );
   }
   return key;
 }
@@ -16,7 +20,7 @@ function resolveOpenAiKey(): string {
 function resolveGeminiKey(): string {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
-    throw new Error('GEMINI_API_KEY is not set in Convex runtime env');
+    throw wideEventError('runtime-gemini-key-missing', 'GEMINI_API_KEY is not set in Convex runtime env');
   }
   return key;
 }

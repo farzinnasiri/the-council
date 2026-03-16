@@ -2,6 +2,8 @@
 
 import path from 'node:path';
 import type { Id } from '../_generated/dataModel';
+import { incrementMainStat, measureMainStage, setMainSpanAttributes } from '../observability/wideEvents';
+import { wideEventError } from '../observability/errors';
 
 const TEXT_EXTENSIONS = new Set([
   '.txt',
@@ -40,12 +42,12 @@ function isTextLike(mimeType?: string, displayName?: string): boolean {
 }
 
 async function extractPdfText(bytes: Buffer, displayName: string): Promise<string> {
-  const mod = await import('pdf-parse/lib/pdf-parse.js');
+  const mod = await measureMainStage('storage.pdf_import', async () => await import('pdf-parse/lib/pdf-parse.js'));
   const parsePdf = ((mod as any).default ?? mod) as (pdfBuffer: Buffer) => Promise<{ text?: string }>;
-  const parsed = await parsePdf(bytes);
+  const parsed = await measureMainStage('storage.pdf_parse', async () => await parsePdf(bytes));
   const cleaned = normalizeExtractedText(parsed?.text ?? '');
   if (!cleaned) {
-    throw new Error(`No extractable text found in PDF "${displayName}"`);
+    throw wideEventError('knowledge-pdf-text-missing', `No extractable text found in PDF "${displayName}"`);
   }
   return cleaned;
 }
@@ -58,9 +60,16 @@ export async function extractTextFromStorage(
     mimeType?: string;
   }
 ): Promise<string> {
+  incrementMainStat('stats.storage.extract_text.count', 1);
+  setMainSpanAttributes({
+    'storage.extract.mime_type': input.mimeType?.trim() || 'unknown',
+    'storage.extract.file_extension': path.extname(input.displayName).toLowerCase() || '(none)',
+  });
   const blob = await ctx.storage.get(input.storageId);
   if (!blob) {
-    throw new Error(`Staged file not found in storage: ${input.storageId}`);
+    throw wideEventError('storage-file-not-found', `Staged file not found in storage: ${input.storageId}`, {
+      statusCode: 404,
+    });
   }
 
   const bytes = Buffer.from(await blob.arrayBuffer());
@@ -71,13 +80,14 @@ export async function extractTextFromStorage(
   if (isTextLike(input.mimeType, input.displayName)) {
     const cleaned = normalizeExtractedText(bytes.toString('utf8'));
     if (!cleaned) {
-      throw new Error(`No extractable text found in "${input.displayName}"`);
+      throw wideEventError('knowledge-text-missing', `No extractable text found in "${input.displayName}"`);
     }
     return cleaned;
   }
 
   const ext = path.extname(input.displayName).toLowerCase() || '(none)';
-  throw new Error(
+  throw wideEventError(
+    'knowledge-file-type-unsupported',
     `Unsupported file type for KB ingest: "${input.displayName}" (mime=${input.mimeType ?? 'unknown'}, ext=${ext})`
   );
 }

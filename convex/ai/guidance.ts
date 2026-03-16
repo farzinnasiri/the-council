@@ -5,6 +5,8 @@ import { v } from 'convex/values';
 import { api } from '../_generated/api';
 import { createAiProvider } from '../contexts/shared/convexGateway';
 import { requireAuthUser, requireOwnedConversation, requireOwnedMember } from '../contexts/shared/auth';
+import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
+import { wideEventError } from '../observability/errors';
 
 const GUIDANCE_REFLECTION_USER_TURNS_KEY = 'chamber-guidance-reflection-user-turns';
 const DEFAULT_REFLECTION_USER_TURNS = 3;
@@ -29,7 +31,12 @@ export const generateMemberGuidanceProfile = action({
     guidanceProfilePrompt: v.string(),
     model: v.string(),
   }),
-  handler: async (ctx, args) => {
+  handler: observeAction('ai.guidance.generateMemberGuidanceProfile', async (ctx, args) => {
+    setMainSpanAttributes({
+      'member.id': String(args.memberId),
+      'guidance.force': Boolean(args.force),
+      'member.specialty_count': args.specialties?.length ?? 0,
+    });
     await requireAuthUser(ctx);
     const member = await requireOwnedMember(ctx, args.memberId, { includeArchived: true });
     if (member.guidanceProfilePrompt?.trim() && !args.force) {
@@ -55,7 +62,7 @@ export const generateMemberGuidanceProfile = action({
     });
 
     return result;
-  },
+  }),
 });
 
 export const reflectChamberGuidance = action({
@@ -86,14 +93,21 @@ export const reflectChamberGuidance = action({
     model: v.optional(v.string()),
     skippedReason: v.optional(v.string()),
   }),
-  handler: async (
+  handler: observeAction('ai.guidance.reflectChamberGuidance', async (
     ctx,
     args
   ): Promise<{ directivesCreated: number; model?: string; skippedReason?: string }> => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'guidance.trigger': args.trigger,
+      'guidance.feedback_key_count': args.feedbackKeys?.length ?? 0,
+    });
     await requireAuthUser(ctx);
     const conversation = await requireOwnedConversation(ctx, args.conversationId);
     if (conversation.kind !== 'chamber' || !conversation.chamberMemberId) {
-      throw new Error('Chamber conversation not found');
+      throw wideEventError('guidance-chamber-conversation-not-found', 'Chamber conversation not found', {
+        statusCode: 404,
+      });
     }
 
     const member = await requireOwnedMember(ctx, conversation.chamberMemberId, { includeArchived: true });
@@ -118,11 +132,13 @@ export const reflectChamberGuidance = action({
     );
 
     const userTurnCount = countUserTurns(messages);
+    setMainSpanAttributes({ 'guidance.user_turn_count': userTurnCount });
     if (
       args.trigger === 'interval' &&
       userTurnCount > 0 &&
       userTurnCount % cadence !== 0
     ) {
+      setMainSpanAttributes({ 'guidance.skipped_reason': 'interval-not-due' });
       return { directivesCreated: 0, skippedReason: 'interval-not-due' };
     }
     if (
@@ -130,6 +146,7 @@ export const reflectChamberGuidance = action({
       typeof conversation.guidanceLastReflectedUserTurnCount === 'number' &&
       conversation.guidanceLastReflectedUserTurnCount >= userTurnCount
     ) {
+      setMainSpanAttributes({ 'guidance.skipped_reason': 'already-reflected' });
       return { directivesCreated: 0, skippedReason: 'already-reflected' };
     }
 
@@ -160,12 +177,7 @@ export const reflectChamberGuidance = action({
         model: args.model,
       });
     } catch (error) {
-      console.error('[guidance-reflection] Reflection failed; skipping directive write.', {
-        conversationId: String(args.conversationId),
-        memberId: String(conversation.chamberMemberId),
-        trigger: args.trigger,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      setMainSpanAttributes({ 'guidance.skipped_reason': 'reflection-failed' });
       return { directivesCreated: 0, skippedReason: 'reflection-failed' };
     }
 
@@ -197,5 +209,5 @@ export const reflectChamberGuidance = action({
       model: result.model,
       skippedReason: directivesCreated === 0 ? 'no-directives' : undefined,
     };
-  },
+  }),
 });

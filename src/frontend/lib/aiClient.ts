@@ -32,113 +32,6 @@ interface MemberChatResult {
   retrievalModel: string;
   usedKnowledgeBase: boolean;
   usedPersonalArchive?: boolean;
-  debug?: {
-    traceId: string;
-    mode: 'with-context' | 'prompt-only';
-    reason?: string;
-    contextPlanner?: {
-      requestedSources: string[];
-      availableKnowledgeDocs: number;
-      availableArchiveBuckets: string[];
-      decisionReason: string;
-    };
-    kbCheck?: {
-      requestedStoreName: string | null;
-      docsCount: number;
-      listError?: string;
-      fileSearchInvoked: boolean;
-      gateDecision?: {
-        mode: 'heuristic' | 'llm-gate';
-        useKnowledgeBase: boolean;
-        reason: string;
-        decision?: 'required' | 'helpful' | 'unnecessary';
-        confidence?: number;
-      };
-    };
-    personalArchiveCheck?: {
-      availableBuckets: string[];
-      totalEntries: number;
-      used: boolean;
-    };
-    queryPlan?: {
-      originalQuery: string;
-      standaloneQuery: string;
-      queryAlternates: string[];
-      deepDiveQueries?: string[];
-      gateUsed: boolean;
-      gateReason: string;
-      matchedDigestSignals: string[];
-    };
-    fileSearchStart?: {
-      storeName: string;
-      retrievalModel: string;
-      query: string;
-      metadataFilter?: string;
-      alternateQuery?: string;
-    };
-    fileSearchResponse?: {
-      grounded: boolean;
-      citationsCount: number;
-      snippetsCount: number;
-      retrievalText: string;
-      citations: Array<{ title: string; uri?: string }>;
-      snippets: string[];
-      queryUsed?: string;
-      usedAlternateQuery?: boolean;
-      deepDivePasses?: Array<{
-        query: string;
-        grounded: boolean;
-        citationsCount: number;
-        snippetsCount: number;
-        retrievalText: string;
-        citations: Array<{ title: string; uri?: string }>;
-        snippets: string[];
-      }>;
-    };
-    personalArchiveSearchResponse?: {
-      grounded: boolean;
-      citationsCount: number;
-      snippetsCount: number;
-      retrievalText: string;
-      citations: Array<{ title: string; uri?: string }>;
-      snippets: string[];
-      queryUsed?: string;
-    };
-    answerPrompt: string;
-  };
-}
-
-function logCouncilDebug(memberId: string, debug: MemberChatResult['debug'] | undefined) {
-  if (!debug) return;
-  const trace = debug.traceId;
-  console.groupCollapsed(`[Council Debug][${trace}] member:${memberId} (${debug.mode})`);
-  console.log('Raw Debug Payload', debug);
-  if (debug.kbCheck) {
-    console.log('KB Check', debug.kbCheck);
-    if (debug.kbCheck.gateDecision) {
-      console.log('KB Gate Decision', debug.kbCheck.gateDecision);
-    }
-  }
-  if (debug.queryPlan) {
-    console.log('Query Plan', debug.queryPlan);
-  }
-  if (debug.contextPlanner) {
-    console.log('Context Planner', debug.contextPlanner);
-  }
-  if (debug.fileSearchStart) {
-    console.log('File Search Request', debug.fileSearchStart);
-  }
-  if (debug.fileSearchResponse) {
-    console.log('File Search Response', debug.fileSearchResponse);
-  }
-  if (debug.personalArchiveSearchResponse) {
-    console.log('Personal Archive Response', debug.personalArchiveSearchResponse);
-  }
-  console.log('Chat Model Prompt', debug.answerPrompt);
-  if (debug.reason) {
-    console.log('Fallback Reason', debug.reason);
-  }
-  console.groupEnd();
 }
 
 export async function uploadFileToConvexStorage(
@@ -377,8 +270,6 @@ export async function chatWithMember(input: {
     timeAwareReentry: input.timeAwareReentry,
   });
 
-  logCouncilDebug(input.memberId, result.debug);
-
   return result;
 }
 
@@ -422,19 +313,5 @@ export async function chatRoundtableSpeaker(input: {
   memberId: string;
   force?: boolean;
 }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
-  const result = await convexRepository.chatRoundtableSpeaker(input);
-  if (result.debug) {
-    logCouncilDebug(input.memberId, result.debug);
-  } else {
-    console.groupCollapsed(`[Council Debug][roundtable-no-debug] member:${input.memberId} (roundtable)`);
-    console.log('Roundtable debug payload missing from backend response.');
-    console.log('Raw Roundtable Response', result);
-    console.log('Conversation', input.conversationId);
-    console.log('Round', input.roundNumber);
-    console.log('Intent', result.intent);
-    console.log('Model', result.model);
-    console.log('Retrieval Model', result.retrievalModel);
-    console.groupEnd();
-  }
-  return result;
+  return await convexRepository.chatRoundtableSpeaker(input);
 }

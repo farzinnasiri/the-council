@@ -5,8 +5,8 @@ import { modelRegistry } from '../runtime/modelRegistry';
 import { createChatModel } from '../runtime/modelFactory';
 import { formatContextMessages } from '../runtime/messages';
 import { invokeStructured, invokeText } from '../runtime/structured';
-import { makeTraceId, maybeLogDebug } from '../runtime/tracing';
-import type { Citation, ContextMessage, GroundedSnippet, KBDocumentDigestHint, KnowledgeRetriever, QueryPlanDebug } from './types';
+import type { Citation, ContextMessage, GroundedSnippet, KBDocumentDigestHint, KnowledgeRetriever } from './types';
+import { getMainTraceId, setMainSpanAttributes } from '../../observability/wideEvents';
 
 type ArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
 
@@ -89,75 +89,6 @@ export interface MemberChatOutput {
   grounded: boolean;
   usedKnowledgeBase?: boolean;
   usedPersonalArchive?: boolean;
-  debug?: {
-    traceId: string;
-    mode: 'with-context' | 'prompt-only';
-    reason?: string;
-    contextPlanner?: {
-      requestedSources: string[];
-      availableKnowledgeDocs: number;
-      availableArchiveBuckets: string[];
-      decisionReason: string;
-    };
-    kbCheck?: {
-      requestedStoreName: string | null;
-      docsCount: number;
-      listError?: string;
-      fileSearchInvoked: boolean;
-      gateDecision?: {
-        mode: 'heuristic' | 'llm-gate';
-        useKnowledgeBase: boolean;
-        reason: string;
-        decision?: 'required' | 'helpful' | 'unnecessary';
-        confidence?: number;
-      };
-    };
-    personalArchiveCheck?: {
-      availableBuckets: string[];
-      totalEntries: number;
-      used: boolean;
-    };
-    queryPlan?: QueryPlanDebug;
-    fileSearchStart?: {
-      storeName: string;
-      retrievalModel: string;
-      query: string;
-      metadataFilter?: string;
-      alternateQuery?: string;
-    };
-    fileSearchResponse?: {
-      grounded: boolean;
-      citationsCount: number;
-      snippetsCount: number;
-      retrievalText: string;
-      citations: Citation[];
-      snippets: string[];
-      queryUsed?: string;
-      usedAlternateQuery?: boolean;
-      deepDivePasses?: Array<{
-        query: string;
-        grounded: boolean;
-        citationsCount: number;
-        snippetsCount: number;
-        retrievalText: string;
-        citations: Citation[];
-        snippets: string[];
-      }>;
-    };
-    personalArchiveSearchResponse?: {
-      grounded: boolean;
-      citationsCount: number;
-      snippetsCount: number;
-      retrievalText: string;
-      citations: Citation[];
-      snippets: string[];
-      queryUsed?: string;
-    };
-    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
-    retrievalProfile?: 'default' | 'deep_dive';
-    turnDirective?: 'shorter' | 'elaborate';
-    answerPrompt: string;
-  };
 }
 
 const rewriteSchema = z.object({
@@ -474,12 +405,9 @@ async function retrieveKnowledgeEvidence(
   if (!input.knowledgeRetriever || !input.storeName) {
     throw new Error('Knowledge retriever is required for knowledge-base chat mode');
   }
-
-  maybeLogDebug(process.env.GEMINI_DEBUG_LOGS === '1', 'file-search:start', {
-    traceId,
-    storeName: input.storeName,
-    query,
-    metadataFilter: input.metadataFilter ?? null,
+  setMainSpanAttributes({
+    'knowledge.retrieval.query.length': query.trim().length,
+    'knowledge.retrieval.limit': limit,
   });
 
   const retrieved = await input.knowledgeRetriever.retrieve({
@@ -606,7 +534,7 @@ async function retrieveArchiveEvidence(
 }
 
 export async function runMemberChatGraph(input: MemberChatInput): Promise<MemberChatOutput> {
-  const traceId = makeTraceId();
+  const traceId = getMainTraceId();
   const effectiveChatProfile = input.chatProfile ?? 'instant';
   const effectiveRetrievalProfile =
     input.retrievalProfile ?? (effectiveChatProfile === 'deep_dive' ? 'deep_dive' : 'default');
@@ -620,6 +548,14 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     safeListDocuments(input),
     safeListArchiveSources(input),
   ]);
+  setMainSpanAttributes({
+    'ai.chat_profile': effectiveChatProfile,
+    'ai.retrieval_profile': effectiveRetrievalProfile,
+    'knowledge.docs_count': docs.length,
+    'archive.bucket_count': archiveSourceState.availableBuckets.length,
+    'archive.entry_count': archiveSourceState.totalEntries,
+    'knowledge.list_error': Boolean(listError),
+  });
 
   const rewrite = await rewriteContextQuery(input, archiveSourceState.availableBuckets);
   const digestSignals = collectDigestSignals(rewrite.standaloneQuery, input.kbDigests ?? []);
@@ -751,6 +687,19 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
   const reason =
     contextDecisionReason ||
     (evidenceMode === 'prompt-only' ? 'no-context-selected' : undefined);
+  setMainSpanAttributes({
+    'ai.used_knowledge_base': runKnowledge,
+    'ai.used_personal_archive': runArchive,
+    'ai.context.mode': evidenceMode,
+    'ai.context.reason': reason ?? 'none',
+    'knowledge.digest_signal_count': digestSignals.length,
+    'knowledge.retrieval.grounded': Boolean(knowledgePass?.grounded),
+    'archive.retrieval.grounded': Boolean(archivePass?.grounded),
+    'knowledge.citation_count': knowledgePass?.evidence.citations.length ?? 0,
+    'archive.citation_count': archivePass?.evidence.citations.length ?? 0,
+    'knowledge.snippet_count': knowledgePass?.evidence.snippets.length ?? 0,
+    'archive.snippet_count': archivePass?.evidence.snippets.length ?? 0,
+  });
 
   return {
     answer,
@@ -760,95 +709,5 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     grounded: Boolean(knowledgePass?.grounded || archivePass?.grounded),
     usedKnowledgeBase: runKnowledge,
     usedPersonalArchive: runArchive,
-    debug: {
-      traceId,
-      mode: evidenceMode,
-      reason,
-      contextPlanner: {
-        requestedSources: [...requestedSources],
-        availableKnowledgeDocs: docs.length,
-        availableArchiveBuckets: archiveSourceState.availableBuckets,
-        decisionReason: contextDecisionReason,
-      },
-      kbCheck: {
-        requestedStoreName: input.storeName ?? null,
-        docsCount: docs.length,
-        listError,
-        fileSearchInvoked: runKnowledge,
-        gateDecision: {
-          mode:
-            input.knowledgeMode === 'force' || forceKnowledgeForDeepDive
-              ? 'heuristic'
-              : 'llm-gate',
-          useKnowledgeBase: runKnowledge,
-          reason: contextDecisionReason,
-        },
-      },
-      personalArchiveCheck: {
-        availableBuckets: archiveSourceState.availableBuckets,
-        totalEntries: archiveSourceState.totalEntries,
-        used: runArchive,
-      },
-      queryPlan: {
-        originalQuery: input.query,
-        standaloneQuery: rewrite.standaloneQuery,
-        queryAlternates:
-          effectiveRetrievalProfile === 'deep_dive'
-            ? (knowledgeResult.deepDiveQueries?.slice(1) ?? rewrite.alternates)
-            : rewrite.alternates,
-        deepDiveQueries: knowledgeResult.deepDiveQueries,
-        gateUsed: runKnowledge,
-        gateReason: contextDecisionReason,
-        matchedDigestSignals: digestSignals,
-      },
-      fileSearchStart:
-        runKnowledge && input.storeName
-          ? {
-              storeName: input.storeName,
-              retrievalModel: retrievalModelTarget.model,
-              query: rewrite.standaloneQuery,
-              metadataFilter: input.metadataFilter,
-              alternateQuery: knowledgeResult.alternateQuery,
-            }
-          : undefined,
-      fileSearchResponse:
-        runKnowledge && knowledgePass
-          ? {
-              grounded: knowledgePass.grounded,
-              citationsCount: knowledgePass.evidence.citations.length,
-              snippetsCount: knowledgePass.evidence.snippets.length,
-              retrievalText: knowledgePass.retrievalText,
-              citations: knowledgePass.evidence.citations,
-              snippets: knowledgePass.evidence.snippets.map((item) => item.text),
-              queryUsed: knowledgePass.query,
-              usedAlternateQuery: Boolean(knowledgeResult.alternateQuery && knowledgePass.query === knowledgeResult.alternateQuery),
-              deepDivePasses: knowledgeResult.deepDivePasses?.map((pass) => ({
-                query: pass.query,
-                grounded: pass.grounded,
-                citationsCount: pass.evidence.citations.length,
-                snippetsCount: pass.evidence.snippets.length,
-                retrievalText: pass.retrievalText,
-                citations: pass.evidence.citations,
-                snippets: pass.evidence.snippets.map((item) => item.text),
-              })),
-            }
-          : undefined,
-      personalArchiveSearchResponse:
-        runArchive && archivePass
-          ? {
-              grounded: archivePass.grounded,
-              citationsCount: archivePass.evidence.citations.length,
-              snippetsCount: archivePass.evidence.snippets.length,
-              retrievalText: archivePass.retrievalText,
-              citations: archivePass.evidence.citations,
-              snippets: archivePass.evidence.snippets.map((item) => item.text),
-              queryUsed: archivePass.query,
-            }
-          : undefined,
-      chatProfile: effectiveChatProfile,
-      retrievalProfile: effectiveRetrievalProfile,
-      turnDirective: input.turnDirective,
-      answerPrompt,
-    },
   };
 }

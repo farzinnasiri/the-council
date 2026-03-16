@@ -3,6 +3,7 @@
 import type { Id } from '../_generated/dataModel';
 import { embedText, embedTexts } from './openaiEmbeddings';
 import type { PersonalArchiveBucket } from '../personalArchiveShared';
+import { wideEventError } from '../observability/errors';
 
 const ARCHIVE_CHUNK_SIZE = 420;
 const ARCHIVE_CHUNK_OVERLAP = 60;
@@ -41,7 +42,10 @@ export async function indexPersonalArchiveEntry(
     return { chunkCount: 0 };
   }
   if (splitChunks.length > ARCHIVE_MAX_CHUNKS) {
-    throw new Error(`Personal Archive entry is too large to index (${splitChunks.length} chunks).`);
+    throw wideEventError(
+      'archive-entry-too-large-to-index',
+      `Personal Archive entry is too large to index (${splitChunks.length} chunks).`
+    );
   }
 
   const embedded: Array<{ chunkIndex: number; text: string; embedding: number[] }> = [];
