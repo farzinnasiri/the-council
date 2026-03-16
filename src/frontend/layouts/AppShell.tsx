@@ -295,7 +295,11 @@ export function AppShell() {
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent className="p-0">
+        <SheetContent
+          className="p-0"
+          title="Navigation menu"
+          description="Browse conversations, members, notebooks, archive, and app settings."
+        >
           <Sidebar onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>

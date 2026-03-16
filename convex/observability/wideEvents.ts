@@ -19,7 +19,7 @@ interface WideEventState {
 const storage = new AsyncLocalStorage<WideEventState>();
 
 let sink: WideEventSink = (event) => {
-  console.log(JSON.stringify(event));
+  console.log(event);
 };
 
 const ESSENTIAL_EVENT_KEYS = new Set([
@@ -135,7 +135,7 @@ export function setWideEventSinkForTests(nextSink: WideEventSink): void {
 
 export function resetWideEventSinkForTests(): void {
   sink = (event) => {
-    console.log(JSON.stringify(event));
+    console.log(event);
   };
 }
 

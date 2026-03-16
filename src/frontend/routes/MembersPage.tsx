@@ -51,6 +51,7 @@ export function MembersPage() {
   const archiveMember = useAppStore((state) => state.archiveMember);
   const uploadDocsForMember = useAppStore((state) => state.uploadDocsForMember);
   const fetchDocsForMember = useAppStore((state) => state.fetchDocsForMember);
+  const hydrateMemberDocuments = useAppStore((state) => state.hydrateMemberDocuments);
   const deleteDocForMember = useAppStore((state) => state.deleteDocForMember);
   const retryKbDocumentIndexForMember = useAppStore((state) => state.retryKbDocumentIndexForMember);
   const retryKbDocumentMetadataForMember = useAppStore((state) => state.retryKbDocumentMetadataForMember);
@@ -91,6 +92,10 @@ export function MembersPage() {
   );
   const isFormActive = isCreating || Boolean(editingMemberId);
   const showKbPanel = isCreating || Boolean(editingMemberId);
+
+  useEffect(() => {
+    void hydrateMemberDocuments();
+  }, [hydrateMemberDocuments]);
 
   useEffect(() => {
     if (!editingMemberId) {

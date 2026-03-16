@@ -53,8 +53,8 @@ export function MessageList({
     const container = containerRef.current;
     if (!container) return;
 
-    const firstId = messages[0]?.id;
-    const lastId = messages[messages.length - 1]?.id;
+    const firstId = messages[0]?.renderId ?? messages[0]?.id;
+    const lastId = messages[messages.length - 1]?.renderId ?? messages[messages.length - 1]?.id;
     const prevFirst = prevFirstMessageIdRef.current;
     const prevLast = prevLastMessageIdRef.current;
 
@@ -208,7 +208,7 @@ export function MessageList({
           if (item.kind === 'round') {
             return <RoundSeparator key={`round-${item.roundNumber}-${index}`} roundNumber={item.roundNumber} />;
           }
-          return <MessageBubble key={item.message.id} message={item.message} />;
+          return <MessageBubble key={item.message.renderId ?? item.message.id} message={item.message} />;
         })}
 
         {isRouting ? (

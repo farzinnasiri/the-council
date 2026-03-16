@@ -114,6 +114,7 @@ function toParticipant(doc: ConvexParticipantDoc): ConversationParticipant {
 function toMessage(doc: ConvexMessageDoc): Message {
   return {
     id: doc._id,
+    renderId: doc._id,
     conversationId: doc.conversationId,
     role: doc.role,
     systemKind: doc.systemKind,

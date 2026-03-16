@@ -57,6 +57,9 @@ interface AppToast {
   message: string;
 }
 
+let initializeAppPromise: Promise<void> | null = null;
+let hydrateMemberDocumentsPromise: Promise<void> | null = null;
+
 interface AppState {
   hydrated: boolean;
   isRouting: boolean;
@@ -338,9 +341,11 @@ function isExplicitContinuation(text: string): boolean {
 }
 
 function buildMessage(input: BuildMessageInput): Message {
+  const renderId = `${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
   return {
     ...input,
-    id: `${Date.now()}-${crypto.randomUUID().slice(0, 6)}`,
+    id: renderId,
+    renderId,
     compacted: false,
     createdAt: Date.now(),
   };
@@ -355,7 +360,10 @@ function replaceOptimisticMessages(
   optimisticMessages.forEach((message, index) => {
     const persisted = persistedMessages[index];
     if (persisted) {
-      replacements.set(message.id, persisted);
+      replacements.set(message.id, {
+        ...persisted,
+        renderId: message.renderId ?? message.id,
+      });
     }
   });
   if (replacements.size === 0) {
@@ -925,43 +933,55 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   initializeApp: async () => {
-    await councilRepository.init();
-    const [snapshot, policy] = await Promise.all([
-      councilRepository.getSnapshot(),
-      councilRepository.getCompactionPolicy(),
-    ]);
-
-    const conversations = snapshot.conversations
-      .filter((item) => !item.deletedAt)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-
-    const firstHall = conversations.find((item) => item.kind === 'hall');
-
-    set({
-      hydrated: true,
-      themeMode: snapshot.themeMode,
-      members: snapshot.members,
-      conversations,
-      chamberMemoryByConversation: {},
-      roundtableStateByConversation: {},
-      roundtablePreparingByConversation: {},
-      compactionPolicy: policy,
-      selectedConversationId: firstHall?.id ?? '',
-    });
-
-    const hallIds = conversations.filter((item) => item.kind === 'hall').map((item) => item.id);
-    await Promise.all(hallIds.map((conversationId) => get().refreshHallParticipants(conversationId)));
-    await Promise.all(
-      conversations
-        .filter((item) => item.kind === 'hall' && item.hallMode === 'roundtable')
-        .map((item) => get().refreshRoundtableState(item.id))
-    );
-
-    if (firstHall) {
-      await get().loadMessages(firstHall.id);
+    if (get().hydrated) return;
+    if (initializeAppPromise) {
+      await initializeAppPromise;
+      return;
     }
 
-    void get().hydrateMemberDocuments();
+    initializeAppPromise = (async () => {
+      await councilRepository.init();
+      const [snapshot, policy] = await Promise.all([
+        councilRepository.getSnapshot(),
+        councilRepository.getCompactionPolicy(),
+      ]);
+
+      const conversations = snapshot.conversations
+        .filter((item) => !item.deletedAt)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+
+      const firstHall = conversations.find((item) => item.kind === 'hall');
+
+      set({
+        hydrated: true,
+        themeMode: snapshot.themeMode,
+        members: snapshot.members,
+        conversations,
+        chamberMemoryByConversation: {},
+        roundtableStateByConversation: {},
+        roundtablePreparingByConversation: {},
+        compactionPolicy: policy,
+        selectedConversationId: firstHall?.id ?? '',
+      });
+
+      const hallIds = conversations.filter((item) => item.kind === 'hall').map((item) => item.id);
+      await Promise.all(hallIds.map((conversationId) => get().refreshHallParticipants(conversationId)));
+      await Promise.all(
+        conversations
+          .filter((item) => item.kind === 'hall' && item.hallMode === 'roundtable')
+          .map((item) => get().refreshRoundtableState(item.id))
+      );
+
+      if (firstHall) {
+        await get().loadMessages(firstHall.id);
+      }
+    })();
+
+    try {
+      await initializeAppPromise;
+    } finally {
+      initializeAppPromise = null;
+    }
   },
 
   selectConversation: (conversationId) => {
@@ -2850,30 +2870,45 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   hydrateMemberDocuments: async () => {
-    const membersWithStore = get().members.filter((m) => !m.deletedAt);
-    if (membersWithStore.length === 0) return;
+    if (hydrateMemberDocumentsPromise) {
+      await hydrateMemberDocumentsPromise;
+      return;
+    }
 
-    const results = await Promise.all(
-      membersWithStore.map(async (member) => {
-        try {
-          const docs = await listKbDocuments(member.id);
-          return { memberId: member.id, docs };
-        } catch {
-          return { memberId: member.id, docs: [] as KbDocumentLifecycle[] };
-        }
-      })
+    const missingMembers = get().members.filter(
+      (member) => !member.deletedAt && get().kbDocumentsByMember[member.id] === undefined
     );
+    if (missingMembers.length === 0) return;
 
-    set((state) => ({
-      kbDocumentsByMember: {
-        ...state.kbDocumentsByMember,
-        ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
-      },
-      memberDocuments: {
-        ...state.memberDocuments,
-        ...Object.fromEntries(results.map((result) => [result.memberId, lifecycleToMemberDocuments(result.docs)])),
-      },
-    }));
+    hydrateMemberDocumentsPromise = (async () => {
+      const results = await Promise.all(
+        missingMembers.map(async (member) => {
+          try {
+            const docs = await listKbDocuments(member.id);
+            return { memberId: member.id, docs };
+          } catch {
+            return { memberId: member.id, docs: [] as KbDocumentLifecycle[] };
+          }
+        })
+      );
+
+      set((state) => ({
+        kbDocumentsByMember: {
+          ...state.kbDocumentsByMember,
+          ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
+        },
+        memberDocuments: {
+          ...state.memberDocuments,
+          ...Object.fromEntries(results.map((result) => [result.memberId, lifecycleToMemberDocuments(result.docs)])),
+        },
+      }));
+    })();
+
+    try {
+      await hydrateMemberDocumentsPromise;
+    } finally {
+      hydrateMemberDocumentsPromise = null;
+    }
   },
 
   deleteDocForMember: async (memberId, kbDocumentId) => {

@@ -128,6 +128,7 @@ export interface MessageRouting {
 
 export interface Message {
   id: string;
+  renderId?: string;
   conversationId: string;
   role: MessageRole;
   systemKind?: SystemMessageKind;

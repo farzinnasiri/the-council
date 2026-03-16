@@ -65,8 +65,8 @@ Still never emit:
 
 Current sink:
 
-```json
-console.log(JSON.stringify(event))
+```ts
+console.log(event)
 ```
 
 This is intentionally hidden behind the observability sink interface in `convex/observability/wideEvents.ts` so future sinks can be added without touching call sites.

@@ -9,6 +9,11 @@ const SheetClose = DialogPrimitive.Close;
 
 const SheetPortal = DialogPrimitive.Portal;
 
+interface SheetContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  title?: string;
+  description?: string;
+}
+
 const SheetOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
@@ -26,8 +31,8 @@ SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+  SheetContentProps
+>(({ className, children, title = 'Panel', description = 'Modal panel content.', ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <DialogPrimitive.Content
@@ -38,6 +43,8 @@ const SheetContent = React.forwardRef<
       )}
       {...props}
     >
+      <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
+      <DialogPrimitive.Description className="sr-only">{description}</DialogPrimitive.Description>
       {children}
       <SheetClose className="absolute right-3 top-3 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
         <X className="h-4 w-4" />
