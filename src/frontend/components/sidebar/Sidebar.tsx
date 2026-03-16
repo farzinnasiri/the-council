@@ -183,7 +183,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const isFocusedThreadsView = Boolean(selectedThreadPanelMemberId && selectedThreadPanelMember);
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-x-hidden overflow-y-hidden bg-background">
       {isFocusedThreadsView ? (
         <>
           <div className="shrink-0 px-4 pb-3 pt-5">
@@ -257,7 +257,10 @@ export function Sidebar({ onNavigate }: SidebarProps) {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 overscroll-contain" onScroll={handleThreadsPanelScroll}>
+          <div
+            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-4 overscroll-contain"
+            onScroll={handleThreadsPanelScroll}
+          >
             {selectedMemberThreads.length === 0 ? (
               <div className="rounded-md border border-dashed border-border/80 px-3 py-4 text-center text-xs text-muted-foreground">
                 No threads yet
@@ -277,8 +280,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                       )}
                     >
                       <div className="flex min-w-0 items-start justify-between gap-1">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium leading-5">{thread.title}</p>
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 break-words pr-1 text-sm font-medium leading-5">{thread.title}</p>
                           <p className="truncate text-xs leading-5 text-muted-foreground">
                             {formatSessionTime(thread.updatedAt)}
                           </p>
@@ -287,7 +290,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                           <DropdownMenuTrigger asChild>
                             <button
                               type="button"
-                              className="rounded-md p-1 text-muted-foreground opacity-0 transition hover:bg-muted/60 hover:text-foreground group-hover:opacity-100"
+                              className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition hover:bg-muted/60 hover:text-foreground group-hover:opacity-100"
                               aria-label="Thread options"
                               onClick={(event) => {
                                 event.preventDefault();
@@ -380,7 +383,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
             </Button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 overscroll-contain">
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 overscroll-contain">
             <SessionGroup
               title="Hall"
               icon={<MessagesSquare className="h-3.5 w-3.5" />}
@@ -402,9 +405,9 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                         isActive ? 'bg-transparent' : 'group-hover:bg-foreground/20'
                       )}
                     />
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium leading-5">{session.title}</p>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 break-words pr-1 text-sm font-medium leading-5">{session.title}</p>
                         <p className="mt-1.5 truncate text-xs leading-5 text-muted-foreground">
                           {formatSessionTime(session.updatedAt)}
                         </p>
@@ -414,7 +417,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                           <button
                             type="button"
                             className={cn(
-                              'rounded-md p-1.5 text-muted-foreground opacity-70 transition-[background-color,color,opacity] hover:bg-muted/60 hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:opacity-100'
+                              'shrink-0 rounded-md p-1.5 text-muted-foreground opacity-70 transition-[background-color,color,opacity] hover:bg-muted/60 hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:opacity-100'
                             )}
                             aria-label="Hall options"
                             onClick={(event) => {
