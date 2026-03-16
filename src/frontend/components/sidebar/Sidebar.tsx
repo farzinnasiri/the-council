@@ -36,11 +36,34 @@ interface SidebarProps {
   onNavigate?: () => void;
 }
 
+const SIDEBAR_SECTION_STORAGE_KEY = 'the-council.sidebar.sections';
+
+function readSidebarSectionState() {
+  if (typeof window === 'undefined') {
+    return { hallOpen: true, chambersOpen: true };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_SECTION_STORAGE_KEY);
+    if (!raw) {
+      return { hallOpen: true, chambersOpen: true };
+    }
+
+    const parsed = JSON.parse(raw) as Partial<{ hallOpen: boolean; chambersOpen: boolean }>;
+    return {
+      hallOpen: parsed.hallOpen ?? true,
+      chambersOpen: parsed.chambersOpen ?? true,
+    };
+  } catch {
+    return { hallOpen: true, chambersOpen: true };
+  }
+}
+
 export function Sidebar({ onNavigate }: SidebarProps) {
   const THREAD_PAGE_SIZE = 12;
   const user = useQuery(api.users.viewer);
-  const [hallOpen, setHallOpen] = useState(true);
-  const [chambersOpen, setChambersOpen] = useState(true);
+  const [sidebarSections, setSidebarSections] = useState(readSidebarSectionState);
+  const { hallOpen, chambersOpen } = sidebarSections;
   const [focusedMemberId, setFocusedMemberId] = useState<string | null>(null);
   const [dismissedFocusedMemberId, setDismissedFocusedMemberId] = useState<string | null>(null);
   const [threadVisibleCountByMember, setThreadVisibleCountByMember] = useState<Record<string, number>>({});
@@ -124,6 +147,20 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           }
     );
   }, [THREAD_PAGE_SIZE, activeChamberMemberId, dismissedFocusedMemberId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_SECTION_STORAGE_KEY,
+        JSON.stringify({
+          hallOpen,
+          chambersOpen,
+        })
+      );
+    } catch {
+      // Ignore storage failures so the sidebar still works in restricted browsers.
+    }
+  }, [chambersOpen, hallOpen]);
 
   const openChamberMember = (memberId: string) => {
     setDismissedFocusedMemberId(null);
@@ -388,7 +425,12 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               title="Hall"
               icon={<MessagesSquare className="h-3.5 w-3.5" />}
               open={hallOpen}
-              onToggle={() => setHallOpen((current) => !current)}
+              onToggle={() =>
+                setSidebarSections((current) => ({
+                  ...current,
+                  hallOpen: !current.hallOpen,
+                }))
+              }
             >
               {halls.map((session) => {
                 const isActive = location.pathname === `/hall/${session.id}`;
@@ -481,7 +523,12 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               title="Chambers"
               icon={<MessageCirclePlus className="h-3.5 w-3.5" />}
               open={chambersOpen}
-              onToggle={() => setChambersOpen((current) => !current)}
+              onToggle={() =>
+                setSidebarSections((current) => ({
+                  ...current,
+                  chambersOpen: !current.chambersOpen,
+                }))
+              }
             >
               {activeMembers.map((member) => {
                 const threads = listChamberThreadsForMember(member.id);
