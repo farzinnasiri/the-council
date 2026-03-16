@@ -52,13 +52,14 @@ Status: In Progress (as of February 27, 2026)
 - UX requirement: first-class support on both mobile and desktop (layout, keyboard behavior, easy open/close).
 - Scope boundary: notes are conversation-scoped (not global memory) and should not block chatting.
 
-### 1.8 Response-Level User Signals (Auto-Adjustment)
-- Let users attach lightweight feedback signals to each AI response (for example: shorter, clearer, too verbose, better structure).
-- Convert these signals into automatic response-style adjustments for subsequent turns.
-- Keep controls frictionless in both Hall and Chamber so feedback does not interrupt chat flow.
-- Add guardrails to avoid overfitting to one-off signals (decay, recency weighting, reset controls).
-- Make the adaptation behavior visible and reversible by the user.
-- this task is related to the moderator  task
+### 1.8 Chamber Guidance System
+Status: Completed (March 16, 2026)
+- Completed: added a Chamber-only member guidance layer that stores short-lived thread directives instead of mutating the member persona.
+- Completed: added editable member guidance profiles in member settings, with generation from the member system prompt and manual regeneration/edit support.
+- Completed: integrated deterministic thread guidance from time-aware re-entry and response-level user feedback.
+- Completed: added Chamber message feedback controls for `Helpful`, `Not helpful`, `Shorter`, `Longer`, and `More direct`.
+- Completed: guidance directives now steer future replies through a runtime inner-compass prompt block while preserving the member’s identity.
+- Completed: added background Chamber reflection on a configurable cadence (`N` user turns, default `3`) to write temporary guidance notes for future replies.
 
 ## 2) Mid-Term (Core Capabilities)
 
@@ -138,14 +139,6 @@ Status: Completed (March 12, 2026)
   - let users enable/disable skills per member.
 - Runtime strategy: prefer precise skill directives for applicable requests instead of always loading full KB RAG context.
 - Treat this primarily as a context-engineering problem (instruction quality, activation rules, composition/conflict handling, observability).
-
-### 2.9 Chamber Moderator Reflection Loop
-- Add an optional moderator process in Chamber that runs every `N` turns.
-- Use a lightweight model to review conversation state and emit structured guidance signals for the main member model.
-- Initial signal examples: user is ranting, user is confused, user is disengaged, conversation drifted, tone mismatch.
-- Keep outputs constrained to a controlled hint taxonomy (not freeform prompt sprawl).
-- Treat moderator output as advisory context to improve response quality without changing visible user flow.
-- integrate Time aware re-entry into it, to have a coherent mechanism of the current state of the thread
 
 ## 3) Platform / Architecture Changes
 
