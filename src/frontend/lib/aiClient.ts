@@ -1,5 +1,5 @@
 import { convexRepository } from '../repository/ConvexCouncilRepository';
-import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
+import type { KbDocumentLifecycle, MessageSpeechResult } from '../repository/CouncilRepository';
 import type { RoundtableState, TimeAwareReentryGapBucket } from '../types/domain';
 
 export interface RouteResult {
@@ -127,6 +127,13 @@ export async function transcribeRecordedAudio(
     storageId: uploaded.storageId,
     mimeType: uploaded.mimeType,
   });
+}
+
+export async function synthesizeMessageSpeech(input: {
+  conversationId: string;
+  messageId: string;
+}): Promise<MessageSpeechResult> {
+  return await convexRepository.synthesizeMessageSpeech(input);
 }
 
 export async function routeHallMembers(input: {

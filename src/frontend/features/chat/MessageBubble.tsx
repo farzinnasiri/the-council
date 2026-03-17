@@ -1,4 +1,4 @@
-import { AlignJustify, Brain, Check, Copy, Expand, MessageCircle, NotebookPen, Reply, Search, SlidersHorizontal, ThumbsDown, ThumbsUp, UserCircle2 } from 'lucide-react';
+import { AlignJustify, Brain, Check, Copy, Expand, LoaderCircle, MessageCircle, NotebookPen, Reply, Search, SlidersHorizontal, Square, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
 import { useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { RoutePill } from './RoutePill';
 import { MarkdownMessage } from './MarkdownMessage';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { cn } from '../../lib/utils';
+import { useChatSpeech } from './ChatSpeechProvider';
 
 const FEEDBACK_OPTIONS = [
   { key: 'helpful', label: 'Helpful', activeLabel: 'Helpful', Icon: ThumbsUp },
@@ -45,6 +46,7 @@ export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
   const [startingFollowUp, setStartingFollowUp] = useState(false);
+  const { toggleMessage, isLoading: isSpeechLoading, isQueued: isSpeechQueued, isPlaying: isSpeechPlaying } = useChatSpeech();
   const navigate = useNavigate();
   const members = useAppStore((state) => state.members);
   const conversations = useAppStore((state) => state.conversations);
@@ -122,6 +124,56 @@ export function MessageBubble({ message }: { message: Message }) {
   );
   const activeFeedback = new Set(messageFeedbackByMessageId[message.id] ?? []);
   const activeFeedbackBadges = FEEDBACK_OPTIONS.filter(({ key }) => activeFeedback.has(key));
+  const canSpeak =
+    !isUser &&
+    message.role === 'member' &&
+    message.status === 'sent' &&
+    !message.deletedAt &&
+    !message.supersededAt &&
+    !message.compacted &&
+    Boolean(message.content.trim());
+  const speechLoading = canSpeak && isSpeechLoading(message.id);
+  const speechQueued = canSpeak && isSpeechQueued(message.id);
+  const speechPlaying = canSpeak && isSpeechPlaying(message.id);
+
+  const renderSpeechButton = (tone: 'muted' | 'user' = 'muted') => {
+    if (!canSpeak) return null;
+
+    const className =
+      tone === 'user'
+        ? 'h-6 w-6 text-background/70 hover:text-background hover:bg-background/20'
+        : cn(
+            'h-6 w-6 text-muted-foreground',
+            (speechQueued || speechPlaying) && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+          );
+
+    const title = speechPlaying
+      ? 'Stop speech'
+      : speechLoading
+        ? 'Preparing speech'
+        : speechQueued
+          ? 'Remove from playback queue'
+          : 'Play aloud';
+
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className={className}
+        onClick={() => void toggleMessage(message)}
+        title={title}
+        aria-label={title}
+      >
+        {speechLoading ? (
+          <LoaderCircle className="h-3 w-3 animate-spin" />
+        ) : speechPlaying ? (
+          <Square className="h-3 w-3 fill-current" />
+        ) : (
+          <Volume2 className="h-3 w-3" />
+        )}
+      </Button>
+    );
+  };
 
   if (isReplacementRefining) {
     return null;
@@ -279,6 +331,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                         <NotebookPen className="h-3 w-3" />
                       </Button>
+                      {renderSpeechButton()}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                       </Button>
@@ -300,6 +353,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                         <NotebookPen className="h-3 w-3" />
                       </Button>
+                      {renderSpeechButton()}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                       </Button>
@@ -326,6 +380,7 @@ export function MessageBubble({ message }: { message: Message }) {
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                   <NotebookPen className="h-3 w-3" />
                 </Button>
+                {renderSpeechButton('user')}
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 </Button>

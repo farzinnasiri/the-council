@@ -204,6 +204,24 @@ export const listReplies = query({
   },
 });
 
+export const getById = query({
+  args: {
+    conversationId: v.id('conversations'),
+    messageId: v.id('messages'),
+  },
+  returns: v.union(messageDoc, v.null()),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await getOwnedConversation(ctx, userId, args.conversationId);
+
+    const message = await getOwnedMessage(ctx, userId, args.messageId);
+    if (!message || message.conversationId !== args.conversationId) {
+      return null;
+    }
+    return message;
+  },
+});
+
 export const getConversationCounts = query({
   args: { conversationId: v.id('conversations') },
   returns: conversationCounts,

@@ -1,10 +1,11 @@
-import { Menu, NotebookPen, Plus, UserCircle2, X } from 'lucide-react';
+import { LoaderCircle, Menu, NotebookPen, Pause, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
@@ -15,6 +16,7 @@ import {
   CHAMBER_PRESENCE_POLL_INTERVAL_MS,
   TYPING_INDICATOR_INITIAL_DELAY_MS,
 } from '../../constants/presence';
+import { useChatSpeech } from '../../features/chat/ChatSpeechProvider';
 
 interface TopBarProps {
   conversation?: Conversation;
@@ -55,6 +57,16 @@ export function TopBar({
   const [presenceNow, setPresenceNow] = useState(() => Date.now());
   const [isChamberTypingVisible, setIsChamberTypingVisible] = useState(false);
   const typingVisibilityTimerRef = useRef<number | null>(null);
+  const {
+    hasPlayback,
+    currentSpeakerName,
+    currentConversationTitle,
+    currentStatus,
+    playbackRate,
+    setPlaybackRate,
+    togglePlayback,
+    skipCurrent,
+  } = useChatSpeech();
 
   useEffect(() => {
     if (!isChamber) return;
@@ -122,16 +134,84 @@ export function TopBar({
       )
     );
 
+  const playbackControls = (
+    <>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8"
+        onClick={() => void togglePlayback()}
+        aria-label={
+          currentStatus === 'playing'
+            ? 'Pause playback'
+            : currentStatus === 'loading'
+              ? 'Speech is loading'
+              : 'Resume playback'
+        }
+        disabled={currentStatus === 'loading'}
+      >
+        {currentStatus === 'loading' ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        ) : currentStatus === 'playing' ? (
+          <Pause className="h-4 w-4" />
+        ) : (
+          <Play className="h-4 w-4" />
+        )}
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-8 w-8"
+        onClick={skipCurrent}
+        aria-label="Skip current speech"
+      >
+        <SkipForward className="h-4 w-4" />
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-8 min-w-[3.5rem] rounded-full px-2.5 text-xs font-medium"
+            aria-label="Playback speed"
+          >
+            {playbackRate}x
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-28">
+          <DropdownMenuLabel>Speed</DropdownMenuLabel>
+          {[1, 1.5, 2, 2.5].map((rate) => (
+            <DropdownMenuItem
+              key={rate}
+              onSelect={(event) => {
+                event.preventDefault();
+                setPlaybackRate(rate);
+              }}
+              className="justify-between"
+            >
+              <span>{rate}x</span>
+              {playbackRate === rate ? <span className="text-[10px] text-primary">Active</span> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+
   return (
-    <header className="flex h-[74px] items-center justify-between border-b border-border bg-background px-4 md:h-16 md:px-6">
-      <div className="flex items-center gap-3">
+    <header className="grid min-h-[74px] grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 border-b border-border bg-background px-4 py-3 md:min-h-16 md:items-center md:px-6 md:py-2">
+      <div className="flex min-w-0 items-start gap-3 md:items-center">
         <Button size="icon" variant="ghost" onClick={onToggleSidebar} aria-label="Toggle sidebar">
           <Menu className="h-5 w-5" />
         </Button>
-        <div>
-          <p className="font-mono text-sm font-semibold tracking-tight">{title}</p>
+        <div className="min-w-0 flex-1">
+          <p className="max-w-[28rem] break-words font-mono text-sm font-semibold tracking-tight text-foreground md:max-w-[34rem]">
+            {title}
+          </p>
           {subtitle || showHallParticipants ? (
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground md:mt-1">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:mt-1">
               {subtitle ? <span>{subtitle}</span> : null}
               {showHallParticipants ? (
                 <CouncilMembersMenu
@@ -160,7 +240,25 @@ export function TopBar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-start justify-self-end gap-2 self-start md:items-center md:self-center">
+        {hasPlayback ? (
+          <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-1.5 py-1 shadow-sm md:flex">
+            <div className="hidden min-w-0 px-2 md:block">
+              <div className="flex items-center gap-2">
+                <Volume2 className="h-3.5 w-3.5 text-primary" />
+                <div className="min-w-0 max-w-[8.5rem] xl:max-w-[11rem]">
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {currentSpeakerName ?? 'Speech'}
+                  </p>
+                  <p className="hidden truncate text-[10px] text-muted-foreground xl:block">
+                    {currentConversationTitle ?? 'The Council'}
+                  </p>
+                </div>
+              </div>
+            </div>
+            {playbackControls}
+          </div>
+        ) : null}
         {showNotebookToggle && onToggleNotebook ? (
           <Button
             type="button"
@@ -224,6 +322,26 @@ export function TopBar({
           />
         ) : null}
       </div>
+      {hasPlayback ? (
+        <div className="col-span-2 md:hidden">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/80 bg-card px-3 py-2 shadow-sm">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Volume2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <p className="truncate text-xs font-medium text-foreground">
+                  {currentSpeakerName ?? 'Speech'}
+                </p>
+              </div>
+              <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                {currentConversationTitle ?? 'The Council'}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+              {playbackControls}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }

@@ -82,6 +82,16 @@ export interface MemberChatResult {
   usedPersonalArchive?: boolean;
 }
 
+export interface MessageSpeechResult {
+  mimeType: 'audio/mpeg';
+  segments: Array<{
+    index: number;
+    audioBase64: string;
+  }>;
+  voiceName: string;
+  cacheKey: string;
+}
+
 export interface KBDigestMetadata {
   id: string;
   memberId: string;
@@ -273,6 +283,10 @@ export interface CouncilRepository {
     storageId: string;
     mimeType?: string;
   }): Promise<{ transcript: string; model: string }>;
+  synthesizeMessageSpeech(input: {
+    conversationId: string;
+    messageId: string;
+  }): Promise<MessageSpeechResult>;
   suggestHallTitle(input: {
     message: string;
     model?: string;

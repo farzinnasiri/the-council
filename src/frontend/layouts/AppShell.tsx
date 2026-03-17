@@ -9,6 +9,7 @@ import { ConversationNotebookEditor } from '../features/notebook/ConversationNot
 import { MobileNotebookSheet } from '../features/notebook/MobileNotebookSheet';
 import { getConversationNotebookMeta } from '../features/notebook/notebookMeta';
 import { ToastHost } from '../components/ui/ToastHost';
+import { ChatSpeechProvider } from '../features/chat/ChatSpeechProvider';
 
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -216,93 +217,95 @@ export function AppShell() {
   }, [anyUploadInProgress, navigate]);
 
   return (
-    <div className="relative h-svh overflow-hidden bg-background text-foreground">
-      <div
-        className={cn(
-          'relative grid h-full md:transition-[grid-template-columns] md:duration-400 md:ease-[cubic-bezier(0.22,1,0.36,1)]',
-          desktopCollapsed ? 'md:grid-cols-[0px_1fr]' : 'md:grid-cols-[320px_1fr]'
-        )}
-      >
+    <ChatSpeechProvider>
+      <div className="relative h-svh overflow-hidden bg-background text-foreground">
         <div
           className={cn(
-            'hidden overflow-hidden md:block md:transition-[border-color] md:duration-300',
-            desktopCollapsed ? 'border-r-0' : 'border-r border-border/80'
+            'relative grid h-full md:transition-[grid-template-columns] md:duration-400 md:ease-[cubic-bezier(0.22,1,0.36,1)]',
+            desktopCollapsed ? 'md:grid-cols-[0px_1fr]' : 'md:grid-cols-[320px_1fr]'
           )}
         >
           <div
             className={cn(
-              'h-full w-[320px] md:will-change-transform md:transition-all md:duration-400 md:ease-[cubic-bezier(0.22,1,0.36,1)]',
-              desktopCollapsed && 'md:pointer-events-none md:-translate-x-4 md:opacity-0'
+              'hidden overflow-hidden md:block md:transition-[border-color] md:duration-300',
+              desktopCollapsed ? 'border-r-0' : 'border-r border-border/80'
             )}
           >
-            <Sidebar />
-          </div>
-        </div>
-
-        <div className="flex min-w-0 min-h-0 flex-col">
-          <TopBar
-            conversation={activeConversation}
-            title={headerMeta.title}
-            subtitle={headerMeta.subtitle}
-            showParticipants={headerMeta.showParticipants}
-            showNotebookToggle={canShowNotebook}
-            notebookOpen={notebookOpen}
-            onToggleNotebook={() => setNotebookOpen(!notebookOpen)}
-            onToggleSidebar={() => {
-              if (isMobile) {
-                setMobileOpen((current) => !current);
-                return;
-              }
-              setDesktopCollapsed((current) => !current);
-            }}
-          />
-          <div className="relative min-h-0 flex-1 overflow-hidden">
             <div
               className={cn(
-                'grid h-full min-h-0',
-                desktopNotebookVisible ? 'md:grid-cols-[minmax(0,1fr)_400px]' : 'grid-cols-[minmax(0,1fr)]'
+                'h-full w-[320px] md:will-change-transform md:transition-all md:duration-400 md:ease-[cubic-bezier(0.22,1,0.36,1)]',
+                desktopCollapsed && 'md:pointer-events-none md:-translate-x-4 md:opacity-0'
               )}
             >
-              <div className="min-h-0 min-w-0">
-                <Outlet />
-              </div>
-              {desktopNotebookVisible && activeConversation ? (
-                <div className="hidden min-h-0 border-l border-border md:flex">
-                  <ConversationNotebookEditor
-                    conversationId={activeConversation.id}
-                    title={notebookMeta.title}
-                    detail={notebookMeta.detail}
-                    variant="panel"
-                    onClose={() => setNotebookOpen(false)}
-                  />
-                </div>
-              ) : null}
+              <Sidebar />
             </div>
-            {mobileNotebookVisible && activeConversation ? (
-              <MobileNotebookSheet
-                open={mobileNotebookVisible}
-                conversationId={activeConversation.id}
-                title={notebookMeta.title}
-                detail={notebookMeta.detail}
-                snap={notebookMobileSnap}
-                onSnapChange={setNotebookMobileSnap}
-                onClose={() => setNotebookOpen(false)}
-              />
-            ) : null}
-            <ToastHost />
+          </div>
+
+          <div className="flex min-w-0 min-h-0 flex-col">
+            <TopBar
+              conversation={activeConversation}
+              title={headerMeta.title}
+              subtitle={headerMeta.subtitle}
+              showParticipants={headerMeta.showParticipants}
+              showNotebookToggle={canShowNotebook}
+              notebookOpen={notebookOpen}
+              onToggleNotebook={() => setNotebookOpen(!notebookOpen)}
+              onToggleSidebar={() => {
+                if (isMobile) {
+                  setMobileOpen((current) => !current);
+                  return;
+                }
+                setDesktopCollapsed((current) => !current);
+              }}
+            />
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div
+                className={cn(
+                  'grid h-full min-h-0',
+                  desktopNotebookVisible ? 'md:grid-cols-[minmax(0,1fr)_400px]' : 'grid-cols-[minmax(0,1fr)]'
+                )}
+              >
+                <div className="min-h-0 min-w-0">
+                  <Outlet />
+                </div>
+                {desktopNotebookVisible && activeConversation ? (
+                  <div className="hidden min-h-0 border-l border-border md:flex">
+                    <ConversationNotebookEditor
+                      conversationId={activeConversation.id}
+                      title={notebookMeta.title}
+                      detail={notebookMeta.detail}
+                      variant="panel"
+                      onClose={() => setNotebookOpen(false)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+              {mobileNotebookVisible && activeConversation ? (
+                <MobileNotebookSheet
+                  open={mobileNotebookVisible}
+                  conversationId={activeConversation.id}
+                  title={notebookMeta.title}
+                  detail={notebookMeta.detail}
+                  snap={notebookMobileSnap}
+                  onSnapChange={setNotebookMobileSnap}
+                  onClose={() => setNotebookOpen(false)}
+                />
+              ) : null}
+              <ToastHost />
+            </div>
           </div>
         </div>
-      </div>
 
-      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent
-          className="p-0"
-          title="Navigation menu"
-          description="Browse conversations, members, notebooks, archive, and app settings."
-        >
-          <Sidebar onNavigate={() => setMobileOpen(false)} />
-        </SheetContent>
-      </Sheet>
-    </div>
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          <SheetContent
+            className="p-0"
+            title="Navigation menu"
+            description="Browse conversations, members, notebooks, archive, and app settings."
+          >
+            <Sidebar onNavigate={() => setMobileOpen(false)} />
+          </SheetContent>
+        </Sheet>
+      </div>
+    </ChatSpeechProvider>
   );
 }

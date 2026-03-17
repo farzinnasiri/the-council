@@ -36,6 +36,7 @@ import type {
   HallTitleResult,
   KBDigestMetadata,
   KbDocumentLifecycle,
+  MessageSpeechResult,
   MemberChatResult,
   MemberSpecialtiesResult,
   RouteResult,
@@ -951,6 +952,16 @@ class ConvexCouncilRepository implements CouncilRepository {
       storageId: input.storageId as Id<'_storage'>,
       mimeType: input.mimeType,
     })) as { transcript: string; model: string };
+  }
+
+  async synthesizeMessageSpeech(input: {
+    conversationId: string;
+    messageId: string;
+  }): Promise<MessageSpeechResult> {
+    return (await this.client.action(api.ai.voice.synthesizeMessageSpeech as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      messageId: input.messageId as Id<'messages'>,
+    })) as MessageSpeechResult;
   }
 
   async suggestHallTitle(input: { message: string; model?: string }): Promise<HallTitleResult> {
