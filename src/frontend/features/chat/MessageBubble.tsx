@@ -1,4 +1,4 @@
-import { AlignJustify, Brain, Check, Copy, Expand, LoaderCircle, MessageCircle, NotebookPen, Reply, Search, SlidersHorizontal, Square, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
+import { AlignJustify, Brain, Check, Copy, Expand, LoaderCircle, MessageCircle, NotebookPen, Pin, Reply, Search, SlidersHorizontal, Square, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
 import { useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
@@ -56,6 +56,9 @@ export function MessageBubble({ message }: { message: Message }) {
   const messageFeedbackByMessageId = useAppStore((state) => state.messageFeedbackByMessageId);
   const refineLatestChamberResponse = useAppStore((state) => state.refineLatestChamberResponse);
   const setMessageFeedback = useAppStore((state) => state.setMessageFeedback);
+  const setMessagePinned = useAppStore((state) => state.setMessagePinned);
+  const retryFailedMessage = useAppStore((state) => state.retryFailedMessage);
+  const retryingMessageIds = useAppStore((state) => state.retryingMessageIds);
   const startHallFollowUpThread = useAppStore((state) => state.startHallFollowUpThread);
   const showToast = useAppStore((state) => state.showToast);
 
@@ -124,6 +127,24 @@ export function MessageBubble({ message }: { message: Message }) {
   );
   const activeFeedback = new Set(messageFeedbackByMessageId[message.id] ?? []);
   const activeFeedbackBadges = FEEDBACK_OPTIONS.filter(({ key }) => activeFeedback.has(key));
+  const canPin =
+    Boolean(
+      isChamber &&
+      message.status === 'sent' &&
+      !message.deletedAt &&
+      !message.supersededAt &&
+      !message.compacted &&
+      message.role !== 'system'
+    );
+  const isPinned = Boolean(message.pinnedAt);
+  const isRetrying = Boolean(retryingMessageIds[message.id]);
+  const canRetryFailedGeneration =
+    Boolean(
+      message.role === 'member' &&
+      message.status === 'error' &&
+      !message.deletedAt &&
+      !message.supersededAt
+    );
   const canSpeak =
     !isUser &&
     message.role === 'member' &&
@@ -171,6 +192,38 @@ export function MessageBubble({ message }: { message: Message }) {
         ) : (
           <Volume2 className="h-3 w-3" />
         )}
+      </Button>
+    );
+  };
+
+  const renderPinButton = (tone: 'muted' | 'user' = 'muted') => {
+    if (!canPin) return null;
+
+    const className =
+      tone === 'user'
+        ? cn(
+            'h-6 w-6',
+            isPinned
+              ? 'bg-background/20 text-background hover:bg-background/25 hover:text-background'
+              : 'text-background/70 hover:text-background hover:bg-background/20'
+          )
+        : cn(
+            'h-6 w-6',
+            isPinned
+              ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+              : 'text-muted-foreground'
+          );
+
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className={className}
+        onClick={() => void setMessagePinned(message.id, !isPinned)}
+        title={isPinned ? 'Unpin from thread context' : 'Pin to thread context'}
+        aria-label={isPinned ? 'Unpin from thread context' : 'Pin to thread context'}
+      >
+        <Pin className="h-3 w-3" />
       </Button>
     );
   };
@@ -230,6 +283,20 @@ export function MessageBubble({ message }: { message: Message }) {
             {message.status === 'error' && message.error ? (
               <div className="mt-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive/90">
                 {message.error}
+              </div>
+            ) : null}
+            {canRetryFailedGeneration ? (
+              <div className="mt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-md px-2 text-[11px]"
+                  onClick={() => void retryFailedMessage(message.id)}
+                  disabled={isRetrying}
+                >
+                  {isRetrying ? <LoaderCircle className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  {isRetrying ? 'Retrying' : 'Retry'}
+                </Button>
               </div>
             ) : null}
 
@@ -331,6 +398,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                         <NotebookPen className="h-3 w-3" />
                       </Button>
+                      {renderPinButton()}
                       {renderSpeechButton()}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -380,6 +448,7 @@ export function MessageBubble({ message }: { message: Message }) {
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                   <NotebookPen className="h-3 w-3" />
                 </Button>
+                {renderPinButton('user')}
                 {renderSpeechButton('user')}
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}

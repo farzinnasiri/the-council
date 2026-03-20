@@ -10,6 +10,9 @@ import type {
   ConversationParticipant,
   RoundtableState,
   Member,
+  MemberMemoryDocument,
+  MemberMemoryEpisode,
+  MemberMemoryRefreshState,
   Message,
   MessageFeedback,
   MessageFeedbackKey,
@@ -137,6 +140,7 @@ function toMessage(doc: ConvexMessageDoc): Message {
     roundNumber: doc.roundNumber,
     roundIntent: doc.roundIntent,
     roundTargetMemberId: doc.roundTargetMemberId,
+    pinnedAt: doc.pinnedAt,
     error: doc.error,
     createdAt: doc._creationTime,
   };
@@ -196,6 +200,51 @@ function toConversationNotebook(doc: any): ConversationNotebook {
     updatedAt: doc.updatedAt,
     createdAt: doc._creationTime,
     archivedAt: doc.archivedAt,
+  };
+}
+
+function toMemberMemoryDocument(doc: any): MemberMemoryDocument {
+  return {
+    id: doc._id,
+    memberId: doc.memberId,
+    body: doc.body,
+    lockedByUser: Boolean(doc.lockedByUser),
+    generatedAt: doc.generatedAt,
+    updatedAt: doc.updatedAt,
+    userEditedAt: doc.userEditedAt,
+    lastProcessedMessageAt: doc.lastProcessedMessageAt,
+  };
+}
+
+function toMemberMemoryEpisode(doc: any): MemberMemoryEpisode {
+  return {
+    id: doc._id,
+    memberId: doc.memberId,
+    title: doc.title,
+    body: doc.body,
+    lockedByUser: Boolean(doc.lockedByUser),
+    archivedAt: doc.archivedAt,
+    generatedAt: doc.generatedAt,
+    updatedAt: doc.updatedAt,
+    userEditedAt: doc.userEditedAt,
+    lastProcessedMessageAt: doc.lastProcessedMessageAt,
+  };
+}
+
+function toMemberMemoryRefreshState(doc: any): MemberMemoryRefreshState {
+  return {
+    id: doc._id,
+    memberId: doc.memberId,
+    processing: Boolean(doc.processing),
+    processingStartedAt: doc.processingStartedAt,
+    nextEligibleAt: doc.nextEligibleAt,
+    lastRunAt: doc.lastRunAt,
+    lastSuccessAt: doc.lastSuccessAt,
+    lastFailureAt: doc.lastFailureAt,
+    retryCount: doc.retryCount,
+    lastProcessedMessageAt: doc.lastProcessedMessageAt,
+    lastError: doc.lastError,
+    updatedAt: doc.updatedAt,
   };
 }
 
@@ -377,6 +426,68 @@ class ConvexCouncilRepository implements CouncilRepository {
       specialties: input.specialties,
       force: input.force,
     })) as { guidanceProfilePrompt: string; model: string };
+  }
+
+  async getMemberMemoryBundle(memberId: string): Promise<{
+    interactionPolicy: MemberMemoryDocument | null;
+    mentalModel: MemberMemoryDocument | null;
+    episodes: MemberMemoryEpisode[];
+    refreshState: MemberMemoryRefreshState | null;
+  }> {
+    const result = await this.clientAny.query('memberMemories:getBundle', {
+      memberId: memberId as Id<'members'>,
+    });
+    return {
+      interactionPolicy: result.interactionPolicy ? toMemberMemoryDocument(result.interactionPolicy) : null,
+      mentalModel: result.mentalModel ? toMemberMemoryDocument(result.mentalModel) : null,
+      episodes: (result.episodes ?? []).map(toMemberMemoryEpisode),
+      refreshState: result.refreshState ? toMemberMemoryRefreshState(result.refreshState) : null,
+    };
+  }
+
+  async saveMemberInteractionPolicy(input: { memberId: string; body: string }): Promise<MemberMemoryDocument | null> {
+    const result = await this.clientAny.mutation('memberMemories:saveInteractionPolicy', {
+      memberId: input.memberId as Id<'members'>,
+      body: input.body,
+    });
+    return result ? toMemberMemoryDocument(result) : null;
+  }
+
+  async saveMemberMentalModel(input: { memberId: string; body: string }): Promise<MemberMemoryDocument | null> {
+    const result = await this.clientAny.mutation('memberMemories:saveMentalModel', {
+      memberId: input.memberId as Id<'members'>,
+      body: input.body,
+    });
+    return result ? toMemberMemoryDocument(result) : null;
+  }
+
+  async unlockMemberMemory(input: { memberId: string; kind: 'interaction_policy' | 'mental_model' }): Promise<void> {
+    await this.clientAny.mutation('memberMemories:unlockSingleton', {
+      memberId: input.memberId as Id<'members'>,
+      kind: input.kind,
+    });
+  }
+
+  async queueMemberMemoryRefresh(input: { memberId: string; force?: boolean }): Promise<{ scheduled: boolean }> {
+    return await this.clientAny.mutation('memberMemories:queueRefresh', {
+      memberId: input.memberId as Id<'members'>,
+      force: input.force,
+    });
+  }
+
+  async updateMemberMemoryEpisode(input: {
+    episodeId: string;
+    title?: string;
+    body?: string;
+    archivedAt?: number | null;
+  }): Promise<MemberMemoryEpisode | null> {
+    const result = await this.clientAny.action('memberMemories:updateEpisode', {
+      episodeId: input.episodeId as Id<'memberUserEpisodes'>,
+      title: input.title,
+      body: input.body,
+      archivedAt: input.archivedAt,
+    });
+    return result ? toMemberMemoryEpisode(result) : null;
   }
 
   async generateUploadUrl(): Promise<string> {
@@ -670,6 +781,17 @@ class ConvexCouncilRepository implements CouncilRepository {
     return rows.map(toMessageFeedback);
   }
 
+  async setMessagePinned(input: {
+    messageId: string;
+    active: boolean;
+  }): Promise<Message | null> {
+    const doc = await this.clientAny.mutation('messages:setPinned', {
+      messageId: input.messageId as Id<'messages'>,
+      active: input.active,
+    });
+    return doc ? toMessage(doc) : null;
+  }
+
   async syncFeedbackGuidanceDirectives(input: {
     messageId: string;
   }): Promise<{ directivesCreated: number; activeKeys: MessageFeedbackKey[] }> {
@@ -839,6 +961,13 @@ class ConvexCouncilRepository implements CouncilRepository {
       })),
     });
     return rows.map(toMessage);
+  }
+
+  async discardMessage(messageId: string): Promise<Message | null> {
+    const doc = await this.clientAny.mutation('messages:discard', {
+      messageId: messageId as Id<'messages'>,
+    });
+    return doc ? toMessage(doc) : null;
   }
 
   async replaceWithRefinement(input: {

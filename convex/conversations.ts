@@ -85,6 +85,7 @@ const messageDoc = v.object({
   roundNumber: v.optional(v.number()),
   roundIntent: v.optional(v.union(v.literal('speak'), v.literal('challenge'), v.literal('support'))),
   roundTargetMemberId: v.optional(v.id('members')),
+  pinnedAt: v.optional(v.number()),
   error: v.optional(v.string()),
 });
 
@@ -659,7 +660,7 @@ export const applyCompaction = mutation({
     await Promise.all(
       args.compactedMessageIds.map(async (id) => {
         const row = await ctx.db.get(id);
-        if (row && row.conversationId === conversation._id && row.userId === userId) {
+        if (row && row.conversationId === conversation._id && row.userId === userId && !row.pinnedAt) {
           await ctx.db.patch(id, { compacted: true });
         }
       })

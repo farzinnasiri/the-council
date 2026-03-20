@@ -77,7 +77,8 @@ export default defineSchema({
     .index('by_user', ['userId'])
     .index('by_user_kind', ['userId', 'kind'])
     .index('by_user_kind_member', ['userId', 'kind', 'chamberMemberId'])
-    .index('by_user_kind_member_updated', ['userId', 'kind', 'chamberMemberId', 'updatedAt']),
+    .index('by_user_kind_member_updated', ['userId', 'kind', 'chamberMemberId', 'updatedAt'])
+    .index('by_kind_updated', ['kind', 'updatedAt']),
 
   conversationParticipants: defineTable({
     conversationId: v.id('conversations'),
@@ -233,10 +234,12 @@ export default defineSchema({
       v.union(v.literal('speak'), v.literal('challenge'), v.literal('support')),
     ),
     roundTargetMemberId: v.optional(v.id('members')),
+    pinnedAt: v.optional(v.number()),
     error: v.optional(v.string()),
   })
     .index('by_conversation', ['conversationId'])
     .index('by_conversation_active', ['conversationId', 'compacted'])
+    .index('by_conversation_pinned', ['conversationId', 'pinnedAt'])
     .index('by_conversation_parent', ['conversationId', 'inReplyToMessageId'])
     .index('by_origin', ['originConversationId', 'originMessageId']),
 
@@ -405,4 +408,66 @@ export default defineSchema({
       dimensions: 1536,
       filterFields: ['userId', 'bucket'],
     }),
+
+  memberUserInteractionPolicies: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    body: v.string(),
+    lockedByUser: v.boolean(),
+    generatedAt: v.number(),
+    updatedAt: v.number(),
+    userEditedAt: v.optional(v.number()),
+    lastProcessedMessageAt: v.optional(v.number()),
+  })
+    .index('by_user_member', ['userId', 'memberId']),
+
+  memberUserMentalModels: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    body: v.string(),
+    lockedByUser: v.boolean(),
+    generatedAt: v.number(),
+    updatedAt: v.number(),
+    userEditedAt: v.optional(v.number()),
+    lastProcessedMessageAt: v.optional(v.number()),
+  })
+    .index('by_user_member', ['userId', 'memberId']),
+
+  memberUserEpisodes: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    title: v.optional(v.string()),
+    body: v.string(),
+    embedding: v.array(v.float64()),
+    lockedByUser: v.boolean(),
+    archivedAt: v.optional(v.number()),
+    generatedAt: v.number(),
+    updatedAt: v.number(),
+    userEditedAt: v.optional(v.number()),
+    lastProcessedMessageAt: v.optional(v.number()),
+  })
+    .index('by_user_member_updated', ['userId', 'memberId', 'updatedAt'])
+    .index('by_user_member_archived_updated', ['userId', 'memberId', 'archivedAt', 'updatedAt'])
+    .vectorIndex('by_embedding', {
+      vectorField: 'embedding',
+      dimensions: 1536,
+      filterFields: ['userId', 'memberId'],
+    }),
+
+  memberMemoryRefreshStates: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    processing: v.boolean(),
+    processingStartedAt: v.optional(v.number()),
+    nextEligibleAt: v.number(),
+    lastRunAt: v.optional(v.number()),
+    lastSuccessAt: v.optional(v.number()),
+    lastFailureAt: v.optional(v.number()),
+    retryCount: v.number(),
+    lastProcessedMessageAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index('by_user_member', ['userId', 'memberId'])
+    .index('by_next_eligible', ['nextEligibleAt']),
 });

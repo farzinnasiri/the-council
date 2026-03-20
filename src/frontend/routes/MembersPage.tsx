@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Expand, Loader2, MessageSquarePlus, Pencil, Plus, RefreshCcw, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
+import { Archive, CircleHelp, Expand, Loader2, MessageSquarePlus, Pencil, Plus, RefreshCcw, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
 import type { KBDigestMetadata } from '../repository/CouncilRepository';
-import type { PersonalArchiveAccess } from '../types/domain';
+import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, PersonalArchiveAccess } from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
 
 interface MemberFormState {
@@ -28,6 +29,15 @@ interface DigestEditorState {
   styleAnchors: string;
   digestSummary: string;
 }
+
+interface MemberMemoryBundleState {
+  interactionPolicy: MemberMemoryDocument | null;
+  mentalModel: MemberMemoryDocument | null;
+  episodes: MemberMemoryEpisode[];
+  refreshState: MemberMemoryRefreshState | null;
+}
+
+type ExpandedMemberMemoryEditor = 'interaction_policy' | 'mental_model';
 
 const emptyForm: MemberFormState = {
   name: '',
@@ -80,6 +90,11 @@ export function MembersPage() {
   const [isDigestEditorOpen, setIsDigestEditorOpen] = useState(false);
   const [isSavingDigest, setIsSavingDigest] = useState(false);
   const [isRetryingDigestFromEditor, setIsRetryingDigestFromEditor] = useState(false);
+  const [memberMemoryBundle, setMemberMemoryBundle] = useState<MemberMemoryBundleState | null>(null);
+  const [isMemberMemoryLoading, setIsMemberMemoryLoading] = useState(false);
+  const [memberMemoryError, setMemberMemoryError] = useState<string | null>(null);
+  const [isMemberMemoryDialogOpen, setIsMemberMemoryDialogOpen] = useState(false);
+  const [expandedMemberMemoryEditor, setExpandedMemberMemoryEditor] = useState<ExpandedMemberMemoryEditor | null>(null);
 
   const activeMembers = useMemo(() => members.filter((member) => !member.deletedAt), [members]);
   const archivedMembers = useMemo(() => members.filter((member) => Boolean(member.deletedAt)), [members]);
@@ -102,11 +117,17 @@ export function MembersPage() {
       setKbDigests([]);
       setDigestLoadError(null);
       setKbPanelError(null);
+      setMemberMemoryBundle(null);
+      setMemberMemoryError(null);
+      setIsMemberMemoryDialogOpen(false);
+      setExpandedMemberMemoryEditor(null);
       return;
     }
     setBusyMemberId(editingMemberId);
     setIsDigestLoading(true);
     setDigestLoadError(null);
+    setIsMemberMemoryLoading(true);
+    setMemberMemoryError(null);
     void fetchDocsForMember(editingMemberId).finally(() => setBusyMemberId(null));
     void convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
       .then((rows) => setKbDigests(rows))
@@ -118,6 +139,10 @@ export function MembersPage() {
         setBusyMemberId(null);
         setIsDigestLoading(false);
       });
+    void convexRepository.getMemberMemoryBundle(editingMemberId)
+      .then((bundle) => setMemberMemoryBundle(bundle))
+      .catch(() => setMemberMemoryError('Could not load member memory.'))
+      .finally(() => setIsMemberMemoryLoading(false));
   }, [editingMemberId, fetchDocsForMember]);
 
   useEffect(() => {
@@ -162,6 +187,10 @@ export function MembersPage() {
     setDigestLoadError(null);
     setDigestEditor(null);
     setIsDigestEditorOpen(false);
+    setMemberMemoryBundle(null);
+    setMemberMemoryError(null);
+    setIsMemberMemoryDialogOpen(false);
+    setExpandedMemberMemoryEditor(null);
   };
 
   const startEdit = (memberId: string) => {
@@ -181,6 +210,9 @@ export function MembersPage() {
     setDigestLoadError(null);
     setDigestEditor(null);
     setIsDigestEditorOpen(false);
+    setMemberMemoryError(null);
+    setIsMemberMemoryDialogOpen(false);
+    setExpandedMemberMemoryEditor(null);
   };
 
   const resetForm = () => {
@@ -197,6 +229,10 @@ export function MembersPage() {
     setKbPanelError(null);
     setDigestEditor(null);
     setIsDigestEditorOpen(false);
+    setMemberMemoryBundle(null);
+    setMemberMemoryError(null);
+    setIsMemberMemoryDialogOpen(false);
+    setExpandedMemberMemoryEditor(null);
   };
 
   const uploadAvatarForMember = async (memberId: string, blob: Blob) => {
@@ -444,6 +480,134 @@ export function MembersPage() {
     }
   };
 
+  const refreshMemberMemory = async (force = false) => {
+    if (!editingMemberId) return;
+    setIsMemberMemoryLoading(true);
+    setMemberMemoryError(null);
+    try {
+      await convexRepository.queueMemberMemoryRefresh({ memberId: editingMemberId, force });
+      const bundle = await convexRepository.getMemberMemoryBundle(editingMemberId);
+      setMemberMemoryBundle(bundle);
+    } catch (error) {
+      setMemberMemoryError(error instanceof Error ? error.message : 'Could not refresh member memory.');
+    } finally {
+      setIsMemberMemoryLoading(false);
+    }
+  };
+
+  const updateMemberMemoryDocumentBody = (kind: ExpandedMemberMemoryEditor, body: string) => {
+    setMemberMemoryBundle((current) => {
+      if (!current || !editingMemberId) return current;
+      if (kind === 'interaction_policy') {
+        return {
+          ...current,
+          interactionPolicy: current.interactionPolicy
+            ? { ...current.interactionPolicy, body }
+            : {
+                id: 'draft-interaction-policy',
+                memberId: editingMemberId,
+                body,
+                lockedByUser: true,
+                generatedAt: Date.now(),
+                updatedAt: Date.now(),
+              },
+        };
+      }
+      return {
+        ...current,
+        mentalModel: current.mentalModel
+          ? { ...current.mentalModel, body }
+          : {
+              id: 'draft-mental-model',
+              memberId: editingMemberId,
+              body,
+              lockedByUser: true,
+              generatedAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+      };
+    });
+  };
+
+  const saveInteractionPolicy = async () => {
+    if (!editingMemberId || !memberMemoryBundle?.interactionPolicy) return;
+    setMemberMemoryError(null);
+    try {
+      const saved = await convexRepository.saveMemberInteractionPolicy({
+        memberId: editingMemberId,
+        body: memberMemoryBundle.interactionPolicy.body,
+      });
+      setMemberMemoryBundle((current) => current ? { ...current, interactionPolicy: saved } : current);
+    } catch (error) {
+      setMemberMemoryError(error instanceof Error ? error.message : 'Could not save interaction policy.');
+    }
+  };
+
+  const saveMentalModel = async () => {
+    if (!editingMemberId || !memberMemoryBundle?.mentalModel) return;
+    setMemberMemoryError(null);
+    try {
+      const saved = await convexRepository.saveMemberMentalModel({
+        memberId: editingMemberId,
+        body: memberMemoryBundle.mentalModel.body,
+      });
+      setMemberMemoryBundle((current) => current ? { ...current, mentalModel: saved } : current);
+    } catch (error) {
+      setMemberMemoryError(error instanceof Error ? error.message : 'Could not save mental model.');
+    }
+  };
+
+  const unlockMemberMemory = async (kind: 'interaction_policy' | 'mental_model') => {
+    if (!editingMemberId) return;
+    setMemberMemoryError(null);
+    try {
+      await convexRepository.unlockMemberMemory({ memberId: editingMemberId, kind });
+      const bundle = await convexRepository.getMemberMemoryBundle(editingMemberId);
+      setMemberMemoryBundle(bundle);
+    } catch (error) {
+      setMemberMemoryError(error instanceof Error ? error.message : 'Could not unlock member memory.');
+    }
+  };
+
+  const regenerateMemberMemory = async (kind: 'interaction_policy' | 'mental_model') => {
+    await unlockMemberMemory(kind);
+    await refreshMemberMemory(true);
+  };
+
+  const saveEpisode = async (episodeId: string) => {
+    const episode = memberMemoryBundle?.episodes.find((item) => item.id === episodeId);
+    if (!episode) return;
+    setMemberMemoryError(null);
+    try {
+      const updated = await convexRepository.updateMemberMemoryEpisode({
+        episodeId,
+        title: episode.title,
+        body: episode.body,
+      });
+      if (!updated) return;
+      setMemberMemoryBundle((current) => current
+        ? { ...current, episodes: current.episodes.map((item) => (item.id === episodeId ? updated : item)) }
+        : current);
+    } catch (error) {
+      setMemberMemoryError(error instanceof Error ? error.message : 'Could not save episode.');
+    }
+  };
+
+  const toggleEpisodeArchive = async (episodeId: string, archived: boolean) => {
+    setMemberMemoryError(null);
+    try {
+      await convexRepository.updateMemberMemoryEpisode({
+        episodeId,
+        archivedAt: archived ? null : Date.now(),
+      });
+      if (!editingMemberId) return;
+      const bundle = await convexRepository.getMemberMemoryBundle(editingMemberId);
+      setMemberMemoryBundle(bundle);
+    } catch (error) {
+      setMemberMemoryError(error instanceof Error ? error.message : 'Could not update episode.');
+    }
+  };
+
   const normalizeDocKey = (value?: string) => (value ?? '').trim().toLowerCase();
   const digestByDocumentName = new Map(
     kbDigests
@@ -633,6 +797,75 @@ export function MembersPage() {
                     : 'Generated from the system prompt after save. Existing members can generate it manually.'}
                 </p>
               </label>
+
+              <section className="rounded-md border border-border bg-background/50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      Member Memory
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                      Chamber-only long-term memory for this member. Open the editor to inspect or update the full details.
+                    </p>
+                  </div>
+                </div>
+
+                {memberMemoryError ? (
+                  <p className="mt-2 font-mono text-[11px] text-destructive">{memberMemoryError}</p>
+                ) : null}
+
+                {!editingMemberId ? (
+                  <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+                    Save this member first to inspect or edit member memory.
+                  </p>
+                ) : null}
+
+                {editingMemberId && memberMemoryBundle ? (
+                  <div className="mt-4 rounded-md border border-border/70 bg-background/70 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                            Interaction policy: {memberMemoryBundle.interactionPolicy?.lockedByUser ? 'Locked' : memberMemoryBundle.interactionPolicy ? 'Generated' : 'Empty'}
+                          </span>
+                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                            Mental model: {memberMemoryBundle.mentalModel?.lockedByUser ? 'Locked' : memberMemoryBundle.mentalModel ? 'Generated' : 'Empty'}
+                          </span>
+                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                            Episodes: {memberMemoryBundle.episodes.length}
+                          </span>
+                        </div>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          Open the modal to inspect, edit, archive, regenerate, or refresh member memory.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                          onClick={() => void refreshMemberMemory(true)}
+                          disabled={!editingMemberId || isMemberMemoryLoading}
+                        >
+                          {isMemberMemoryLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
+                          Refresh
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                          onClick={() => setIsMemberMemoryDialogOpen(true)}
+                        >
+                          <Expand className="h-3 w-3" />
+                          Open
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
 
               <section className="rounded-md border border-border bg-background/50 p-3">
                 <div className="mb-2">
@@ -923,6 +1156,322 @@ export function MembersPage() {
               </DialogPrimitive.Portal>
             </DialogPrimitive.Root>
 
+            <DialogPrimitive.Root
+              open={isMemberMemoryDialogOpen}
+              onOpenChange={(open) => {
+                setIsMemberMemoryDialogOpen(open);
+                if (!open) {
+                  setExpandedMemberMemoryEditor(null);
+                }
+              }}
+            >
+              <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(90vh,860px)] w-[min(95vw,980px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-background p-4 shadow-lg focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-mono text-lg font-semibold tracking-tight">Member memory</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    Chamber-only long-term memory for this member. Manual edits lock documents until you unlock or regenerate.
+                  </DialogPrimitive.Description>
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        Interaction policy: {memberMemoryBundle?.interactionPolicy?.lockedByUser ? 'Locked' : memberMemoryBundle?.interactionPolicy ? 'Generated' : 'Empty'}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        Mental model: {memberMemoryBundle?.mentalModel?.lockedByUser ? 'Locked' : memberMemoryBundle?.mentalModel ? 'Generated' : 'Empty'}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        Episodes: {memberMemoryBundle?.episodes.length ?? 0}
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-2 rounded-md text-xs"
+                      onClick={() => void refreshMemberMemory(true)}
+                      disabled={!editingMemberId || isMemberMemoryLoading}
+                    >
+                      {isMemberMemoryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                      {isMemberMemoryLoading ? 'Refreshing…' : 'Refresh now'}
+                    </Button>
+                  </div>
+
+                  {memberMemoryError ? (
+                    <p className="mt-3 font-mono text-[11px] text-destructive">{memberMemoryError}</p>
+                  ) : null}
+
+                  {memberMemoryBundle ? (
+                    <TooltipProvider>
+                      <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                      <div className="rounded-md border border-border/70 bg-background/70 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <MemoryInfoHint description="How this member should answer this user over time. It is generated from cross-thread chat history with this member, explicit feedback, refine actions like shorter or deep dive, and response-pattern signals. It focuses on stable answering habits such as tone, directness, depth, and pacing." />
+                              <p className="font-mono text-xs font-semibold">Interaction policy</p>
+                            </div>
+                            <p className="font-mono text-[10px] text-muted-foreground">
+                              {memberMemoryBundle.interactionPolicy?.lockedByUser ? 'Locked' : 'Generated'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 rounded-md px-2 text-[10px]"
+                              onClick={() => setExpandedMemberMemoryEditor('interaction_policy')}
+                            >
+                              <Expand className="mr-1 h-3 w-3" />
+                              Expand
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 rounded-md px-2 text-[10px]"
+                              onClick={() => void unlockMemberMemory('interaction_policy')}
+                              disabled={!memberMemoryBundle.interactionPolicy?.lockedByUser}
+                            >
+                              Unlock
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 rounded-md px-2 text-[10px]"
+                              onClick={() => void regenerateMemberMemory('interaction_policy')}
+                            >
+                              Regenerate
+                            </Button>
+                          </div>
+                        </div>
+                        <textarea
+                          className="min-h-28 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                          value={memberMemoryBundle.interactionPolicy?.body ?? ''}
+                          onChange={(event) => updateMemberMemoryDocumentBody('interaction_policy', event.target.value)}
+                          placeholder="No interaction policy yet."
+                        />
+                        <div className="mt-2 flex justify-end">
+                          <Button type="button" size="sm" className="h-7 gap-1 rounded-md text-[10px]" onClick={() => void saveInteractionPolicy()}>
+                            <Save className="h-3 w-3" />
+                            Save
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-md border border-border/70 bg-background/70 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <MemoryInfoHint description="This member's current understanding of the user. It is generated from the member's chamber history with this user, guidance profile, feedback, and repeated conversational patterns. It captures goals, preferences, sticking points, and what tends to click from this member's point of view." />
+                              <p className="font-mono text-xs font-semibold">Mental model</p>
+                            </div>
+                            <p className="font-mono text-[10px] text-muted-foreground">
+                              {memberMemoryBundle.mentalModel?.lockedByUser ? 'Locked' : 'Generated'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 rounded-md px-2 text-[10px]"
+                              onClick={() => setExpandedMemberMemoryEditor('mental_model')}
+                            >
+                              <Expand className="mr-1 h-3 w-3" />
+                              Expand
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 rounded-md px-2 text-[10px]"
+                              onClick={() => void unlockMemberMemory('mental_model')}
+                              disabled={!memberMemoryBundle.mentalModel?.lockedByUser}
+                            >
+                              Unlock
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 rounded-md px-2 text-[10px]"
+                              onClick={() => void regenerateMemberMemory('mental_model')}
+                            >
+                              Regenerate
+                            </Button>
+                          </div>
+                        </div>
+                        <textarea
+                          className="min-h-32 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                          value={memberMemoryBundle.mentalModel?.body ?? ''}
+                          onChange={(event) => updateMemberMemoryDocumentBody('mental_model', event.target.value)}
+                          placeholder="No mental model yet."
+                        />
+                        <div className="mt-2 flex justify-end">
+                          <Button type="button" size="sm" className="h-7 gap-1 rounded-md text-[10px]" onClick={() => void saveMentalModel()}>
+                            <Save className="h-3 w-3" />
+                            Save
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-md border border-border/70 bg-background/70 p-3">
+                        <div className="mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <MemoryInfoHint description="Specific remembered examples from past chats with this member. Episodes are generated when there is enough history and the system can identify concrete moments that worked, failed, or taught something useful about how this member should respond to the user." />
+                            <p className="font-mono text-xs font-semibold">Episodes</p>
+                          </div>
+                          <p className="font-mono text-[10px] text-muted-foreground">
+                            Editable member-specific episodic memories. Manual edits lock the episode.
+                          </p>
+                        </div>
+                        <div className="space-y-3">
+                          {memberMemoryBundle.episodes.length === 0 ? (
+                            <p className="font-mono text-[11px] text-muted-foreground">No episodes yet.</p>
+                          ) : (
+                            memberMemoryBundle.episodes.map((episode) => (
+                              <div key={episode.id} className="rounded-md border border-border bg-background/60 p-3">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                                    {episode.lockedByUser ? 'Locked' : 'Generated'}
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 rounded-md px-2 text-[10px]"
+                                    onClick={() => void toggleEpisodeArchive(episode.id, Boolean(episode.archivedAt))}
+                                  >
+                                    {episode.archivedAt ? 'Restore' : 'Archive'}
+                                  </Button>
+                                </div>
+                                <input
+                                  className="mb-2 h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                                  value={episode.title ?? ''}
+                                  onChange={(event) =>
+                                    setMemberMemoryBundle((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            episodes: current.episodes.map((item) =>
+                                              item.id === episode.id ? { ...item, title: event.target.value } : item
+                                            ),
+                                          }
+                                        : current
+                                    )
+                                  }
+                                  placeholder="Episode title"
+                                />
+                                <textarea
+                                  className="min-h-24 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                                  value={episode.body}
+                                  onChange={(event) =>
+                                    setMemberMemoryBundle((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            episodes: current.episodes.map((item) =>
+                                              item.id === episode.id ? { ...item, body: event.target.value } : item
+                                            ),
+                                          }
+                                        : current
+                                    )
+                                  }
+                                  placeholder="Episode body"
+                                />
+                                <div className="mt-2 flex justify-end">
+                                  <Button type="button" size="sm" className="h-7 gap-1 rounded-md text-[10px]" onClick={() => void saveEpisode(episode.id)}>
+                                    <Save className="h-3 w-3" />
+                                    Save
+                                  </Button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      </div>
+                    </TooltipProvider>
+                  ) : (
+                    <div className="mt-4 min-h-0 flex-1">
+                      <p className="font-mono text-[11px] text-muted-foreground">No member memory loaded yet.</p>
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <DialogPrimitive.Close asChild>
+                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs">
+                        Close
+                      </Button>
+                    </DialogPrimitive.Close>
+                  </div>
+                </DialogPrimitive.Content>
+              </DialogPrimitive.Portal>
+            </DialogPrimitive.Root>
+
+            <DialogPrimitive.Root
+              open={expandedMemberMemoryEditor !== null}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setExpandedMemberMemoryEditor(null);
+                }
+              }}
+            >
+              <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[82] bg-background/80" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[83] flex h-[min(88vh,820px)] w-[min(95vw,920px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-background p-4 shadow-lg focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-mono text-lg font-semibold tracking-tight">
+                    {expandedMemberMemoryEditor === 'interaction_policy' ? 'Edit interaction policy' : 'Edit mental model'}
+                  </DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    Review and edit the full document in a larger editor.
+                  </DialogPrimitive.Description>
+
+                  <textarea
+                    className="mt-4 min-h-0 flex-1 resize-none overflow-y-auto rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed"
+                    value={
+                      expandedMemberMemoryEditor === 'interaction_policy'
+                        ? memberMemoryBundle?.interactionPolicy?.body ?? ''
+                        : memberMemoryBundle?.mentalModel?.body ?? ''
+                    }
+                    onChange={(event) => {
+                      if (!expandedMemberMemoryEditor) return;
+                      updateMemberMemoryDocumentBody(expandedMemberMemoryEditor, event.target.value);
+                    }}
+                    placeholder={
+                      expandedMemberMemoryEditor === 'interaction_policy'
+                        ? 'No interaction policy yet.'
+                        : 'No mental model yet.'
+                    }
+                  />
+
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button
+                      type="button"
+                      className="h-8 gap-2 rounded-md text-xs"
+                      onClick={() => void (
+                        expandedMemberMemoryEditor === 'interaction_policy'
+                          ? saveInteractionPolicy()
+                          : saveMentalModel()
+                      )}
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      Save changes
+                    </Button>
+                    <DialogPrimitive.Close asChild>
+                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs">
+                        Close
+                      </Button>
+                    </DialogPrimitive.Close>
+                  </div>
+                </DialogPrimitive.Content>
+              </DialogPrimitive.Portal>
+            </DialogPrimitive.Root>
+
             <DialogPrimitive.Root open={isDigestEditorOpen} onOpenChange={setIsDigestEditorOpen}>
               <DialogPrimitive.Portal>
                 <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80" />
@@ -1035,6 +1584,25 @@ export function MembersPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function MemoryInfoHint({ description }: { description: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground"
+          aria-label="What is this?"
+        >
+          <CircleHelp className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" align="start" className="max-w-80 text-xs leading-relaxed">
+        {description}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

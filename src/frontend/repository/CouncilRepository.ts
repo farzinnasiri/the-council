@@ -9,6 +9,9 @@ import type {
   Message,
   MessageFeedback,
   MessageFeedbackKey,
+  MemberMemoryDocument,
+  MemberMemoryEpisode,
+  MemberMemoryRefreshState,
   PersonalArchiveAccess,
   PersonalArchiveCapturePreview,
   PersonalArchiveEntry,
@@ -145,6 +148,22 @@ export interface CouncilRepository {
     specialties?: string[];
     force?: boolean;
   }): Promise<{ guidanceProfilePrompt: string; model: string }>;
+  getMemberMemoryBundle(memberId: string): Promise<{
+    interactionPolicy: MemberMemoryDocument | null;
+    mentalModel: MemberMemoryDocument | null;
+    episodes: MemberMemoryEpisode[];
+    refreshState: MemberMemoryRefreshState | null;
+  }>;
+  saveMemberInteractionPolicy(input: { memberId: string; body: string }): Promise<MemberMemoryDocument | null>;
+  saveMemberMentalModel(input: { memberId: string; body: string }): Promise<MemberMemoryDocument | null>;
+  unlockMemberMemory(input: { memberId: string; kind: 'interaction_policy' | 'mental_model' }): Promise<void>;
+  queueMemberMemoryRefresh(input: { memberId: string; force?: boolean }): Promise<{ scheduled: boolean }>;
+  updateMemberMemoryEpisode(input: {
+    episodeId: string;
+    title?: string;
+    body?: string;
+    archivedAt?: number | null;
+  }): Promise<MemberMemoryEpisode | null>;
 
   listConversations(includeArchived?: boolean): Promise<Conversation[]>;
   listHalls(includeArchived?: boolean): Promise<Conversation[]>;
@@ -183,6 +202,10 @@ export interface CouncilRepository {
     key: MessageFeedbackKey;
     active: boolean;
   }): Promise<MessageFeedback[]>;
+  setMessagePinned(input: {
+    messageId: string;
+    active: boolean;
+  }): Promise<Message | null>;
   syncFeedbackGuidanceDirectives(input: {
     messageId: string;
   }): Promise<{ directivesCreated: number; activeKeys: MessageFeedbackKey[] }>;
@@ -221,6 +244,7 @@ export interface CouncilRepository {
   }): Promise<void>;
   getCompactionPolicy(): Promise<CompactionPolicyConfig>;
   appendMessages(input: AppendMessagesInput): Promise<Message[]>;
+  discardMessage(messageId: string): Promise<Message | null>;
   replaceWithRefinement(input: {
     targetMessageId: string;
     replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'>;

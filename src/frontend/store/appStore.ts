@@ -22,7 +22,6 @@ import { convexRepository as councilRepository } from '../repository/ConvexCounc
 import {
   chatWithMember,
   chatRoundtableSpeaker,
-  compactConversation,
   createKbDocumentRecord,
   deleteKbDocument,
   refreshRoundtableRound,
@@ -104,6 +103,7 @@ interface AppState {
   >;
   compactionPolicy: CompactionPolicy;
   refiningActionByMessageId: Record<string, 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate' | undefined>;
+  retryingMessageIds: Record<string, boolean>;
 
   initializeApp: () => Promise<void>;
   refreshCompactionPolicy: () => Promise<CompactionPolicy>;
@@ -175,6 +175,8 @@ interface AppState {
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
   generateMemberGuidanceProfile: (memberId: string, force?: boolean) => Promise<{ guidanceProfilePrompt: string; model: string }>;
   setMessageFeedback: (messageId: string, key: MessageFeedbackKey, active: boolean) => Promise<void>;
+  setMessagePinned: (messageId: string, active: boolean) => Promise<void>;
+  retryFailedMessage: (messageId: string) => Promise<void>;
   archiveMember: (memberId: string) => Promise<void>;
   uploadDocsForMember: (memberId: string, files: File[]) => Promise<void>;
   fetchDocsForMember: (memberId: string) => Promise<void>;
@@ -299,6 +301,18 @@ function mapFeedbackRows(rows: Array<{ messageId: string; key: MessageFeedbackKe
     grouped[row.messageId] = [...(grouped[row.messageId] ?? []), row.key];
   }
   return grouped;
+}
+
+function findRetrySourceUserMessage(messages: Message[], failedMessage: Message): Message | undefined {
+  return messages
+    .filter((message) =>
+      message.conversationId === failedMessage.conversationId &&
+      message.role === 'user' &&
+      message.status === 'sent' &&
+      isVisibleMessage(message) &&
+      message.createdAt <= failedMessage.createdAt
+    )
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
 function getLatestActiveNonSystemMessageAt(messages: Message[], conversationId: string): number | undefined {
@@ -641,63 +655,17 @@ async function maybeCompact(
   if (conversation.kind !== 'chamber') {
     return null;
   }
-
-  const persistedActiveMessages = await councilRepository.listMessages(conversationId);
-  const persistedActiveChatMessages = persistedActiveMessages.filter(
-    (m) => m.role !== 'system'
-  );
-
-  if (persistedActiveChatMessages.length < compactionPolicy.threshold) {
-    return null;
-  }
-
-  const [counts, latestLog] = await Promise.all([
-    councilRepository.getMessageCounts(conversationId),
+  void compactionPolicy;
+  void previousMemory;
+  void memoryContext;
+  const [latestLog, activeMessages] = await Promise.all([
     councilRepository.getLatestChamberMemoryLog(conversationId),
+    councilRepository.listMessages(conversationId),
   ]);
-  const sinceLastLog = latestLog
-    ? Math.max(0, counts.totalNonSystem - latestLog.totalMessagesAtRun)
-    : counts.totalNonSystem;
-  if (sinceLastLog < compactionPolicy.threshold) {
-    return null;
-  }
-
-  const foldableCount = Math.max(0, persistedActiveChatMessages.length - compactionPolicy.recentRawTail);
-  if (foldableCount === 0) {
-    return null;
-  }
-
-  const toCompact = persistedActiveChatMessages.slice(0, foldableCount);
-
-  const contextMsgs = toCompact.map((m) => ({
-    role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
-    content: m.content,
-  }));
-
-  const result = await compactConversation({
-    conversationId,
-    previousSummary: previousMemory,
-    messages: contextMsgs,
-    messageIds: toCompact.map((m) => m.id),
-    memoryScope: 'chamber',
-    memoryContext: memoryContext
-      ? {
-        conversationId,
-        memberName: memoryContext.memberName,
-        memberSpecialties: memoryContext.memberSpecialties,
-      }
-      : undefined,
-  });
-
-  await councilRepository.applyCompaction(
-    conversationId,
-    result.summary,
-    toCompact.map((m) => m.id),
-    compactionPolicy.recentRawTail
-  );
-
-  const activeMessages = await councilRepository.listMessages(conversationId);
-  return { summary: result.summary, activeMessages };
+  return {
+    summary: latestLog?.memory ?? '',
+    activeMessages,
+  };
 }
 
 function lifecycleToMemberDocuments(rows: KbDocumentLifecycle[]): Array<{ name?: string; displayName?: string }> {
@@ -746,6 +714,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   messagePaginationByConversation: {},
   compactionPolicy: COMPACTION_POLICY_DEFAULTS,
   refiningActionByMessageId: {},
+  retryingMessageIds: {},
 
   refreshCompactionPolicy: async () => {
     const policy = await councilRepository.getCompactionPolicy();
@@ -1096,58 +1065,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const [policy, counts, latestLog] = await Promise.all([
+      const [policy, latestLog, activeMessages] = await Promise.all([
         councilRepository.getCompactionPolicy(),
-        councilRepository.getMessageCounts(conversationId),
         councilRepository.getLatestChamberMemoryLog(conversationId),
+        councilRepository.listMessages(conversationId),
       ]);
       set({ compactionPolicy: policy });
-      const latestMemory = latestLog?.memory;
-      if (latestMemory) {
-        set((state) => ({
-          chamberMemoryByConversation: {
-            ...state.chamberMemoryByConversation,
-            [conversationId]: latestMemory,
-          },
-        }));
-      }
-      const sinceLastLog = latestLog
-        ? Math.max(0, counts.totalNonSystem - latestLog.totalMessagesAtRun)
-        : counts.totalNonSystem;
-      const foldableCount = Math.max(0, counts.activeNonSystem - policy.recentRawTail);
-      const shouldCompact =
-        counts.activeNonSystem >= policy.threshold &&
-        sinceLastLog >= policy.threshold &&
-        foldableCount > 0;
-
-      if (!shouldCompact) return;
-
-      const membersMap = new Map(get().members.map((m) => [m.id, m]));
-      const chamberMemoryContext = conversation.chamberMemberId
-        ? {
-          memberName: membersMap.get(conversation.chamberMemberId)?.name ?? 'Member',
-          memberSpecialties: membersMap.get(conversation.chamberMemberId)?.specialties ?? [],
-        }
-        : undefined;
-
-      const compacted = await maybeCompact(
-        conversationId,
-        conversation,
-        policy,
-        latestLog?.memory ?? get().chamberMemoryByConversation[conversationId],
-        chamberMemoryContext
-      );
-      if (!compacted) return;
-
       set((state) => ({
         ...patchConversationEverywhere(state, conversationId, { updatedAt: Date.now() }),
         chamberMemoryByConversation: {
           ...state.chamberMemoryByConversation,
-          [conversationId]: compacted.summary,
+          [conversationId]: latestLog?.memory ?? '',
         },
         messages: [
           ...state.messages.filter((item) => item.conversationId !== conversationId),
-          ...compacted.activeMessages,
+          ...activeMessages,
         ],
       }));
     } catch (error) {
@@ -1932,6 +1864,9 @@ export const useAppStore = create<AppState>((set, get) => ({
                 openingSpeakerIds.map(async (memberId) => {
                   const member = membersById.get(memberId);
                   const memberName = member?.name ?? 'Member';
+                  const openingSourceUserMessage = [...openingMessages]
+                    .reverse()
+                    .find((message) => message.role === 'user' && message.status !== 'error' && isVisibleMessage(message));
                   let reply: Message;
 
                   try {
@@ -1964,6 +1899,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                       content: stripLeadingSpeakerLabel(result.answer, memberName),
                       status: 'sent',
                       roundNumber: nextRound.round.roundNumber,
+                      inReplyToMessageId: openingSourceUserMessage?.id,
                     });
                   } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Request failed';
@@ -1975,6 +1911,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                       status: 'error',
                       roundNumber: nextRound.round.roundNumber,
                       error: errorMessage,
+                      inReplyToMessageId: openingSourceUserMessage?.id,
                     });
                   }
 
@@ -2261,6 +2198,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         : { chatProfile: 'instant' as const, retrievalProfile: 'default' as const };
     const replyTasks = memberIds.map(async (memberId) => {
       const member = membersMap.get(memberId);
+      const sourceUserMessage = [...get().messages]
+        .reverse()
+        .find((message) =>
+          message.conversationId === conversationId &&
+          message.role === 'user' &&
+          message.status !== 'error' &&
+          isVisibleMessage(message)
+        );
       let reply: Message;
 
       if (!member) {
@@ -2314,6 +2259,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               conversation.kind === 'chamber'
                 ? conversation.chamberResponseMode ?? chamberGeneration.chatProfile
                 : undefined,
+            inReplyToMessageId: sourceUserMessage?.id,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Request failed';
@@ -2324,6 +2270,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             content: 'Could not generate a response right now.',
             status: 'error',
             error: errorMessage,
+            inReplyToMessageId: sourceUserMessage?.id,
           });
         }
       }
@@ -2596,6 +2543,20 @@ export const useAppStore = create<AppState>((set, get) => ({
             [conversationId]: [],
           },
         }));
+        const [activeMessages, latestLog] = await Promise.all([
+          councilRepository.listMessages(conversationId),
+          councilRepository.getLatestChamberMemoryLog(conversationId),
+        ]);
+        set((current) => ({
+          messages: [
+            ...current.messages.filter((message) => message.conversationId !== conversationId),
+            ...activeMessages,
+          ],
+          chamberMemoryByConversation: {
+            ...current.chamberMemoryByConversation,
+            [conversationId]: latestLog?.memory ?? current.chamberMemoryByConversation[conversationId],
+          },
+        }));
         return;
       }
 
@@ -2627,6 +2588,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         pendingReplyMemberIds: {
           ...current.pendingReplyMemberIds,
           [conversationId]: [],
+        },
+      }));
+      const [activeMessages, latestLog] = await Promise.all([
+        councilRepository.listMessages(conversationId),
+        councilRepository.getLatestChamberMemoryLog(conversationId),
+      ]);
+      set((current) => ({
+        messages: [
+          ...current.messages.filter((message) => message.conversationId !== conversationId),
+          ...activeMessages,
+        ],
+        chamberMemoryByConversation: {
+          ...current.chamberMemoryByConversation,
+          [conversationId]: latestLog?.memory ?? current.chamberMemoryByConversation[conversationId],
         },
       }));
     } catch (error) {
@@ -2739,6 +2714,197 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
     await councilRepository.syncFeedbackGuidanceDirectives({ messageId });
     get().showToast(feedbackToastMessage(key, active));
+  },
+
+  setMessagePinned: async (messageId, active) => {
+    const updated = await councilRepository.setMessagePinned({ messageId, active });
+    if (!updated) return;
+    set((state) => ({
+      messages: state.messages.map((message) => (message.id === messageId ? { ...message, pinnedAt: updated.pinnedAt } : message)),
+    }));
+    get().showToast(active ? 'Pinned to thread context.' : 'Removed from pinned thread context.');
+  },
+
+  retryFailedMessage: async (messageId) => {
+    const state = get();
+    const failedMessage = state.messages.find((message) => message.id === messageId);
+    if (!failedMessage) return;
+    if (failedMessage.role !== 'member' || failedMessage.status !== 'error' || failedMessage.deletedAt || failedMessage.supersededAt) {
+      throw new Error('Only active failed member replies can be retried.');
+    }
+    if (!failedMessage.authorMemberId) {
+      throw new Error('Retry target is missing a member.');
+    }
+
+    const conversation = state.conversations.find((item) => item.id === failedMessage.conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found.');
+    }
+
+    set((current) => ({
+      retryingMessageIds: {
+        ...current.retryingMessageIds,
+        [messageId]: true,
+      },
+    }));
+
+    try {
+      const discarded = await councilRepository.discardMessage(messageId);
+      if (discarded) {
+        set((current) => ({
+          messages: current.messages.map((message) =>
+            message.id === messageId ? { ...message, deletedAt: discarded.deletedAt } : message
+          ),
+        }));
+      }
+
+      let retriedReply: Message;
+
+      if (conversation.kind === 'hall' && conversation.hallMode === 'roundtable') {
+        const member = get().members.find((item) => item.id === failedMessage.authorMemberId);
+        const memberName = member?.name ?? 'Member';
+        try {
+          const result = await chatRoundtableSpeaker({
+            conversationId: failedMessage.conversationId,
+            roundNumber: failedMessage.roundNumber ?? 1,
+            memberId: failedMessage.authorMemberId,
+            force: true,
+          });
+          retriedReply = buildMessage({
+            conversationId: failedMessage.conversationId,
+            role: 'member',
+            authorMemberId: failedMessage.authorMemberId,
+            content: stripLeadingSpeakerLabel(result.answer, memberName),
+            status: 'sent',
+            roundNumber: failedMessage.roundNumber,
+            roundIntent: result.intent,
+            roundTargetMemberId: result.targetMemberId,
+            inReplyToMessageId: findRetrySourceUserMessage(get().messages, failedMessage)?.id,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Request failed';
+          retriedReply = buildMessage({
+            conversationId: failedMessage.conversationId,
+            role: 'member',
+            authorMemberId: failedMessage.authorMemberId,
+            content: `${memberName} could not speak in this round.`,
+            status: 'error',
+            roundNumber: failedMessage.roundNumber,
+            error: errorMessage,
+            inReplyToMessageId: findRetrySourceUserMessage(get().messages, failedMessage)?.id,
+          });
+        }
+      } else {
+        const currentState = get();
+        const member = currentState.members.find((item) => item.id === failedMessage.authorMemberId);
+        if (!member) {
+          throw new Error('Member not found.');
+        }
+
+        const sourceUserMessage = findRetrySourceUserMessage(currentState.messages, failedMessage);
+        if (!sourceUserMessage) {
+          throw new Error('Could not find the user message that this reply should retry.');
+        }
+
+        const membersMap = new Map(currentState.members.map((item) => [item.id, item]));
+        const chamberMemory =
+          conversation.kind === 'chamber'
+            ? currentState.chamberMemoryByConversation[conversation.id] ?? (await councilRepository.getLatestChamberMemoryLog(conversation.id))?.memory
+            : undefined;
+        const hallParticipants = conversation.kind === 'hall'
+          ? (currentState.hallParticipantsByConversation[conversation.id] ?? [])
+              .map((id) => membersMap.get(id))
+              .filter((item): item is Member => Boolean(item && !item.deletedAt))
+          : [];
+        const hallContextBundle = conversation.kind === 'hall'
+          ? buildHallRoundAwareContext({
+              messages: currentState.messages,
+              conversationId: conversation.id,
+              hallMemoryLogs: await councilRepository.listMemoryLogsByScope(conversation.id, 'hall'),
+              rawRoundTail: currentState.compactionPolicy.hallRawRoundTail,
+              hallMode: conversation.hallMode ?? 'advisory',
+            })
+          : null;
+        const chamberGeneration =
+          conversation.kind === 'chamber'
+            ? getBaseGenerationProfile(conversation.chamberResponseMode)
+            : { chatProfile: 'instant' as const, retrievalProfile: 'default' as const };
+
+        try {
+          const result = await chatWithMember({
+            message: sourceUserMessage.content,
+            memberId: member.id,
+            conversationId: conversation.id,
+            previousSummary: conversation.kind === 'chamber' ? chamberMemory : undefined,
+            contextMessages: buildMemberContextWindow(
+              conversation.kind === 'hall' ? (hallContextBundle?.rawMessages ?? currentState.messages) : currentState.messages,
+              conversation.id,
+              member.id,
+              conversation.kind,
+              membersMap
+            ),
+            hallContext:
+              conversation.kind === 'hall'
+                ? buildHallSystemContext(
+                    member,
+                    hallParticipants,
+                    hallContextBundle?.rawMessages ?? [],
+                    hallContextBundle?.roundSummaries ?? [],
+                    conversation.hallMode ?? 'advisory',
+                    conversation.id,
+                  )
+                : undefined,
+            chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
+            retrievalProfile: conversation.kind === 'chamber' ? chamberGeneration.retrievalProfile : undefined,
+          });
+
+          retriedReply = buildMessage({
+            conversationId: conversation.id,
+            role: 'member',
+            authorMemberId: member.id,
+            content: conversation.kind === 'hall'
+              ? stripLeadingSpeakerLabel(result.answer, member.name)
+              : result.answer,
+            status: 'sent',
+            roundNumber: failedMessage.roundNumber,
+            generationProfile:
+              conversation.kind === 'chamber'
+                ? conversation.chamberResponseMode ?? chamberGeneration.chatProfile
+                : undefined,
+            inReplyToMessageId: sourceUserMessage.id,
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Request failed';
+          retriedReply = buildMessage({
+            conversationId: conversation.id,
+            role: 'member',
+            authorMemberId: member.id,
+            content: 'Could not generate a response right now.',
+            status: 'error',
+            error: errorMessage,
+            roundNumber: failedMessage.roundNumber,
+            inReplyToMessageId: sourceUserMessage.id,
+          });
+        }
+      }
+
+      set((current) => ({
+        messages: [...current.messages, retriedReply],
+        ...updateConversationStamp(current, failedMessage.conversationId, true),
+      }));
+
+      const persistedReplies = await councilRepository.appendMessages({
+        conversationId: failedMessage.conversationId,
+        messages: [retriedReply],
+      });
+      set((current) => ({
+        messages: replaceOptimisticMessages(current.messages, [retriedReply], persistedReplies),
+      }));
+    } finally {
+      set((current) => ({
+        retryingMessageIds: removeKey(current.retryingMessageIds, messageId),
+      }));
+    }
   },
 
   archiveMember: async (memberId) => {

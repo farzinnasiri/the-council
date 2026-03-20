@@ -45,6 +45,7 @@ const messageDoc = v.object({
   roundNumber: v.optional(v.number()),
   roundIntent: v.optional(v.union(v.literal('speak'), v.literal('challenge'), v.literal('support'))),
   roundTargetMemberId: v.optional(v.id('members')),
+  pinnedAt: v.optional(v.number()),
   error: v.optional(v.string()),
 });
 
@@ -78,6 +79,7 @@ const messageInputValidator = v.object({
   roundNumber: v.optional(v.number()),
   roundIntent: v.optional(v.union(v.literal('speak'), v.literal('challenge'), v.literal('support'))),
   roundTargetMemberId: v.optional(v.id('members')),
+  pinnedAt: v.optional(v.number()),
   error: v.optional(v.string()),
 });
 
@@ -183,6 +185,22 @@ export const listAll = query({
       .order('asc')
       .collect();
     return rows.filter((row) => !row.deletedAt && !row.supersededAt);
+  },
+});
+
+export const listPinned = query({
+  args: { conversationId: v.id('conversations') },
+  returns: v.array(messageDoc),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await getOwnedConversation(ctx, userId, args.conversationId);
+
+    const rows = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation_pinned', (q) => q.eq('conversationId', args.conversationId))
+      .order('asc')
+      .collect();
+    return rows.filter((row) => !row.deletedAt && !row.supersededAt && row.role !== 'system' && typeof row.pinnedAt === 'number');
   },
 });
 
@@ -309,6 +327,51 @@ export const appendMany = mutation({
   },
 });
 
+export const setPinned = mutation({
+  args: {
+    messageId: v.id('messages'),
+    active: v.boolean(),
+  },
+  returns: v.union(messageDoc, v.null()),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const message = await getOwnedMessage(ctx, userId, args.messageId);
+    const conversation = await getOwnedConversation(ctx, userId, message.conversationId);
+
+    if (conversation.kind !== 'chamber') {
+      throw new Error('Pinned thread context is only available in chamber threads');
+    }
+    if (message.role === 'system' || message.deletedAt || message.supersededAt) {
+      throw new Error('Message cannot be pinned');
+    }
+
+    await ctx.db.patch(args.messageId, {
+      pinnedAt: args.active ? Date.now() : undefined,
+    });
+    return await ctx.db.get(args.messageId);
+  },
+});
+
+export const discard = mutation({
+  args: {
+    messageId: v.id('messages'),
+  },
+  returns: v.union(messageDoc, v.null()),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const message = await getOwnedMessage(ctx, userId, args.messageId);
+    if (message.role === 'system') {
+      throw new Error('System messages cannot be discarded');
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.messageId, {
+      deletedAt: now,
+      pinnedAt: undefined,
+    });
+    return await ctx.db.get(args.messageId);
+  },
+});
+
 export const replaceWithRefinement = mutation({
   args: {
     targetMessageId: v.id('messages'),
@@ -339,10 +402,12 @@ export const replaceWithRefinement = mutation({
       userId,
       ...args.replacement,
       compacted: false,
+      pinnedAt: target.pinnedAt,
       supersedesMessageId: args.targetMessageId,
     });
 
     await ctx.db.patch(args.targetMessageId, {
+      pinnedAt: undefined,
       supersededAt: now,
       supersededByMessageId: replacementId,
     });

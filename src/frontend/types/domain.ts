@@ -54,6 +54,45 @@ export interface Member {
   updatedAt: number;
 }
 
+export interface MemberMemoryDocument {
+  id: string;
+  memberId: string;
+  body: string;
+  lockedByUser: boolean;
+  generatedAt: number;
+  updatedAt: number;
+  userEditedAt?: number;
+  lastProcessedMessageAt?: number;
+}
+
+export interface MemberMemoryEpisode {
+  id: string;
+  memberId: string;
+  title?: string;
+  body: string;
+  lockedByUser: boolean;
+  archivedAt?: number;
+  generatedAt: number;
+  updatedAt: number;
+  userEditedAt?: number;
+  lastProcessedMessageAt?: number;
+}
+
+export interface MemberMemoryRefreshState {
+  id: string;
+  memberId: string;
+  processing: boolean;
+  processingStartedAt?: number;
+  nextEligibleAt: number;
+  lastRunAt?: number;
+  lastSuccessAt?: number;
+  lastFailureAt?: number;
+  retryCount: number;
+  lastProcessedMessageAt?: number;
+  lastError?: string;
+  updatedAt: number;
+}
+
 export interface Conversation {
   id: string;
   kind: ConversationKind;
@@ -150,6 +189,7 @@ export interface Message {
   roundNumber?: number;
   roundIntent?: Exclude<RoundtableIntent, 'pass'>;
   roundTargetMemberId?: string;
+  pinnedAt?: number;
   error?: string;
   createdAt: number;
 }

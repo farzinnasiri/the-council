@@ -5,6 +5,7 @@ The role of this file is to describe common mistakes and confusion points that a
 ## Surprise Notes
 
 1. The workspace directory currently includes trailing spaces in its name (`/Users/farzin/MyProjects/the-council  `). Some tools fail if they trim the path or if `workdir` is passed without the trailing spaces.
+2. In at least some local sessions, the actual working directory resolves without trailing spaces (`/Users/farzin/MyProjects/the-council`). Treat the trailing-space warning as environment-dependent and verify with `pwd` before assuming either path form.
 
 ## Keep These Invariants
 

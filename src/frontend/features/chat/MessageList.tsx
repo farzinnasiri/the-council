@@ -208,7 +208,15 @@ export function MessageList({
           if (item.kind === 'round') {
             return <RoundSeparator key={`round-${item.roundNumber}-${index}`} roundNumber={item.roundNumber} />;
           }
-          return <MessageBubble key={item.message.renderId ?? item.message.id} message={item.message} />;
+          return (
+            <div
+              key={item.message.renderId ?? item.message.id}
+              id={`message-${item.message.id}`}
+              className="scroll-mt-24"
+            >
+              <MessageBubble message={item.message} />
+            </div>
+          );
         })}
 
         {isRouting ? (

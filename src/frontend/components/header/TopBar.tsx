@@ -1,4 +1,5 @@
-import { LoaderCircle, Menu, NotebookPen, Pause, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { LoaderCircle, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -43,6 +44,7 @@ export function TopBar({
   const removeMemberFromConversation = useAppStore((state) => state.removeMemberFromConversation);
   const members = useAppStore((state) => state.members);
   const messages = useAppStore((state) => state.messages);
+  const setMessagePinned = useAppStore((state) => state.setMessagePinned);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
   const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
   const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
@@ -56,6 +58,7 @@ export function TopBar({
   const canManageHall = conversation?.kind === 'hall';
   const [presenceNow, setPresenceNow] = useState(() => Date.now());
   const [isChamberTypingVisible, setIsChamberTypingVisible] = useState(false);
+  const [isPinnedManagerOpen, setIsPinnedManagerOpen] = useState(false);
   const typingVisibilityTimerRef = useRef<number | null>(null);
   const {
     hasPlayback,
@@ -122,6 +125,18 @@ export function TopBar({
     }
     if (latest > 0) return latest;
     return undefined;
+  }, [conversation, messages]);
+
+  const pinnedMessages = useMemo(() => {
+    if (!conversation || conversation.kind !== 'chamber') return [];
+    return messages
+      .filter((message) => {
+        if (message.conversationId !== conversation.id) return false;
+        if (message.role === 'system') return false;
+        if (message.deletedAt || message.supersededAt || message.compacted) return false;
+        return typeof message.pinnedAt === 'number';
+      })
+      .sort((a, b) => (b.pinnedAt ?? b.createdAt) - (a.pinnedAt ?? a.createdAt));
   }, [conversation, messages]);
 
   const isChamberOnline =
@@ -201,13 +216,13 @@ export function TopBar({
   );
 
   return (
-    <header className="grid min-h-[74px] grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 border-b border-border bg-background px-4 py-3 md:min-h-16 md:items-center md:px-6 md:py-2">
+    <header className="grid min-h-[74px] grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 border-b border-border bg-background px-4 py-3 md:min-h-16 md:items-center md:gap-y-2 md:px-6 md:py-2">
       <div className="flex min-w-0 items-start gap-3 md:items-center">
         <Button size="icon" variant="ghost" onClick={onToggleSidebar} aria-label="Toggle sidebar">
           <Menu className="h-5 w-5" />
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="max-w-[28rem] break-words font-mono text-sm font-semibold tracking-tight text-foreground md:max-w-[34rem]">
+          <p className="max-w-[16rem] break-words font-mono text-sm font-semibold tracking-tight text-foreground md:max-w-[34rem]">
             {title}
           </p>
           {subtitle || showHallParticipants ? (
@@ -240,7 +255,7 @@ export function TopBar({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-start justify-self-end gap-2 self-start md:items-center md:self-center">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 justify-self-end self-start md:flex-nowrap md:items-center md:self-center">
         {hasPlayback ? (
           <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-1.5 py-1 shadow-sm md:flex">
             <div className="hidden min-w-0 px-2 md:block">
@@ -264,15 +279,111 @@ export function TopBar({
             type="button"
             size="icon"
             variant={notebookOpen ? 'outline' : 'ghost'}
-            className="h-9 w-9"
+            className="h-9 w-9 shrink-0"
             onClick={onToggleNotebook}
             aria-label={notebookOpen ? 'Close notebook' : 'Open notebook'}
           >
             <NotebookPen className="h-4 w-4" />
           </Button>
         ) : null}
+        {isChamber && pinnedMessages.length > 0 ? (
+          <DialogPrimitive.Root open={isPinnedManagerOpen} onOpenChange={setIsPinnedManagerOpen}>
+            <DialogPrimitive.Trigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-9 shrink-0 gap-1.5 px-0 text-xs text-muted-foreground hover:text-foreground"
+                aria-label={`Open pinned thread messages (${pinnedMessages.length})`}
+              >
+                <Pin className="h-3.5 w-3.5" />
+                <span className="font-medium tabular-nums">{pinnedMessages.length}</span>
+              </Button>
+            </DialogPrimitive.Trigger>
+            <DialogPrimitive.Portal>
+              <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80 backdrop-blur-sm" />
+              <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(82vh,720px)] w-[min(94vw,760px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-border bg-background p-4 shadow-2xl focus:outline-none md:p-5">
+                <div className="flex items-start justify-between gap-4 border-b border-border pb-3">
+                  <div className="min-w-0">
+                    <DialogPrimitive.Title className="font-mono text-sm font-semibold uppercase tracking-[0.22em] text-foreground">
+                      Pinned Thread Messages
+                    </DialogPrimitive.Title>
+                    <DialogPrimitive.Description className="mt-2 text-sm text-muted-foreground">
+                      These messages stay in the chamber context until you unpin them.
+                    </DialogPrimitive.Description>
+                  </div>
+                  <DialogPrimitive.Close asChild>
+                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label="Close pinned messages">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </DialogPrimitive.Close>
+                </div>
+
+                <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
+                  {pinnedMessages.map((message) => {
+                    const author =
+                      message.role === 'user'
+                        ? 'You'
+                        : members.find((member) => member.id === message.authorMemberId)?.name ?? title;
+
+                    return (
+                      <div
+                        key={message.id}
+                        className="rounded-2xl border border-border/80 bg-card px-4 py-3 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{author}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {new Date(message.createdAt).toLocaleString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-3 text-xs"
+                              onClick={() => {
+                                setIsPinnedManagerOpen(false);
+                                window.setTimeout(() => {
+                                  document.getElementById(`message-${message.id}`)?.scrollIntoView({
+                                    behavior: 'smooth',
+                                    block: 'center',
+                                  });
+                                }, 120);
+                              }}
+                            >
+                              Jump
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => void setMessagePinned(message.id, false)}
+                            >
+                              Unpin
+                            </Button>
+                          </div>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground line-clamp-4">
+                          {message.content}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
+        ) : null}
         {isChamber ? (
-          <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-foreground">
+          <span className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-foreground">
             <span
               className={`h-2 w-2 rounded-full ${
                 isChamberOnline ? 'bg-emerald-500' : 'bg-red-500'
