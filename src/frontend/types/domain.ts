@@ -11,6 +11,7 @@ export type RoundtableIntent = 'speak' | 'challenge' | 'support' | 'pass';
 export type RoundtableRoundStatus = 'awaiting_user' | 'in_progress' | 'completed' | 'superseded';
 export type PersonalArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
 export type SystemMessageKind = 'routing' | 'hall_followup_context';
+export type MemberVoiceName = 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
 export type MessageFeedbackKey =
   | 'like'
   | 'dislike'
@@ -47,6 +48,10 @@ export interface Member {
   guidanceProfilePrompt?: string;
   guidanceProfileGeneratedAt?: number;
   guidanceProfileUpdatedAt?: number;
+  ttsVoiceName: MemberVoiceName;
+  ttsPersonaPrompt?: string;
+  ttsPersonaGeneratedAt?: number;
+  ttsPersonaUpdatedAt?: number;
   kbStoreName?: string;
   personalArchiveAccess: PersonalArchiveAccess;
   deletedAt?: number;

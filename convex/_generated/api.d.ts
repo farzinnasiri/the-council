@@ -16,6 +16,7 @@ import type * as ai_graphs_kbDigestGraph from "../ai/graphs/kbDigestGraph.js";
 import type * as ai_graphs_memberChatGraph from "../ai/graphs/memberChatGraph.js";
 import type * as ai_graphs_memberGuidanceGraph from "../ai/graphs/memberGuidanceGraph.js";
 import type * as ai_graphs_memberMemoryGraph from "../ai/graphs/memberMemoryGraph.js";
+import type * as ai_graphs_memberVoiceGraph from "../ai/graphs/memberVoiceGraph.js";
 import type * as ai_graphs_roundIntentGraph from "../ai/graphs/roundIntentGraph.js";
 import type * as ai_graphs_routeMembersGraph from "../ai/graphs/routeMembersGraph.js";
 import type * as ai_graphs_specialtiesGraph from "../ai/graphs/specialtiesGraph.js";
@@ -124,6 +125,7 @@ declare const fullApi: ApiFromModules<{
   "ai/graphs/memberChatGraph": typeof ai_graphs_memberChatGraph;
   "ai/graphs/memberGuidanceGraph": typeof ai_graphs_memberGuidanceGraph;
   "ai/graphs/memberMemoryGraph": typeof ai_graphs_memberMemoryGraph;
+  "ai/graphs/memberVoiceGraph": typeof ai_graphs_memberVoiceGraph;
   "ai/graphs/roundIntentGraph": typeof ai_graphs_roundIntentGraph;
   "ai/graphs/routeMembersGraph": typeof ai_graphs_routeMembersGraph;
   "ai/graphs/specialtiesGraph": typeof ai_graphs_specialtiesGraph;

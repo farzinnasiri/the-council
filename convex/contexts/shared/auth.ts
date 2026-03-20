@@ -14,6 +14,10 @@ export interface OwnedMember {
   guidanceProfilePrompt?: string;
   guidanceProfileGeneratedAt?: number;
   guidanceProfileUpdatedAt?: number;
+  ttsVoiceName?: 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
+  ttsPersonaPrompt?: string;
+  ttsPersonaGeneratedAt?: number;
+  ttsPersonaUpdatedAt?: number;
   kbStoreName?: string;
   personalArchiveAccess?: {
     reflection: boolean;

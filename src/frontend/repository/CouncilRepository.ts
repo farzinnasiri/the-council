@@ -19,6 +19,7 @@ import type {
   RoundtableState,
   ConversationGuidanceDirective,
   TimeAwareReentryGapBucket,
+  MemberVoiceName,
   ThemeMode,
 } from '../types/domain';
 import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/compactionPolicy';
@@ -27,6 +28,8 @@ export interface CreateMemberInput {
   name: string;
   systemPrompt: string;
   guidanceProfilePrompt?: string;
+  ttsVoiceName?: MemberVoiceName;
+  ttsPersonaPrompt?: string;
   specialties?: string[];
   personalArchiveAccess?: PersonalArchiveAccess;
 }
@@ -36,6 +39,9 @@ export interface UpdateMemberPatch {
   systemPrompt?: string;
   guidanceProfilePrompt?: string;
   guidanceProfileGeneratedAt?: number;
+  ttsVoiceName?: MemberVoiceName;
+  ttsPersonaPrompt?: string;
+  ttsPersonaGeneratedAt?: number;
   specialties?: string[];
   personalArchiveAccess?: PersonalArchiveAccess;
   kbStoreName?: string | null;
@@ -86,12 +92,12 @@ export interface MemberChatResult {
 }
 
 export interface MessageSpeechResult {
-  mimeType: 'audio/mpeg';
+  mimeType: string;
   segments: Array<{
     index: number;
     audioBase64: string;
   }>;
-  voiceName: string;
+  voiceName: MemberVoiceName;
   cacheKey: string;
 }
 
@@ -148,6 +154,13 @@ export interface CouncilRepository {
     specialties?: string[];
     force?: boolean;
   }): Promise<{ guidanceProfilePrompt: string; model: string }>;
+  generateMemberVoicePersona(input: {
+    memberId: string;
+    systemPrompt: string;
+    specialties?: string[];
+    ttsVoiceName?: MemberVoiceName;
+    force?: boolean;
+  }): Promise<{ ttsPersonaPrompt: string; model: string }>;
   getMemberMemoryBundle(memberId: string): Promise<{
     interactionPolicy: MemberMemoryDocument | null;
     mentalModel: MemberMemoryDocument | null;
@@ -228,8 +241,8 @@ export interface CouncilRepository {
   listMessages(conversationId: string): Promise<Message[]>;
   listMessagesPage(
     conversationId: string,
-    options?: { beforeCreatedAt?: number; limit?: number }
-  ): Promise<{ messages: Message[]; hasMore: boolean }>;
+    options?: { cursor?: string | null; limit?: number }
+  ): Promise<{ messages: Message[]; continueCursor: string | null; hasMore: boolean }>;
   getMessageCounts(conversationId: string): Promise<{ totalNonSystem: number; activeNonSystem: number }>;
   getLatestChamberMemoryLog(conversationId: string): Promise<ConversationMemoryLog | null>;
   listMemoryLogsByScope(conversationId: string, scope: 'chamber' | 'hall'): Promise<ConversationMemoryLog[]>;

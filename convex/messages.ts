@@ -116,6 +116,10 @@ async function getOwnedMessage(ctx: any, userId: any, messageId: any) {
   return message;
 }
 
+function isVisibleHistoryRow(row: { deletedAt?: number; supersededAt?: number }) {
+  return !row.deletedAt && !row.supersededAt;
+}
+
 export const listActive = query({
   args: { conversationId: v.id('conversations') },
   returns: v.array(messageDoc),
@@ -130,18 +134,35 @@ export const listActive = query({
       )
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt && !row.supersededAt);
+    return rows.filter(isVisibleHistoryRow);
+  },
+});
+
+export const listVisible = query({
+  args: { conversationId: v.id('conversations') },
+  returns: v.array(messageDoc),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await getOwnedConversation(ctx, userId, args.conversationId);
+
+    const rows = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
+      .order('asc')
+      .collect();
+    return rows.filter(isVisibleHistoryRow);
   },
 });
 
 export const listActivePage = query({
   args: {
     conversationId: v.id('conversations'),
-    beforeCreatedAt: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
     limit: v.optional(v.number()),
   },
   returns: v.object({
     messages: v.array(messageDoc),
+    continueCursor: v.union(v.string(), v.null()),
     hasMore: v.boolean(),
   }),
   handler: async (ctx, args) => {
@@ -149,24 +170,83 @@ export const listActivePage = query({
     await getOwnedConversation(ctx, userId, args.conversationId);
 
     const limit = Math.max(10, Math.min(args.limit ?? 40, 120));
-    let queryBuilder = ctx.db
-      .query('messages')
-      .withIndex('by_conversation_active', (q) =>
-        q.eq('conversationId', args.conversationId).eq('compacted', false)
-      )
-      .order('desc');
+    let cursor = args.cursor ?? null;
+    let hasMore = true;
+    const collected: any[] = [];
 
-    const beforeCreatedAt = args.beforeCreatedAt;
-    if (typeof beforeCreatedAt === 'number') {
-      queryBuilder = queryBuilder.filter((q) => q.lt(q.field('_creationTime'), beforeCreatedAt));
+    while (collected.length < limit && hasMore) {
+      const page = await ctx.db
+        .query('messages')
+        .withIndex('by_conversation_active', (q) =>
+          q.eq('conversationId', args.conversationId).eq('compacted', false)
+        )
+        .order('desc')
+        .paginate({
+          numItems: limit - collected.length,
+          cursor,
+        });
+
+      const visibleRows = page.page.filter(isVisibleHistoryRow);
+      collected.push(...visibleRows);
+      cursor = page.continueCursor;
+      hasMore = !page.isDone;
+
+      if (page.page.length === 0) {
+        break;
+      }
     }
 
-    const rows = await queryBuilder.take(limit + 1);
-    const filtered = rows.filter((row) => !row.deletedAt && !row.supersededAt);
-    const hasMore = rows.length > limit;
+    return {
+      messages: collected.slice(0, limit).reverse(),
+      continueCursor: hasMore ? cursor : null,
+      hasMore,
+    };
+  },
+});
+
+export const listPage = query({
+  args: {
+    conversationId: v.id('conversations'),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    messages: v.array(messageDoc),
+    continueCursor: v.union(v.string(), v.null()),
+    hasMore: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await getOwnedConversation(ctx, userId, args.conversationId);
+
+    const limit = Math.max(10, Math.min(args.limit ?? 40, 120));
+    let cursor = args.cursor ?? null;
+    let hasMore = true;
+    const collected: any[] = [];
+
+    while (collected.length < limit && hasMore) {
+      const page = await ctx.db
+        .query('messages')
+        .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
+        .order('desc')
+        .paginate({
+          numItems: limit - collected.length,
+          cursor,
+        });
+
+      const visibleRows = page.page.filter(isVisibleHistoryRow);
+      collected.push(...visibleRows);
+      cursor = page.continueCursor;
+      hasMore = !page.isDone;
+
+      if (page.page.length === 0) {
+        break;
+      }
+    }
 
     return {
-      messages: filtered.slice(0, limit).reverse(),
+      messages: collected.slice(0, limit).reverse(),
+      continueCursor: hasMore ? cursor : null,
       hasMore,
     };
   },
@@ -184,7 +264,7 @@ export const listAll = query({
       .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt && !row.supersededAt);
+    return rows.filter(isVisibleHistoryRow);
   },
 });
 
@@ -200,7 +280,7 @@ export const listPinned = query({
       .withIndex('by_conversation_pinned', (q) => q.eq('conversationId', args.conversationId))
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt && !row.supersededAt && row.role !== 'system' && typeof row.pinnedAt === 'number');
+    return rows.filter((row) => isVisibleHistoryRow(row) && row.role !== 'system' && typeof row.pinnedAt === 'number');
   },
 });
 
@@ -218,7 +298,7 @@ export const listReplies = query({
       )
       .order('asc')
       .collect();
-    return rows.filter((row) => !row.deletedAt && !row.supersededAt);
+    return rows.filter(isVisibleHistoryRow);
   },
 });
 

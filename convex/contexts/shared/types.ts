@@ -23,6 +23,8 @@ export interface MemberListRow {
   name: string;
   specialties?: string[];
   systemPrompt: string;
+  ttsVoiceName?: 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
+  ttsPersonaPrompt?: string;
   kbStoreName?: string;
   personalArchiveAccess?: {
     reflection: boolean;

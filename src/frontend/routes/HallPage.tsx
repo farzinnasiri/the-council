@@ -44,8 +44,7 @@ export function HallPage() {
     (message) =>
       message.conversationId === conversation.id &&
       !message.deletedAt &&
-      !message.supersededAt &&
-      !message.compacted
+      !message.supersededAt
   );
   const typingMembers = (pendingReplyMemberIds[conversation.id] ?? [])
     .map((memberId) => members.find((member) => member.id === memberId))

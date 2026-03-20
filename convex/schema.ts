@@ -29,6 +29,18 @@ export default defineSchema({
     guidanceProfilePrompt: v.optional(v.string()),
     guidanceProfileGeneratedAt: v.optional(v.number()),
     guidanceProfileUpdatedAt: v.optional(v.number()),
+    ttsVoiceName: v.optional(
+      v.union(
+        v.literal('Kore'),
+        v.literal('Zephyr'),
+        v.literal('Fenrir'),
+        v.literal('Puck'),
+        v.literal('Charon')
+      )
+    ),
+    ttsPersonaPrompt: v.optional(v.string()),
+    ttsPersonaGeneratedAt: v.optional(v.number()),
+    ttsPersonaUpdatedAt: v.optional(v.number()),
     kbStoreName: v.optional(v.string()),
     personalArchiveAccess: v.optional(personalArchiveAccessValidator),
     // Legacy compatibility only. Active/archived now derives from deletedAt.

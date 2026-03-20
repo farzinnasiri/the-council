@@ -10,6 +10,7 @@ import type {
   ConversationParticipant,
   RoundtableState,
   Member,
+  MemberVoiceName,
   MemberMemoryDocument,
   MemberMemoryEpisode,
   MemberMemoryRefreshState,
@@ -45,6 +46,7 @@ import type {
   RouteResult,
   UpdateMemberPatch,
 } from './CouncilRepository';
+import { DEFAULT_MEMBER_VOICE } from '../constants/memberVoice';
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string;
 
@@ -69,6 +71,10 @@ function toMember(doc: ConvexMemberDoc): Member {
     guidanceProfilePrompt: doc.guidanceProfilePrompt,
     guidanceProfileGeneratedAt: doc.guidanceProfileGeneratedAt,
     guidanceProfileUpdatedAt: doc.guidanceProfileUpdatedAt,
+    ttsVoiceName: (doc.ttsVoiceName as MemberVoiceName | undefined) ?? DEFAULT_MEMBER_VOICE,
+    ttsPersonaPrompt: doc.ttsPersonaPrompt,
+    ttsPersonaGeneratedAt: doc.ttsPersonaGeneratedAt,
+    ttsPersonaUpdatedAt: doc.ttsPersonaUpdatedAt,
     kbStoreName: doc.kbStoreName,
     personalArchiveAccess,
     deletedAt: doc.deletedAt,
@@ -386,6 +392,8 @@ class ConvexCouncilRepository implements CouncilRepository {
       name: input.name,
       systemPrompt: input.systemPrompt,
       guidanceProfilePrompt: input.guidanceProfilePrompt,
+      ttsVoiceName: input.ttsVoiceName,
+      ttsPersonaPrompt: input.ttsPersonaPrompt,
       specialties: input.specialties,
       personalArchiveAccess: input.personalArchiveAccess,
     } as any);
@@ -426,6 +434,22 @@ class ConvexCouncilRepository implements CouncilRepository {
       specialties: input.specialties,
       force: input.force,
     })) as { guidanceProfilePrompt: string; model: string };
+  }
+
+  async generateMemberVoicePersona(input: {
+    memberId: string;
+    systemPrompt: string;
+    specialties?: string[];
+    ttsVoiceName?: MemberVoiceName;
+    force?: boolean;
+  }): Promise<{ ttsPersonaPrompt: string; model: string }> {
+    return (await this.client.action(api.ai.voice.generateMemberVoicePersona as any, {
+      memberId: input.memberId as Id<'members'>,
+      systemPrompt: input.systemPrompt,
+      specialties: input.specialties,
+      ttsVoiceName: input.ttsVoiceName,
+      force: input.force,
+    })) as { ttsPersonaPrompt: string; model: string };
   }
 
   async getMemberMemoryBundle(memberId: string): Promise<{
@@ -849,7 +873,7 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async listMessages(conversationId: string): Promise<Message[]> {
-    const docs = await this.client.query(api.messages.listActive, {
+    const docs = await this.client.query(api.messages.listVisible, {
       conversationId: conversationId as Id<'conversations'>,
     });
     return docs.map(toMessage);
@@ -857,15 +881,16 @@ class ConvexCouncilRepository implements CouncilRepository {
 
   async listMessagesPage(
     conversationId: string,
-    options: { beforeCreatedAt?: number; limit?: number } = {}
-  ): Promise<{ messages: Message[]; hasMore: boolean }> {
-    const result = await this.client.query(api.messages.listActivePage, {
+    options: { cursor?: string | null; limit?: number } = {}
+  ): Promise<{ messages: Message[]; continueCursor: string | null; hasMore: boolean }> {
+    const result = await this.client.query(api.messages.listPage, {
       conversationId: conversationId as Id<'conversations'>,
-      beforeCreatedAt: options.beforeCreatedAt,
+      cursor: options.cursor ?? null,
       limit: options.limit,
     });
     return {
       messages: result.messages.map(toMessage),
+      continueCursor: result.continueCursor,
       hasMore: result.hasMore,
     };
   }

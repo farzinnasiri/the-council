@@ -3,6 +3,14 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { defaultPersonalArchiveAccess, personalArchiveAccessValidator } from './personalArchiveShared';
 
+const ttsVoiceNameValidator = v.union(
+  v.literal('Kore'),
+  v.literal('Zephyr'),
+  v.literal('Fenrir'),
+  v.literal('Puck'),
+  v.literal('Charon')
+);
+
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error('Not authenticated');
@@ -56,6 +64,8 @@ export const create = mutation({
     specialties: v.optional(v.array(v.string())),
     systemPrompt: v.string(),
     guidanceProfilePrompt: v.optional(v.string()),
+    ttsVoiceName: v.optional(ttsVoiceNameValidator),
+    ttsPersonaPrompt: v.optional(v.string()),
     personalArchiveAccess: v.optional(personalArchiveAccessValidator),
   },
   handler: async (ctx, args) => {
@@ -68,6 +78,10 @@ export const create = mutation({
       guidanceProfilePrompt: args.guidanceProfilePrompt,
       guidanceProfileGeneratedAt: args.guidanceProfilePrompt ? Date.now() : undefined,
       guidanceProfileUpdatedAt: args.guidanceProfilePrompt ? Date.now() : undefined,
+      ttsVoiceName: args.ttsVoiceName,
+      ttsPersonaPrompt: args.ttsPersonaPrompt,
+      ttsPersonaGeneratedAt: args.ttsPersonaPrompt ? Date.now() : undefined,
+      ttsPersonaUpdatedAt: args.ttsPersonaPrompt ? Date.now() : undefined,
       personalArchiveAccess: args.personalArchiveAccess ?? defaultPersonalArchiveAccess(),
       updatedAt: Date.now(),
     });
@@ -84,6 +98,9 @@ export const update = mutation({
     systemPrompt: v.optional(v.string()),
     guidanceProfilePrompt: v.optional(v.string()),
     guidanceProfileGeneratedAt: v.optional(v.number()),
+    ttsVoiceName: v.optional(ttsVoiceNameValidator),
+    ttsPersonaPrompt: v.optional(v.string()),
+    ttsPersonaGeneratedAt: v.optional(v.number()),
     avatarId: v.optional(v.id('_storage')),
     kbStoreName: v.optional(v.string()),
     personalArchiveAccess: v.optional(personalArchiveAccessValidator),
@@ -99,6 +116,9 @@ export const update = mutation({
       ...filteredPatch,
       ...(args.guidanceProfilePrompt !== undefined
         ? { guidanceProfileUpdatedAt: Date.now() }
+        : {}),
+      ...(args.ttsPersonaPrompt !== undefined
+        ? { ttsPersonaUpdatedAt: Date.now() }
         : {}),
       updatedAt: Date.now(),
     });

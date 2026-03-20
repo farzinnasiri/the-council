@@ -114,6 +114,15 @@ export interface CouncilAiProvider {
     model?: string;
   }): Promise<{ guidanceProfilePrompt: string; model: string }>;
 
+  generateMemberVoicePersona(input: {
+    memberName: string;
+    systemPrompt: string;
+    specialties?: string[];
+    selectedVoiceName: 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
+    existingTtsPersonaPrompt?: string;
+    model?: string;
+  }): Promise<{ ttsPersonaPrompt: string; model: string }>;
+
   reflectChamberGuidance(input: {
     memberName: string;
     guidanceProfilePrompt: string;

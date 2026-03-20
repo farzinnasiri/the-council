@@ -59,7 +59,7 @@ deploy: ## Validate and deploy Convex functions to dev
 deploy-prod: ## Validate and deploy Convex functions to prod
 	@$(MAKE) env-doctor TARGET=prod
 	@$(MAKE) check
-	@npx convex deploy
+	@npx convex deploy -y
 
 logs: ## Tail Convex logs for dev deployment
 	@npx convex logs

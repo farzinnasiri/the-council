@@ -6,6 +6,7 @@ import type {
   ConversationNotebook,
   ConversationType,
   Member,
+  MemberVoiceName,
   Message,
   MessageFeedbackKey,
   MessageRouting,
@@ -18,6 +19,7 @@ import {
   COMPACTION_POLICY_DEFAULTS,
   type CompactionPolicy,
 } from '../constants/compactionPolicy';
+import { DEFAULT_MEMBER_VOICE } from '../constants/memberVoice';
 import { convexRepository as councilRepository } from '../repository/ConvexCouncilRepository';
 import {
   chatWithMember,
@@ -45,6 +47,8 @@ interface CreateMemberPayload {
   name: string;
   systemPrompt: string;
   guidanceProfilePrompt?: string;
+  ttsVoiceName?: MemberVoiceName;
+  ttsPersonaPrompt?: string;
   specialties?: string[];
   personalArchiveAccess?: PersonalArchiveAccess;
 }
@@ -96,7 +100,7 @@ interface AppState {
   messagePaginationByConversation: Record<
     string,
     {
-      oldestLoadedAt?: number;
+      continueCursor: string | null;
       hasOlder: boolean;
       isLoadingOlder: boolean;
     }
@@ -174,6 +178,7 @@ interface AppState {
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
   generateMemberGuidanceProfile: (memberId: string, force?: boolean) => Promise<{ guidanceProfilePrompt: string; model: string }>;
+  generateMemberVoicePersona: (memberId: string, force?: boolean) => Promise<{ ttsPersonaPrompt: string; model: string }>;
   setMessageFeedback: (messageId: string, key: MessageFeedbackKey, active: boolean) => Promise<void>;
   setMessagePinned: (messageId: string, active: boolean) => Promise<void>;
   retryFailedMessage: (messageId: string) => Promise<void>;
@@ -979,7 +984,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       messagePaginationByConversation: {
         ...state.messagePaginationByConversation,
         [conversationId]: {
-          oldestLoadedAt: msgs[0]?.createdAt,
+          continueCursor: page.continueCursor,
           hasOlder: page.hasMore,
           isLoadingOlder: false,
         },
@@ -995,7 +1000,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadOlderMessages: async (conversationId) => {
     const pagination = get().messagePaginationByConversation[conversationId];
-    if (!pagination || pagination.isLoadingOlder || !pagination.hasOlder || !pagination.oldestLoadedAt) {
+    if (!pagination || pagination.isLoadingOlder || !pagination.hasOlder || !pagination.continueCursor) {
       return;
     }
 
@@ -1012,7 +1017,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const [page, feedbackRows] = await Promise.all([
         councilRepository.listMessagesPage(conversationId, {
-          beforeCreatedAt: pagination.oldestLoadedAt,
+          cursor: pagination.continueCursor,
           limit: 30,
         }),
         councilRepository.listMessageFeedback(conversationId),
@@ -1028,7 +1033,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           messagePaginationByConversation: {
             ...state.messagePaginationByConversation,
             [conversationId]: {
-              oldestLoadedAt: deduped[0]?.createdAt,
+              continueCursor: page.continueCursor,
               hasOlder: page.hasMore,
               isLoadingOlder: false,
             },
@@ -2628,22 +2633,39 @@ export const useAppStore = create<AppState>((set, get) => ({
   createMember: async (payload) => {
     const created = await councilRepository.createMember(payload);
     let nextMember = created;
-    if (!created.guidanceProfilePrompt?.trim()) {
-      try {
-        const generated = await councilRepository.generateMemberGuidanceProfile({
-          memberId: created.id,
-          systemPrompt: created.systemPrompt,
-          specialties: created.specialties,
-        });
-        nextMember = {
-          ...created,
-          guidanceProfilePrompt: generated.guidanceProfilePrompt,
-          guidanceProfileGeneratedAt: Date.now(),
-          guidanceProfileUpdatedAt: Date.now(),
-        };
-      } catch {
-        nextMember = created;
-      }
+    const [guidanceResult, voiceResult] = await Promise.allSettled([
+      !created.guidanceProfilePrompt?.trim()
+        ? councilRepository.generateMemberGuidanceProfile({
+            memberId: created.id,
+            systemPrompt: created.systemPrompt,
+            specialties: created.specialties,
+          })
+        : Promise.resolve(null),
+      !created.ttsPersonaPrompt?.trim()
+        ? councilRepository.generateMemberVoicePersona({
+            memberId: created.id,
+            systemPrompt: created.systemPrompt,
+            specialties: created.specialties,
+            ttsVoiceName: created.ttsVoiceName,
+          })
+        : Promise.resolve(null),
+    ]);
+
+    if (guidanceResult.status === 'fulfilled' && guidanceResult.value) {
+      nextMember = {
+        ...nextMember,
+        guidanceProfilePrompt: guidanceResult.value.guidanceProfilePrompt,
+        guidanceProfileGeneratedAt: Date.now(),
+        guidanceProfileUpdatedAt: Date.now(),
+      };
+    }
+    if (voiceResult.status === 'fulfilled' && voiceResult.value) {
+      nextMember = {
+        ...nextMember,
+        ttsPersonaPrompt: voiceResult.value.ttsPersonaPrompt,
+        ttsPersonaGeneratedAt: Date.now(),
+        ttsPersonaUpdatedAt: Date.now(),
+      };
     }
     set((state) => ({ members: [nextMember, ...state.members.filter((member) => member.id !== created.id)] }));
     return nextMember;
@@ -2694,6 +2716,33 @@ export const useAppStore = create<AppState>((set, get) => ({
               guidanceProfilePrompt: generated.guidanceProfilePrompt,
               guidanceProfileGeneratedAt: Date.now(),
               guidanceProfileUpdatedAt: Date.now(),
+            }
+          : item
+      ),
+    }));
+    return generated;
+  },
+
+  generateMemberVoicePersona: async (memberId, force = true) => {
+    const member = get().members.find((item) => item.id === memberId);
+    if (!member) {
+      throw new Error('Member not found');
+    }
+    const generated = await councilRepository.generateMemberVoicePersona({
+      memberId,
+      systemPrompt: member.systemPrompt,
+      specialties: member.specialties,
+      ttsVoiceName: member.ttsVoiceName ?? DEFAULT_MEMBER_VOICE,
+      force,
+    });
+    set((state) => ({
+      members: state.members.map((item) =>
+        item.id === memberId
+          ? {
+              ...item,
+              ttsPersonaPrompt: generated.ttsPersonaPrompt,
+              ttsPersonaGeneratedAt: Date.now(),
+              ttsPersonaUpdatedAt: Date.now(),
             }
           : item
       ),

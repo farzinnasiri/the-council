@@ -1,6 +1,6 @@
 import type { MessageSpeechResult } from '../../repository/CouncilRepository';
 
-const CACHE_NAME = 'chat-tts-v1';
+const CACHE_NAME = 'chat-tts-v2';
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const LOOKUP_BASE_URL = 'https://the-council.local/tts-lookup/';
 const ENTRY_BASE_URL = 'https://the-council.local/tts-entry/';

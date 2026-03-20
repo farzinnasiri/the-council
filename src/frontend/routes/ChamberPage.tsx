@@ -45,8 +45,7 @@ export function ChamberPage() {
     (message) =>
       message.conversationId === conversation.id &&
       !message.deletedAt &&
-      !message.supersededAt &&
-      !message.compacted
+      !message.supersededAt
   );
   const typingMembers = member
     ? (pendingReplyMemberIds[conversation.id] ?? [])

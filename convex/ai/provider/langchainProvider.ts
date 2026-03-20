@@ -4,6 +4,7 @@ import { runChamberTitleGraph, runHallTitleGraph } from '../graphs/hallTitleGrap
 import { runKBDigestGraph } from '../graphs/kbDigestGraph';
 import { runChamberGuidanceReflectionGraph, runMemberGuidanceProfileGraph } from '../graphs/memberGuidanceGraph';
 import { runMemberChatGraph } from '../graphs/memberChatGraph';
+import { runMemberVoicePersonaGraph } from '../graphs/memberVoiceGraph';
 import { runRoundIntentGraph } from '../graphs/roundIntentGraph';
 import { runRouteMembersGraph } from '../graphs/routeMembersGraph';
 import { runSpecialtiesGraph } from '../graphs/specialtiesGraph';
@@ -53,6 +54,17 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     model?: string;
   }): Promise<{ guidanceProfilePrompt: string; model: string }> {
     return await runMemberGuidanceProfileGraph(input);
+  }
+
+  async generateMemberVoicePersona(input: {
+    memberName: string;
+    systemPrompt: string;
+    specialties?: string[];
+    selectedVoiceName: 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
+    existingTtsPersonaPrompt?: string;
+    model?: string;
+  }): Promise<{ ttsPersonaPrompt: string; model: string }> {
+    return await runMemberVoicePersonaGraph(input);
   }
 
   async reflectChamberGuidance(input: {

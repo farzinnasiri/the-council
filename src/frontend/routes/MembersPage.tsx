@@ -8,7 +8,8 @@ import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
 import type { KBDigestMetadata } from '../repository/CouncilRepository';
-import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, PersonalArchiveAccess } from '../types/domain';
+import { DEFAULT_MEMBER_VOICE, describeMemberVoice, MEMBER_VOICE_OPTIONS } from '../constants/memberVoice';
+import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, MemberVoiceName, PersonalArchiveAccess } from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
 
 interface MemberFormState {
@@ -16,6 +17,8 @@ interface MemberFormState {
   specialties: string;
   systemPrompt: string;
   guidanceProfilePrompt: string;
+  ttsVoiceName: MemberVoiceName;
+  ttsPersonaPrompt: string;
   personalArchiveAccess: PersonalArchiveAccess;
 }
 
@@ -44,6 +47,8 @@ const emptyForm: MemberFormState = {
   specialties: '',
   systemPrompt: '',
   guidanceProfilePrompt: '',
+  ttsVoiceName: DEFAULT_MEMBER_VOICE,
+  ttsPersonaPrompt: '',
   personalArchiveAccess: {
     reflection: false,
     cookieJar: false,
@@ -58,6 +63,7 @@ export function MembersPage() {
   const createMember = useAppStore((state) => state.createMember);
   const updateMember = useAppStore((state) => state.updateMember);
   const generateMemberGuidanceProfile = useAppStore((state) => state.generateMemberGuidanceProfile);
+  const generateMemberVoicePersona = useAppStore((state) => state.generateMemberVoicePersona);
   const archiveMember = useAppStore((state) => state.archiveMember);
   const uploadDocsForMember = useAppStore((state) => state.uploadDocsForMember);
   const fetchDocsForMember = useAppStore((state) => state.fetchDocsForMember);
@@ -83,6 +89,9 @@ export function MembersPage() {
   const [isGuidanceDialogOpen, setIsGuidanceDialogOpen] = useState(false);
   const [guidanceDialogValue, setGuidanceDialogValue] = useState('');
   const [isGeneratingGuidance, setIsGeneratingGuidance] = useState(false);
+  const [isVoicePersonaDialogOpen, setIsVoicePersonaDialogOpen] = useState(false);
+  const [voicePersonaDialogValue, setVoicePersonaDialogValue] = useState('');
+  const [isGeneratingVoicePersona, setIsGeneratingVoicePersona] = useState(false);
   const [kbDigests, setKbDigests] = useState<KBDigestMetadata[]>([]);
   const [isDigestLoading, setIsDigestLoading] = useState(false);
   const [digestLoadError, setDigestLoadError] = useState<string | null>(null);
@@ -203,6 +212,8 @@ export function MembersPage() {
       specialties: member.specialties.join(', '),
       systemPrompt: member.systemPrompt,
       guidanceProfilePrompt: member.guidanceProfilePrompt ?? '',
+      ttsVoiceName: member.ttsVoiceName,
+      ttsPersonaPrompt: member.ttsPersonaPrompt ?? '',
       personalArchiveAccess: member.personalArchiveAccess,
     });
     setIsCreating(false);
@@ -224,6 +235,8 @@ export function MembersPage() {
     setPromptDialogValue('');
     setIsGuidanceDialogOpen(false);
     setGuidanceDialogValue('');
+    setIsVoicePersonaDialogOpen(false);
+    setVoicePersonaDialogValue('');
     setKbDigests([]);
     setDigestLoadError(null);
     setKbPanelError(null);
@@ -262,6 +275,8 @@ export function MembersPage() {
       name,
       systemPrompt: prompt,
       guidanceProfilePrompt: form.guidanceProfilePrompt.trim() || undefined,
+      ttsVoiceName: form.ttsVoiceName,
+      ttsPersonaPrompt: form.ttsPersonaPrompt.trim() || undefined,
       specialties: form.specialties
         .split(',')
         .map((item) => item.trim())
@@ -284,6 +299,8 @@ export function MembersPage() {
         specialties: created.specialties.join(', '),
         systemPrompt: created.systemPrompt,
         guidanceProfilePrompt: created.guidanceProfilePrompt ?? '',
+        ttsVoiceName: created.ttsVoiceName,
+        ttsPersonaPrompt: created.ttsPersonaPrompt ?? '',
         personalArchiveAccess: created.personalArchiveAccess,
       });
       return;
@@ -386,6 +403,16 @@ export function MembersPage() {
     setIsGuidanceDialogOpen(false);
   };
 
+  const openVoicePersonaDialog = () => {
+    setVoicePersonaDialogValue(form.ttsPersonaPrompt);
+    setIsVoicePersonaDialogOpen(true);
+  };
+
+  const saveVoicePersonaDialog = () => {
+    setForm((current) => ({ ...current, ttsPersonaPrompt: voicePersonaDialogValue }));
+    setIsVoicePersonaDialogOpen(false);
+  };
+
   const generateGuidance = async () => {
     const targetMemberId = editingMemberId;
     if (!targetMemberId) return;
@@ -396,6 +423,19 @@ export function MembersPage() {
       setGuidanceDialogValue(result.guidanceProfilePrompt);
     } finally {
       setIsGeneratingGuidance(false);
+    }
+  };
+
+  const generateVoicePersona = async () => {
+    const targetMemberId = editingMemberId;
+    if (!targetMemberId) return;
+    setIsGeneratingVoicePersona(true);
+    try {
+      const result = await generateMemberVoicePersona(targetMemberId, true);
+      setForm((current) => ({ ...current, ttsPersonaPrompt: result.ttsPersonaPrompt }));
+      setVoicePersonaDialogValue(result.ttsPersonaPrompt);
+    } finally {
+      setIsGeneratingVoicePersona(false);
     }
   };
 
@@ -798,6 +838,66 @@ export function MembersPage() {
                 </p>
               </label>
 
+              <label className="grid gap-1.5 font-mono text-xs">
+                <span>Speech voice</span>
+                <select
+                  className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                  value={form.ttsVoiceName}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, ttsVoiceName: event.target.value as MemberVoiceName }))
+                  }
+                >
+                  {MEMBER_VOICE_OPTIONS.map((voice) => (
+                    <option key={voice.value} value={voice.value}>
+                      {voice.label} - {voice.family}
+                    </option>
+                  ))}
+                </select>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  {describeMemberVoice(form.ttsVoiceName)}
+                </p>
+              </label>
+
+              <label className="grid gap-1.5 font-mono text-xs">
+                <span className="flex items-center justify-between gap-2">
+                  <span>Voice persona</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                      onClick={() => void generateVoicePersona()}
+                      disabled={!editingMemberId || isGeneratingVoicePersona}
+                      title="Generate voice persona"
+                    >
+                      {isGeneratingVoicePersona ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                      {isGeneratingVoicePersona ? 'Working…' : 'Generate'}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                      onClick={openVoicePersonaDialog}
+                      title="Expand voice persona editor"
+                    >
+                      <Expand className="h-3 w-3" />
+                      Expand
+                    </Button>
+                  </div>
+                </span>
+                <textarea
+                  className="min-h-28 rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                  value={form.ttsPersonaPrompt}
+                  onChange={(event) => setForm((current) => ({ ...current, ttsPersonaPrompt: event.target.value }))}
+                  placeholder="Generated from the system prompt after save"
+                />
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  Used only for speech delivery. If blank, TTS falls back to the default explanatory persona.
+                </p>
+              </label>
+
               <section className="rounded-md border border-border bg-background/50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1143,6 +1243,40 @@ export function MembersPage() {
                   />
                   <div className="mt-4 flex items-center gap-2">
                     <Button type="button" className="h-8 gap-2 rounded-md text-xs" onClick={saveGuidanceDialog}>
+                      <Save className="h-3.5 w-3.5" />
+                      Save changes
+                    </Button>
+                    <DialogPrimitive.Close asChild>
+                      <Button type="button" variant="ghost" className="h-8 rounded-md text-xs">
+                        Cancel
+                      </Button>
+                    </DialogPrimitive.Close>
+                  </div>
+                </DialogPrimitive.Content>
+              </DialogPrimitive.Portal>
+            </DialogPrimitive.Root>
+
+            <DialogPrimitive.Root
+              open={isVoicePersonaDialogOpen}
+              onOpenChange={(open) => {
+                setIsVoicePersonaDialogOpen(open);
+              }}
+            >
+              <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80" />
+                <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] flex h-[min(86vh,820px)] w-[min(95vw,920px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-border bg-background p-4 shadow-lg focus:outline-none md:p-5">
+                  <DialogPrimitive.Title className="font-mono text-lg font-semibold tracking-tight">Edit voice persona</DialogPrimitive.Title>
+                  <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    Private TTS-only prompt that shapes pacing, tone, and delivery for this member.
+                  </DialogPrimitive.Description>
+                  <textarea
+                    className="mt-4 min-h-0 flex-1 resize-none overflow-y-auto rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    value={voicePersonaDialogValue}
+                    onChange={(event) => setVoicePersonaDialogValue(event.target.value)}
+                    placeholder="Generated from the system prompt after save"
+                  />
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button type="button" className="h-8 gap-2 rounded-md text-xs" onClick={saveVoicePersonaDialog}>
                       <Save className="h-3.5 w-3.5" />
                       Save changes
                     </Button>
