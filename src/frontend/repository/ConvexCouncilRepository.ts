@@ -102,6 +102,8 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
     guidanceLastReflectedUserTurnCount: doc.kind === 'chamber' ? doc.guidanceLastReflectedUserTurnCount : undefined,
     title: doc.title,
     chamberMemberId: doc.chamberMemberId as string | undefined,
+    closedAt: doc.closedAt,
+    closedReason: doc.closedReason,
     deletedAt: doc.deletedAt,
     lastMessageAt: doc.lastMessageAt,
     createdAt: doc._creationTime,
@@ -166,16 +168,19 @@ function toRoundtableState(doc: any): RoundtableState {
       createdAt: doc.round._creationTime,
     },
     spokenMemberIds: doc.spokenMemberIds ?? [],
-    intents: (doc.intents ?? []).map((row: any) => ({
+    candidates: (doc.candidates ?? []).map((row: any) => ({
       id: row._id,
       conversationId: row.conversationId,
       roundNumber: row.roundNumber,
       memberId: row.memberId,
-      intent: row.intent,
+      rank: row.rank,
+      status: row.status,
+      moveType: row.moveType,
       targetMemberId: row.targetMemberId,
-      rationale: row.rationale,
-      selected: row.selected,
-      source: row.source,
+      rationaleTag: row.rationaleTag,
+      allocatorReason: row.allocatorReason,
+      score: row.score,
+      selectedBy: row.selectedBy,
       updatedAt: row.updatedAt,
       createdAt: row._creationTime,
     })),
@@ -700,6 +705,16 @@ class ConvexCouncilRepository implements CouncilRepository {
     });
   }
 
+  async closeHall(conversationId: string): Promise<{ conversation: Conversation; closingMessage: Message }> {
+    const result = await this.client.action(api.ai.chat.closeHall as any, {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+    return {
+      conversation: toConversation(result.conversation),
+      closingMessage: toMessage(result.closingMessage),
+    };
+  }
+
   async createChamberThread(memberId: string): Promise<Conversation> {
     const doc = await this.clientAny.mutation('conversations:createChamberThread', {
       memberId: memberId as Id<'members'>,
@@ -1207,10 +1222,14 @@ class ConvexCouncilRepository implements CouncilRepository {
   async markRoundtableInProgress(input: {
     conversationId: string;
     roundNumber: number;
+    speakingMemberId?: string;
+    selectedBy?: 'allocator' | 'mention_boost' | 'user_manual_fallback';
   }): Promise<RoundtableState> {
     const result = await this.clientAny.mutation('hallRounds:markRoundInProgress', {
       conversationId: input.conversationId as Id<'conversations'>,
       roundNumber: input.roundNumber,
+      speakingMemberId: input.speakingMemberId as Id<'members'> | undefined,
+      selectedBy: input.selectedBy,
     });
     return toRoundtableState(result);
   }

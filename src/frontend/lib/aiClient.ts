@@ -299,6 +299,8 @@ export async function refreshRoundtableRound(input: {
 export async function markRoundtableInProgress(input: {
   conversationId: string;
   roundNumber: number;
+  speakingMemberId?: string;
+  selectedBy?: 'allocator' | 'mention_boost' | 'user_manual_fallback';
 }): Promise<RoundtableState> {
   return await convexRepository.markRoundtableInProgress(input);
 }

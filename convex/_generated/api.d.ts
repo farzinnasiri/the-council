@@ -11,13 +11,14 @@
 import type * as ai_archive from "../ai/archive.js";
 import type * as ai_chat from "../ai/chat.js";
 import type * as ai_graphs_fallbacks from "../ai/graphs/fallbacks.js";
+import type * as ai_graphs_hallClosureGraph from "../ai/graphs/hallClosureGraph.js";
 import type * as ai_graphs_hallTitleGraph from "../ai/graphs/hallTitleGraph.js";
 import type * as ai_graphs_kbDigestGraph from "../ai/graphs/kbDigestGraph.js";
 import type * as ai_graphs_memberChatGraph from "../ai/graphs/memberChatGraph.js";
 import type * as ai_graphs_memberGuidanceGraph from "../ai/graphs/memberGuidanceGraph.js";
 import type * as ai_graphs_memberMemoryGraph from "../ai/graphs/memberMemoryGraph.js";
 import type * as ai_graphs_memberVoiceGraph from "../ai/graphs/memberVoiceGraph.js";
-import type * as ai_graphs_roundIntentGraph from "../ai/graphs/roundIntentGraph.js";
+import type * as ai_graphs_roundBidGraph from "../ai/graphs/roundBidGraph.js";
 import type * as ai_graphs_routeMembersGraph from "../ai/graphs/routeMembersGraph.js";
 import type * as ai_graphs_specialtiesGraph from "../ai/graphs/specialtiesGraph.js";
 import type * as ai_graphs_summaryGraph from "../ai/graphs/summaryGraph.js";
@@ -65,6 +66,7 @@ import type * as contexts_hall_application_suggestMemberSpecialties from "../con
 import type * as contexts_hall_contracts from "../contexts/hall/contracts.js";
 import type * as contexts_hall_domain_hallMode from "../contexts/hall/domain/hallMode.js";
 import type * as contexts_hall_domain_hallPrompt from "../contexts/hall/domain/hallPrompt.js";
+import type * as contexts_hall_domain_roundtableAllocator from "../contexts/hall/domain/roundtableAllocator.js";
 import type * as contexts_hall_infrastructure_membersRepo from "../contexts/hall/infrastructure/membersRepo.js";
 import type * as contexts_hall_infrastructure_memoryRepo from "../contexts/hall/infrastructure/memoryRepo.js";
 import type * as contexts_hall_infrastructure_messagesRepo from "../contexts/hall/infrastructure/messagesRepo.js";
@@ -120,13 +122,14 @@ declare const fullApi: ApiFromModules<{
   "ai/archive": typeof ai_archive;
   "ai/chat": typeof ai_chat;
   "ai/graphs/fallbacks": typeof ai_graphs_fallbacks;
+  "ai/graphs/hallClosureGraph": typeof ai_graphs_hallClosureGraph;
   "ai/graphs/hallTitleGraph": typeof ai_graphs_hallTitleGraph;
   "ai/graphs/kbDigestGraph": typeof ai_graphs_kbDigestGraph;
   "ai/graphs/memberChatGraph": typeof ai_graphs_memberChatGraph;
   "ai/graphs/memberGuidanceGraph": typeof ai_graphs_memberGuidanceGraph;
   "ai/graphs/memberMemoryGraph": typeof ai_graphs_memberMemoryGraph;
   "ai/graphs/memberVoiceGraph": typeof ai_graphs_memberVoiceGraph;
-  "ai/graphs/roundIntentGraph": typeof ai_graphs_roundIntentGraph;
+  "ai/graphs/roundBidGraph": typeof ai_graphs_roundBidGraph;
   "ai/graphs/routeMembersGraph": typeof ai_graphs_routeMembersGraph;
   "ai/graphs/specialtiesGraph": typeof ai_graphs_specialtiesGraph;
   "ai/graphs/summaryGraph": typeof ai_graphs_summaryGraph;
@@ -174,6 +177,7 @@ declare const fullApi: ApiFromModules<{
   "contexts/hall/contracts": typeof contexts_hall_contracts;
   "contexts/hall/domain/hallMode": typeof contexts_hall_domain_hallMode;
   "contexts/hall/domain/hallPrompt": typeof contexts_hall_domain_hallPrompt;
+  "contexts/hall/domain/roundtableAllocator": typeof contexts_hall_domain_roundtableAllocator;
   "contexts/hall/infrastructure/membersRepo": typeof contexts_hall_infrastructure_membersRepo;
   "contexts/hall/infrastructure/memoryRepo": typeof contexts_hall_infrastructure_memoryRepo;
   "contexts/hall/infrastructure/messagesRepo": typeof contexts_hall_infrastructure_messagesRepo;

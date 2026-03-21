@@ -67,6 +67,7 @@ interface AppState {
   hydrated: boolean;
   isRouting: boolean;
   routingConversationId?: string;
+  closingConversationId?: string;
   themeMode: ThemeMode;
   members: Member[];
   conversations: Conversation[];
@@ -123,6 +124,7 @@ interface AppState {
   markChamberTimeAwareReentryNoticeSeen: (conversationId: string) => Promise<void>;
   renameConversation: (conversationId: string, title: string) => Promise<void>;
   archiveConversation: (conversationId: string) => Promise<void>;
+  closeHall: (conversationId: string) => Promise<void>;
   createChamberThread: (memberId: string) => Promise<Conversation>;
   startHallFollowUpThread: (
     hallConversationId: string,
@@ -210,6 +212,10 @@ function removeKey<T>(record: Record<string, T>, key: string) {
 
 function isVisibleMessage(message: Message) {
   return !message.deletedAt && !message.supersededAt && !message.compacted;
+}
+
+function isClosedHallConversation(conversation: Conversation | undefined) {
+  return conversation?.kind === 'hall' && Boolean(conversation.closedAt);
 }
 
 function getBaseGenerationProfile(mode: ChamberResponseMode | undefined): {
@@ -556,12 +562,13 @@ function stripLeadingSpeakerLabel(text: string, memberName: string): string {
   return text;
 }
 
-function selectOpeningRoundMembers(intents: RoundtableState['intents']): string[] {
-  const selected = intents.filter((intent) => intent.selected).map((intent) => intent.memberId);
-  if (selected.length > 0) return selected;
-  const nonPass = intents.filter((intent) => intent.intent !== 'pass').map((intent) => intent.memberId);
-  if (nonPass.length > 0) return nonPass;
-  return intents.map((intent) => intent.memberId);
+function selectOpeningRoundMembers(candidates: RoundtableState['candidates']): string[] {
+  const shortlisted = candidates
+    .filter((candidate) => candidate.status === 'shortlisted' || candidate.status === 'speaking')
+    .sort((left, right) => left.rank - right.rank)
+    .map((candidate) => candidate.memberId);
+  if (shortlisted.length > 0) return shortlisted;
+  return candidates.map((candidate) => candidate.memberId);
 }
 
 function buildHallRoundAssignments(
@@ -686,6 +693,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   hydrated: false,
   isRouting: false,
   routingConversationId: undefined,
+  closingConversationId: undefined,
   themeMode: 'system',
   members: [],
   conversations: [],
@@ -1101,7 +1109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   refreshRoundtableState: async (conversationId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
+    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
       return;
     }
 
@@ -1116,7 +1124,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   continueRoundtableRound: async (conversationId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
+    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
       return;
     }
     const snapshot = get().roundtableStateByConversation[conversationId];
@@ -1155,7 +1163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   speakNextRoundtableMember: async (conversationId, memberId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
+    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
       return;
     }
 
@@ -1168,16 +1176,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (snapshot.spokenMemberIds.includes(memberId)) {
       return;
     }
-    const ready = snapshot.intents.find((item) => item.memberId === memberId && item.selected);
-    const intent = snapshot.intents.find((item) => item.memberId === memberId);
-    if (!intent) {
+    const candidate = snapshot.candidates.find((item) => item.memberId === memberId);
+    if (!candidate) {
       return;
     }
+    const ready = candidate.status === 'shortlisted' || candidate.status === 'speaking';
     const force = !ready;
 
     const inProgress = await markRoundtableInProgress({
       conversationId,
       roundNumber,
+      speakingMemberId: memberId,
+      selectedBy: force ? 'user_manual_fallback' : candidate.selectedBy,
     });
 
     set((state) => ({
@@ -1276,7 +1286,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   finishRoundtableRound: async (conversationId) => {
     const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable') {
+    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
       return;
     }
 
@@ -1492,6 +1502,47 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  closeHall: async (conversationId) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'hall' || conversation.closedAt) {
+      return;
+    }
+
+    set({ closingConversationId: conversationId });
+    try {
+      const result = await councilRepository.closeHall(conversationId);
+      set((state) => ({
+        ...patchConversationEverywhere(state, conversationId, result.conversation),
+        messages: [...state.messages, result.closingMessage],
+        closingConversationId: undefined,
+        isRouting:
+          state.routingConversationId === conversationId ? false : state.isRouting,
+        routingConversationId:
+          state.routingConversationId === conversationId ? undefined : state.routingConversationId,
+        pendingReplyCount: {
+          ...state.pendingReplyCount,
+          [conversationId]: 0,
+        },
+        pendingReplyMemberIds: {
+          ...state.pendingReplyMemberIds,
+          [conversationId]: [],
+        },
+        roundtableStateByConversation: {
+          ...state.roundtableStateByConversation,
+          [conversationId]: null,
+        },
+        roundtablePreparingByConversation: {
+          ...state.roundtablePreparingByConversation,
+          [conversationId]: false,
+        },
+      }));
+    } catch (error) {
+      set({ closingConversationId: undefined });
+      get().showToast(error instanceof Error ? error.message : 'Could not close this table.');
+      throw error;
+    }
+  },
+
   createChamberThread: async (memberId) => {
     const created = await councilRepository.createChamberThread(memberId);
 
@@ -1610,6 +1661,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     const conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return undefined;
+    if (isClosedHallConversation(conversation)) {
+      get().showToast('This table is closed.');
+      return undefined;
+    }
     const previousActiveMessageAt =
       conversation.kind === 'chamber'
         ? getLatestActiveNonSystemMessageAt(state.messages, conversationId)
@@ -1698,6 +1753,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     let conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
+    if (isClosedHallConversation(conversation)) {
+      return;
+    }
     let activeTimeAwareReentryState =
       conversation.kind === 'chamber' ? conversation.timeAwareReentryState : undefined;
     const currentHallRoundNumber =
@@ -1832,7 +1890,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
 
         if (isOpeningRound && nextRound.round.status === 'awaiting_user') {
-          const openingSpeakerIds = selectOpeningRoundMembers(nextRound.intents);
+          const openingSpeakerIds = selectOpeningRoundMembers(nextRound.candidates);
           if (openingSpeakerIds.length > 0) {
             const inProgress = await markRoundtableInProgress({
               conversationId,

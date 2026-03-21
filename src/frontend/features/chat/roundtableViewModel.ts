@@ -3,14 +3,15 @@ import type { Member, RoundtableState } from '../../types/domain';
 export interface RoundtableChoice {
   memberId: string;
   name: string;
-  volunteered: boolean;
+  rationaleTag: 'pushback' | 'new angle' | 'evidence' | 'synthesis' | 'clarify';
+  score: number;
 }
 
 export interface RoundtableViewModel {
   isOpeningRound: boolean;
   spokenCount: number;
   remainingCount: number;
-  volunteeredChoices: RoundtableChoice[];
+  shortlistedChoices: RoundtableChoice[];
   fallbackChoices: RoundtableChoice[];
   spokenNames: string[];
 }
@@ -19,17 +20,21 @@ export function deriveRoundtableViewModel(state: RoundtableState, members: Membe
   const membersById = new Map(members.map((member) => [member.id, member]));
   const spokenSet = new Set(state.spokenMemberIds);
 
-  const remainingChoices = state.intents
-    .filter((intent) => !spokenSet.has(intent.memberId))
-    .map((intent) => ({
-      memberId: intent.memberId,
-      name: membersById.get(intent.memberId)?.name ?? intent.memberId,
-      volunteered: intent.selected,
+  const remainingChoices = state.candidates
+    .filter((candidate) => !spokenSet.has(candidate.memberId))
+    .map((candidate) => ({
+      memberId: candidate.memberId,
+      name: membersById.get(candidate.memberId)?.name ?? candidate.memberId,
+      rationaleTag: candidate.rationaleTag,
+      score: candidate.score,
+      rank: candidate.rank,
+      shortlisted: candidate.status === 'shortlisted' || candidate.status === 'speaking',
     }))
     .sort((left, right) => {
-      if (left.volunteered !== right.volunteered) {
-        return left.volunteered ? -1 : 1;
+      if (left.shortlisted !== right.shortlisted) {
+        return left.shortlisted ? -1 : 1;
       }
+      if (left.rank !== right.rank) return left.rank - right.rank;
       return left.name.localeCompare(right.name);
     });
 
@@ -40,8 +45,12 @@ export function deriveRoundtableViewModel(state: RoundtableState, members: Membe
     isOpeningRound: state.round.roundNumber === 1,
     spokenCount: state.spokenMemberIds.length,
     remainingCount: remainingChoices.length,
-    volunteeredChoices: remainingChoices.filter((choice) => choice.volunteered),
-    fallbackChoices: remainingChoices.filter((choice) => !choice.volunteered),
+    shortlistedChoices: remainingChoices
+      .filter((choice) => choice.shortlisted)
+      .map(({ rank: _rank, shortlisted: _shortlisted, ...choice }) => choice),
+    fallbackChoices: remainingChoices
+      .filter((choice) => !choice.shortlisted)
+      .map(({ rank: _rank, shortlisted: _shortlisted, ...choice }) => choice),
     spokenNames,
   };
 }

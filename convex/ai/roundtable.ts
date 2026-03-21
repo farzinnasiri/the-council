@@ -3,7 +3,10 @@
 import { action } from '../_generated/server';
 import { v } from 'convex/values';
 import {
-  roundIntentValidator,
+  roundBidMoveTypeValidator,
+  roundtableCandidateSelectedByValidator,
+  roundtableCandidateStatusValidator,
+  roundtableRationaleTagValidator,
   roundtableSpeakIntentValidator,
   roundTriggerValidator,
 } from '../contexts/shared/contracts';
@@ -38,19 +41,22 @@ export const prepareRoundtableRound = action({
       updatedAt: v.number(),
     }),
     spokenMemberIds: v.array(v.id('members')),
-    intents: v.array(
+    candidates: v.array(
       v.object({
-        _id: v.id('hallRoundIntents'),
+        _id: v.id('hallRoundCandidates'),
         _creationTime: v.number(),
         userId: v.id('users'),
         conversationId: v.id('conversations'),
         roundNumber: v.number(),
         memberId: v.id('members'),
-        intent: roundIntentValidator,
+        rank: v.number(),
+        status: roundtableCandidateStatusValidator,
+        moveType: roundBidMoveTypeValidator,
         targetMemberId: v.optional(v.id('members')),
-        rationale: v.string(),
-        selected: v.boolean(),
-        source: v.union(v.literal('mention'), v.literal('intent_default'), v.literal('user_manual')),
+        rationaleTag: roundtableRationaleTagValidator,
+        allocatorReason: v.string(),
+        score: v.number(),
+        selectedBy: roundtableCandidateSelectedByValidator,
         updatedAt: v.number(),
       })
     ),
@@ -89,19 +95,22 @@ export const refreshRoundtableRound = action({
       updatedAt: v.number(),
     }),
     spokenMemberIds: v.array(v.id('members')),
-    intents: v.array(
+    candidates: v.array(
       v.object({
-        _id: v.id('hallRoundIntents'),
+        _id: v.id('hallRoundCandidates'),
         _creationTime: v.number(),
         userId: v.id('users'),
         conversationId: v.id('conversations'),
         roundNumber: v.number(),
         memberId: v.id('members'),
-        intent: roundIntentValidator,
+        rank: v.number(),
+        status: roundtableCandidateStatusValidator,
+        moveType: roundBidMoveTypeValidator,
         targetMemberId: v.optional(v.id('members')),
-        rationale: v.string(),
-        selected: v.boolean(),
-        source: v.union(v.literal('mention'), v.literal('intent_default'), v.literal('user_manual')),
+        rationaleTag: roundtableRationaleTagValidator,
+        allocatorReason: v.string(),
+        score: v.number(),
+        selectedBy: roundtableCandidateSelectedByValidator,
         updatedAt: v.number(),
       })
     ),

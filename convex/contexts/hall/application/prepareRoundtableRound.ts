@@ -2,19 +2,21 @@
 
 import type { Id } from '../../../_generated/dataModel';
 import { resolveRoundtableMaxSpeakers } from '../../../ai/roundtablePolicy';
-import { applyRoundDefaultSelection, buildRoundContext } from '../../../ai/orchestration/roundtableHall';
-import type { RoundIntentProposal } from '../../../ai/provider/types';
-import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
+import { buildRoundContext } from '../../../ai/orchestration/roundtableHall';
+import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, withTimeout } from '../../shared/convexGateway';
-import type { PreparedRoundIntent, RoundtableState } from '../../shared/types';
+import type { RoundtableState } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
+import { allocateRoundCandidates, type RoundBidDraft } from '../domain/roundtableAllocator';
 import type { PrepareRoundtableRoundInput } from '../contracts';
 import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
-import { createRoundWithIntents, getRoundtableState } from '../infrastructure/roundtableRepo';
+import { createRoundWithCandidates, getRoundtableState } from '../infrastructure/roundtableRepo';
 import { setMainSpanAttributes } from '../../../observability/wideEvents';
 import { wideEventError } from '../../../observability/errors';
+
+const BID_TIMEOUT_MS = 3000;
 
 export async function prepareRoundtableRoundUseCase(
   ctx: any,
@@ -28,6 +30,10 @@ export async function prepareRoundtableRoundUseCase(
       statusCode: 400,
     });
   }
+  assertHallConversationOpen(conversation, {
+    errorCode: 'roundtable-prepare-conversation-closed',
+    message: 'This table is closed.',
+  });
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
     throw wideEventError('roundtable-prepare-mode-invalid', 'Conversation is not in roundtable mode', {
@@ -73,38 +79,60 @@ export async function prepareRoundtableRoundUseCase(
   });
 
   if (isOpeningRound) {
-    return await createRoundWithIntents(ctx, {
+    return await createRoundWithCandidates(ctx, {
       conversationId: args.conversationId,
       trigger: args.trigger,
       triggerMessageId: args.triggerMessageId,
       maxSpeakers,
-      intents: activeMemberIds.map((memberId) => ({
+      bids: [],
+      candidates: activeMemberIds.map((memberId, index) => ({
         memberId,
-        intent: 'speak' as const,
+        rank: index + 1,
+        status: 'shortlisted' as const,
+        moveType: 'synthesis' as const,
         targetMemberId: undefined,
-        rationale: 'Opening round: give your initial position.',
-        selected: true,
-        source: 'intent_default' as const,
+        rationaleTag: 'new angle' as const,
+        allocatorReason: 'Opening round: give your initial position.',
+        score: 1,
+        selectedBy: 'allocator' as const,
       })),
     });
   }
 
+  const recentSpeakerIds = Array.from(
+    new Set(
+      activeMessages
+        .filter(
+          (message) =>
+            message.role === 'member' &&
+            message.status !== 'error' &&
+            typeof message.roundNumber === 'number' &&
+            message.roundNumber >= Math.max(1, (existingRoundState?.round.roundNumber ?? 1) - 3)
+        )
+        .map((message) => message.authorMemberId)
+        .filter(Boolean)
+    )
+  ) as Id<'members'>[];
   const provider = createAiProvider();
 
-  const proposed = await Promise.all(
+  const bids = await Promise.all(
     activeMemberIds.map(async (memberId) => {
       const member = membersById.get(memberId as string);
       if (!member) {
         return {
-          memberId: memberId as string,
-          intent: 'pass' as const,
-          rationale: 'Member unavailable.',
-        } satisfies RoundIntentProposal & { memberId: string };
+          memberId,
+          wantsToSpeak: false,
+          moveType: 'pass' as const,
+          targetMemberId: undefined,
+          noveltyClaim: 'Member unavailable.',
+          confidence: 0.1,
+          estimatedValue: 0.05,
+        } satisfies RoundBidDraft;
       }
 
       try {
-        const intent = await withTimeout(
-          provider.proposeRoundIntentPromptOnly({
+        const bid = await withTimeout(
+          provider.proposeRoundBidPromptOnly({
             member: {
               id: member._id as string,
               name: member.name,
@@ -113,60 +141,79 @@ export async function prepareRoundtableRoundUseCase(
             },
             conversationContext: roundContext,
             memberIds: activeMemberIds.map((id) => id as string),
+            recentSpeakerIds: recentSpeakerIds.map((id) => id as string),
+            mentionedMemberIds: args.mentionedMemberIds?.map((id) => id as string),
           }),
-          2500
+          BID_TIMEOUT_MS
         );
 
         return {
-          memberId: memberId as string,
-          intent: intent.intent,
-          targetMemberId: intent.targetMemberId,
-          rationale: intent.rationale,
-        };
+          memberId,
+          wantsToSpeak: bid.wantsToSpeak,
+          moveType: bid.moveType,
+          targetMemberId: bid.targetMemberId as Id<'members'> | undefined,
+          noveltyClaim: bid.noveltyClaim,
+          confidence: bid.confidence,
+          estimatedValue: bid.estimatedValue,
+        } satisfies RoundBidDraft;
       } catch {
         return {
-          memberId: memberId as string,
-          intent: 'pass' as const,
-          rationale: 'Will listen unless a clearer opening emerges.',
-        };
+          memberId,
+          wantsToSpeak: false,
+          moveType: 'pass' as const,
+          targetMemberId: undefined,
+          noveltyClaim: 'No reliable bid available.',
+          confidence: 0.15,
+          estimatedValue: 0.1,
+        } satisfies RoundBidDraft;
       }
     })
   );
 
-  const preparedIntents = applyRoundDefaultSelection({
-    intents: proposed.map((row) => ({
-      memberId: row.memberId,
-      intent: row.intent,
-      targetMemberId: row.targetMemberId,
-      rationale: row.rationale,
-      selected: false,
-      source: 'intent_default',
-    })),
+  const allocated = allocateRoundCandidates({
+    bids,
+    activeMemberIds,
+    currentRound: (existingRoundState?.round.roundNumber ?? 0) + 1,
     maxSpeakers,
-  }) as PreparedRoundIntent[];
+    mentionedMemberIds: args.mentionedMemberIds,
+    recentMessages: activeMessages,
+  });
 
-  if (args.trigger === 'user_message' && preparedIntents.every((row) => !row.selected) && preparedIntents.length > 0) {
-    for (const row of preparedIntents.slice(0, Math.min(2, maxSpeakers, preparedIntents.length))) {
-      row.intent = 'speak';
-      row.targetMemberId = undefined;
-      row.rationale = 'Fresh user message: respond instead of deferring.';
-      row.selected = true;
-    }
-  }
-
-  return await createRoundWithIntents(ctx, {
+  return await createRoundWithCandidates(ctx, {
     conversationId: args.conversationId,
     trigger: args.trigger,
     triggerMessageId: args.triggerMessageId,
     maxSpeakers,
     initialStatus: 'awaiting_user',
-    intents: preparedIntents.map((row) => ({
-      memberId: row.memberId as Id<'members'>,
-      intent: row.intent,
-      targetMemberId: row.targetMemberId as Id<'members'> | undefined,
-      rationale: row.rationale,
-      selected: row.selected,
-      source: row.source,
+    bids: allocated.bids.map((row) => ({
+      memberId: row.memberId,
+      wantsToSpeak: row.wantsToSpeak,
+      moveType: row.moveType,
+      targetMemberId: row.targetMemberId,
+      noveltyClaim: row.noveltyClaim,
+      confidence: row.confidence,
+      estimatedValue: row.estimatedValue,
+      relevanceScore: row.relevanceScore,
+      noveltyScore: row.noveltyScore,
+      tensionScore: row.tensionScore,
+      coverageScore: row.coverageScore,
+      recencyPenalty: row.recencyPenalty,
+      dominancePenalty: row.dominancePenalty,
+      mentionBoost: row.mentionBoost,
+      overlapPenalty: row.overlapPenalty,
+      allocatorScore: row.allocatorScore,
+      allocatorReason: row.allocatorReason,
+    })),
+    candidates: allocated.candidates.map((row) => ({
+      memberId: row.memberId,
+      rank: row.rank,
+      status: row.status,
+      moveType: row.moveType,
+      targetMemberId: row.targetMemberId,
+      rationaleTag: row.rationaleTag,
+      allocatorReason: row.allocatorReason,
+      score: row.score,
+      selectedBy: row.selectedBy,
     })),
   });
 }

@@ -1,4 +1,5 @@
-import { CheckCircle2, Hand, Loader2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Hand, Loader2 } from 'lucide-react';
+import { useState } from 'react';
 import type { Member, RoundtableState } from '../../types/domain';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../lib/utils';
@@ -79,6 +80,8 @@ export function RoundtablePanel({
   isRunning,
   isPreparing = false,
 }: RoundtablePanelProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
   if (!state) {
     const isBusy = isPreparing || isRunning;
     return (
@@ -109,6 +112,7 @@ export function RoundtablePanel({
   const canChooseNext = isAwaitingUser && !isPreparing && !isRunning;
   const showChoices = isAwaitingUser && view.remainingCount > 0;
   const showFallbackChoices = showChoices && view.fallbackChoices.length > 0;
+  const collapseLabel = collapsed ? 'Expand roundtable panel' : 'Collapse roundtable panel';
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pt-2 md:px-8">
@@ -121,9 +125,9 @@ export function RoundtablePanel({
             </p>
             {round.status === 'awaiting_user' ? (
               <p className="text-xs text-muted-foreground">
-                {view.volunteeredChoices.length > 0
-                  ? `${view.volunteeredChoices.length} raised hand${view.volunteeredChoices.length === 1 ? '' : 's'}`
-                  : 'No raised hands'}
+                {view.shortlistedChoices.length > 0
+                  ? `${view.shortlistedChoices.length} suggested speaker${view.shortlistedChoices.length === 1 ? '' : 's'}`
+                  : 'No suggestions'}
               </p>
             ) : null}
           </div>
@@ -138,89 +142,94 @@ export function RoundtablePanel({
                 Prepare round
               </Button>
             ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 w-8 rounded-full p-0"
+              onClick={() => setCollapsed((current) => !current)}
+              aria-label={collapseLabel}
+              title={collapseLabel}
+            >
+              {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </Button>
           </div>
         </div>
 
-        {isPreparing ? (
-          <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-3 py-1 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Collecting hands
-          </div>
-        ) : null}
-
-        {view.isOpeningRound ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Everyone gives one opener before the table moves into moderated rounds.
-          </p>
-        ) : null}
-
-        {round.status === 'in_progress' ? (
-          <p className="mt-2 text-xs text-muted-foreground">Waiting for the current speaker to finish.</p>
-        ) : null}
-
-        {round.status === 'awaiting_user' && view.volunteeredChoices.length === 0 ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            No one raised a hand. You can pick any participant or end the round.
-          </p>
-        ) : null}
-
-        {round.status === 'completed' && view.spokenCount === 0 ? (
-          <p className="mt-2 text-xs text-muted-foreground">This round ended without any member speaking.</p>
-        ) : null}
-
-        {showChoices ? (
-          <div className="mt-3 space-y-3">
-            {view.volunteeredChoices.length > 0 ? (
-              <div>
-                <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Raised Hands</p>
-                <div className="flex flex-wrap gap-2">
-                  {view.volunteeredChoices.map((choice) => (
-                    <Button
-                      key={choice.memberId}
-                      size="sm"
-                      className="rounded-full"
-                      onClick={() => onSpeakNext(choice.memberId)}
-                      disabled={!canChooseNext}
-                    >
-                      <Hand className="mr-1.5 h-3.5 w-3.5" />
-                      {choice.name}
-                    </Button>
-                  ))}
-                </div>
+        {collapsed ? null : (
+          <>
+            {isPreparing ? (
+              <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-background/70 px-3 py-1 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Collecting hands
               </div>
             ) : null}
 
-            {showFallbackChoices ? (
-              <div>
-                <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Pick Anyone</p>
-                <div className="flex flex-wrap gap-2">
-                  {view.fallbackChoices.map((choice) => (
-                    <Button
-                      key={choice.memberId}
-                      size="sm"
-                      variant="outline"
-                      className={cn('rounded-full')}
-                      onClick={() => onSpeakNext(choice.memberId)}
-                      disabled={!canChooseNext}
-                    >
-                      {choice.name}
-                    </Button>
-                  ))}
-                </div>
+            {view.isOpeningRound ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Everyone gives one opener before the table moves into moderated rounds.
+              </p>
+            ) : null}
+
+            {round.status === 'in_progress' ? (
+              <p className="mt-2 text-xs text-muted-foreground">Waiting for the current speaker to finish.</p>
+            ) : null}
+
+            {round.status === 'awaiting_user' && view.shortlistedChoices.length === 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                No strong next speaker was suggested. You can pick anyone or end the round.
+              </p>
+            ) : null}
+
+            {round.status === 'completed' && view.spokenCount === 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">This round ended without any member speaking.</p>
+            ) : null}
+
+            {showChoices ? (
+              <div className="mt-3 space-y-3">
+                {view.shortlistedChoices.length > 0 ? (
+                  <div>
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Suggested Speakers</p>
+                    <div className="flex flex-wrap gap-2">
+                      {view.shortlistedChoices.map((choice) => (
+                        <Button
+                          key={choice.memberId}
+                          size="sm"
+                          className="rounded-full"
+                          onClick={() => onSpeakNext(choice.memberId)}
+                          disabled={!canChooseNext}
+                        >
+                          <Hand className="mr-1.5 h-3.5 w-3.5" />
+                          {choice.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {showFallbackChoices ? (
+                  <div>
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Pick Anyone</p>
+                    <div className="flex flex-wrap gap-2">
+                      {view.fallbackChoices.map((choice) => (
+                        <Button
+                          key={choice.memberId}
+                          size="sm"
+                          variant="outline"
+                          className={cn('rounded-full')}
+                          onClick={() => onSpeakNext(choice.memberId)}
+                          disabled={!canChooseNext}
+                        >
+                          {choice.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
-          </div>
-        ) : null}
-
-        {view.spokenNames.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Spoke
-            </span>
-            <span>{view.spokenNames.join(', ')}</span>
-          </div>
-        ) : null}
+          </>
+        )}
       </div>
     </div>
   );

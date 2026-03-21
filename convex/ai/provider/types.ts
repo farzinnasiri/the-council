@@ -1,4 +1,13 @@
 export type RoundIntent = 'speak' | 'challenge' | 'support' | 'pass';
+export type RoundBidMoveType =
+  | 'rebuttal'
+  | 'caveat'
+  | 'synthesis'
+  | 'evidence'
+  | 'reframing'
+  | 'clarification'
+  | 'agreement'
+  | 'pass';
 
 export interface CouncilContextMessage {
   role: 'user' | 'assistant';
@@ -55,10 +64,13 @@ export interface CouncilPersonalArchiveRetriever {
   }>;
 }
 
-export interface RoundIntentProposal {
-  intent: RoundIntent;
+export interface RoundBidProposal {
+  wantsToSpeak: boolean;
+  moveType: RoundBidMoveType;
   targetMemberId?: string;
-  rationale: string;
+  noveltyClaim: string;
+  confidence: number;
+  estimatedValue: number;
 }
 
 export interface CouncilKnowledgeRetriever {
@@ -207,10 +219,12 @@ export interface CouncilAiProvider {
     model: string;
   }>;
 
-  proposeRoundIntentPromptOnly(input: {
+  proposeRoundBidPromptOnly(input: {
     member: { id: string; name: string; specialties?: string[]; systemPrompt: string };
     conversationContext: string;
     memberIds: string[];
+    recentSpeakerIds?: string[];
+    mentionedMemberIds?: string[];
     model?: string;
-  }): Promise<RoundIntentProposal>;
+  }): Promise<RoundBidProposal>;
 }

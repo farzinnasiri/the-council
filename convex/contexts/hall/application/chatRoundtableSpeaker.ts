@@ -3,8 +3,9 @@
 import { resolveModel } from '../../../ai/modelConfig';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
 import { chatWithMemberUseCase } from '../../chamber/application/chatWithMember';
-import { requireOwnedConversation, requireOwnedMember } from '../../shared/auth';
+import { assertHallConversationOpen, requireOwnedConversation, requireOwnedMember } from '../../shared/auth';
 import { normalizeHallMode } from '../domain/hallMode';
+import { moveTypeToRoundIntent } from '../domain/roundtableAllocator';
 import type { ChatRoundtableSpeakerInput, RoundtableSingleSpeakerResponse } from '../contracts';
 import { buildContextMessages, buildHallContextAddendum } from '../domain/hallPrompt';
 import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
@@ -30,6 +31,10 @@ export async function chatRoundtableSpeakerUseCase(
       statusCode: 400,
     });
   }
+  assertHallConversationOpen(conversation, {
+    errorCode: 'roundtable-speaker-conversation-closed',
+    message: 'This table is closed.',
+  });
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
     throw wideEventError('roundtable-mode-invalid', 'Conversation is not in roundtable mode', { statusCode: 400 });
@@ -45,23 +50,27 @@ export async function chatRoundtableSpeakerUseCase(
     throw wideEventError('roundtable-round-not-open', 'Round is not open for speaking', { statusCode: 409 });
   }
 
-  const persistedIntentRow = state.intents.find((row) => row.memberId === args.memberId);
+  const persistedCandidateRow = state.candidates.find((row) => row.memberId === args.memberId);
 
-  if (!persistedIntentRow) {
+  if (!persistedCandidateRow) {
     throw wideEventError('roundtable-member-not-in-round', 'Member is not part of this round', { statusCode: 404 });
   }
 
-  if (!persistedIntentRow.selected && !args.force) {
+  if (
+    persistedCandidateRow.status !== 'shortlisted' &&
+    persistedCandidateRow.status !== 'speaking' &&
+    !args.force
+  ) {
     throw wideEventError('roundtable-member-not-selected', 'Member is not selected for this round', { statusCode: 409 });
   }
 
-  const intentRow: typeof persistedIntentRow = persistedIntentRow.selected
-    ? persistedIntentRow
+  const candidateRow: typeof persistedCandidateRow = persistedCandidateRow.status === 'shortlisted' || persistedCandidateRow.status === 'speaking'
+    ? persistedCandidateRow
     : {
-        ...persistedIntentRow,
-        intent: 'speak' as const,
+        ...persistedCandidateRow,
+        moveType: 'clarification' as const,
         targetMemberId: undefined,
-        rationale: persistedIntentRow.rationale || 'User forced this member to speak in the round.',
+        allocatorReason: persistedCandidateRow.allocatorReason || 'User forced this member to speak in the round.',
       };
 
   const [participants, membersById, activeMessages, allMessages, hallSummaryRows, rawRoundTail] = await Promise.all([
@@ -91,14 +100,14 @@ export async function chatRoundtableSpeakerUseCase(
     throw wideEventError('roundtable-member-not-found', 'Member not found', { statusCode: 404 });
   }
 
-  const effectiveIntent = intentRow.intent === 'pass' ? 'speak' : intentRow.intent;
+  const effectiveIntent = moveTypeToRoundIntent(candidateRow.moveType);
   setMainSpanAttributes({
     'hall.round_number': args.roundNumber,
     'hall.intent': effectiveIntent,
     'hall.force': Boolean(args.force),
   });
-  const targetName = intentRow.targetMemberId
-    ? (membersById.get(intentRow.targetMemberId as string)?.name ?? 'another member')
+  const targetName = candidateRow.targetMemberId
+    ? (membersById.get(candidateRow.targetMemberId as string)?.name ?? 'another member')
     : undefined;
 
   const hallContext = [
@@ -113,7 +122,7 @@ export async function chatRoundtableSpeakerUseCase(
     '',
     '[Roundtable Turn]',
     `Round #${args.roundNumber}.`,
-    `Your move in this round: ${effectiveIntent}.`,
+    `Your move type in this round: ${candidateRow.moveType}.`,
     targetName ? `Address or react to: ${targetName}.` : '',
     'Give one concise contribution for this turn.',
   ]
@@ -143,6 +152,6 @@ export async function chatRoundtableSpeakerUseCase(
     retrievalModel: single.retrievalModel ?? resolveModel('retrieval', args.retrievalModel),
     usedKnowledgeBase: typeof single.usedKnowledgeBase === 'boolean' ? single.usedKnowledgeBase : true,
     intent: effectiveIntent,
-    targetMemberId: intentRow.targetMemberId,
+    targetMemberId: candidateRow.targetMemberId,
   };
 }

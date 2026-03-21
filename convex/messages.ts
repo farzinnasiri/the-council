@@ -17,7 +17,7 @@ const messageDoc = v.object({
   userId: v.id('users'),
   conversationId: v.id('conversations'),
   role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
-  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
+  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'), v.literal('hall_closure'))),
   authorMemberId: v.optional(v.id('members')),
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
@@ -52,7 +52,7 @@ const messageDoc = v.object({
 const messageInputValidator = v.object({
   conversationId: v.id('conversations'),
   role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
-  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
+  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'), v.literal('hall_closure'))),
   authorMemberId: v.optional(v.id('members')),
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
@@ -347,7 +347,10 @@ export const appendMany = mutation({
     if (args.messages.length === 0) return [];
 
     const conversationId = args.messages[0].conversationId;
-    await getOwnedConversation(ctx, userId, conversationId);
+    const conversation = await getOwnedConversation(ctx, userId, conversationId);
+    if (conversation.kind === 'hall' && conversation.closedAt) {
+      throw new Error('This table is closed.');
+    }
 
     const now = Date.now();
     const inserted: Array<any> = [];

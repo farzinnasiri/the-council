@@ -15,6 +15,7 @@ export function HallPage() {
   const loadOlderMessages = useAppStore((state) => state.loadOlderMessages);
   const isRouting = useAppStore((state) => state.isRouting);
   const routingConversationId = useAppStore((state) => state.routingConversationId);
+  const closingConversationId = useAppStore((state) => state.closingConversationId);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
   const pendingReplyCount = useAppStore((state) => state.pendingReplyCount);
   const members = useAppStore((state) => state.members);
@@ -58,13 +59,15 @@ export function HallPage() {
   const isSending =
     (isRouting && routingConversationId === conversation.id) ||
     (pendingReplyCount[conversation.id] ?? 0) > 0;
+  const isClosing = closingConversationId === conversation.id;
+  const isClosed = Boolean(conversation.closedAt);
 
   const participantIds = hallParticipantsByConversation[conversation.id] ?? [];
   const selectedSpeakerSet = new Set(
     (roundtableStateByConversation[conversation.id]?.round.status === 'awaiting_user'
-      ? roundtableStateByConversation[conversation.id]?.intents
-          .filter((intent) => intent.selected)
-          .map((intent) => intent.memberId)
+      ? roundtableStateByConversation[conversation.id]?.candidates
+          .filter((candidate) => candidate.status === 'shortlisted' || candidate.status === 'speaking')
+          .map((candidate) => candidate.memberId)
       : []) ?? []
   );
   const mentionOptions = participantIds
@@ -84,7 +87,7 @@ export function HallPage() {
       ? roundtableState.round.roundNumber
       : undefined;
   const roundtablePanel =
-    conversation.hallMode === 'roundtable' ? (
+    conversation.hallMode === 'roundtable' && !isClosed ? (
       <RoundtablePanel
         state={roundtableState}
         members={members.filter((member) => !member.deletedAt)}
@@ -94,6 +97,12 @@ export function HallPage() {
         onFinishRound={() => void finishRoundtableRound(conversation.id)}
         onContinueRound={() => void continueRoundtableRound(conversation.id)}
       />
+    ) : conversation.hallMode === 'roundtable' && isClosed ? (
+      <div className="mx-auto w-full max-w-3xl px-4 md:px-6">
+        <div className="rounded-2xl border border-border/80 bg-card px-4 py-3 text-sm text-muted-foreground">
+          This table is closed. The final council synthesis is now the last hall message.
+        </div>
+      </div>
     ) : null;
 
   return (
@@ -105,9 +114,10 @@ export function HallPage() {
       isRouting={isRouting && routingConversationId === conversation.id}
       typingMembers={typingMembers}
       isSending={isSending}
+      sendDisabled={isClosed || isClosing}
       hasOlderMessages={pagination?.hasOlder ?? false}
       loadingOlderMessages={pagination?.isLoadingOlder ?? false}
-      placeholder="Ask the Hall..."
+      placeholder={isClosing ? 'Closing table...' : isClosed ? 'This table is closed.' : 'Ask the Hall...'}
       mentionOptions={composerMentionOptions}
       mentionError={mentionError}
       beforeComposer={roundtablePanel}
@@ -126,6 +136,9 @@ export function HallPage() {
 
         const normalizedMentions =
           conversation.hallMode === 'roundtable' ? [] : mentionedMemberIds;
+        if (isClosed || isClosing) {
+          return;
+        }
         const sendResult = await sendUserMessage(conversation.id, text, normalizedMentions);
         await generateReplies(conversation.id, text, normalizedMentions, sendResult?.previousActiveMessageAt);
       }}

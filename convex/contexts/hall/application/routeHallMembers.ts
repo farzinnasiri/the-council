@@ -2,7 +2,7 @@
 
 import { fallbackRouteMemberIds } from '../../../ai/graphs/fallbacks';
 import { resolveModel } from '../../../ai/modelConfig';
-import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
+import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider } from '../../shared/convexGateway';
 import { listActiveMembers } from '../infrastructure/membersRepo';
 import type { RouteHallMembersInput, RouteHallMembersResult, NormalizedRouteCandidate } from '../contracts';
@@ -17,6 +17,10 @@ export async function routeHallMembersUseCase(ctx: any, args: RouteHallMembersIn
       statusCode: 400,
     });
   }
+  assertHallConversationOpen(conversation, {
+    errorCode: 'hall-routing-conversation-closed',
+    message: 'This table is closed.',
+  });
 
   const candidates = await listActiveMembers(ctx);
 

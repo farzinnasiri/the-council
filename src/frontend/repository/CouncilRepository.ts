@@ -207,6 +207,7 @@ export interface CouncilRepository {
   markChamberTimeAwareReentryNoticeSeen(conversationId: string): Promise<Conversation>;
   renameConversation(conversationId: string, title: string): Promise<Conversation>;
   archiveConversation(conversationId: string): Promise<void>;
+  closeHall(conversationId: string): Promise<{ conversation: Conversation; closingMessage: Message }>;
   clearChamberByMember(memberId: string): Promise<void>;
   listConversationGuidanceDirectives(conversationId: string): Promise<ConversationGuidanceDirective[]>;
   listMessageFeedback(conversationId: string): Promise<MessageFeedback[]>;
@@ -369,6 +370,8 @@ export interface CouncilRepository {
   markRoundtableInProgress(input: {
     conversationId: string;
     roundNumber: number;
+    speakingMemberId?: string;
+    selectedBy?: 'allocator' | 'mention_boost' | 'user_manual_fallback';
   }): Promise<RoundtableState>;
   markRoundtableCompleted(input: {
     conversationId: string;

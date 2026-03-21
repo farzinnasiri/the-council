@@ -1,7 +1,7 @@
 'use node';
 
 import { api, internal } from '../../../_generated/api';
-import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
+import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, createKnowledgeRetriever, createPersonalArchiveRetriever, toKBDigestHints } from '../../shared/convexGateway';
 import type { ChatWithMemberInput, ChatWithMemberResult } from '../contracts';
 import { ensureChamberMemberStore, listMemberDigests } from '../infrastructure/chamberRepo';
@@ -183,6 +183,10 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
       statusCode: 400,
     });
   }
+  assertHallConversationOpen(conversation, {
+    errorCode: 'hall-chat-conversation-closed',
+    message: 'This table is closed.',
+  });
   setMainSpanAttributes({
     'conversation.id': String(args.conversationId),
     'conversation.kind': conversation.kind,

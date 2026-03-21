@@ -5,7 +5,7 @@ import { runKBDigestGraph } from '../graphs/kbDigestGraph';
 import { runChamberGuidanceReflectionGraph, runMemberGuidanceProfileGraph } from '../graphs/memberGuidanceGraph';
 import { runMemberChatGraph } from '../graphs/memberChatGraph';
 import { runMemberVoicePersonaGraph } from '../graphs/memberVoiceGraph';
-import { runRoundIntentGraph } from '../graphs/roundIntentGraph';
+import { runRoundBidGraph } from '../graphs/roundBidGraph';
 import { runRouteMembersGraph } from '../graphs/routeMembersGraph';
 import { runSpecialtiesGraph } from '../graphs/specialtiesGraph';
 import { runChamberSummaryGraph, runHallFollowUpSeedGraph, runHallRoundSummaryGraph, runSummaryGraph } from '../graphs/summaryGraph';
@@ -17,7 +17,7 @@ import type {
   CouncilPersonalArchiveAccess,
   CouncilPersonalArchiveRetriever,
   CouncilRouteMemberCandidate,
-  RoundIntentProposal,
+  RoundBidProposal,
 } from './types';
 
 export class LangChainCouncilAiProvider implements CouncilAiProvider {
@@ -165,12 +165,14 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     return await runKBDigestGraph(input);
   }
 
-  async proposeRoundIntentPromptOnly(input: {
+  async proposeRoundBidPromptOnly(input: {
     member: { id: string; name: string; specialties?: string[]; systemPrompt: string };
     conversationContext: string;
     memberIds: string[];
+    recentSpeakerIds?: string[];
+    mentionedMemberIds?: string[];
     model?: string;
-  }): Promise<RoundIntentProposal> {
-    return await runRoundIntentGraph(input);
+  }): Promise<RoundBidProposal> {
+    return await runRoundBidGraph(input);
   }
 }

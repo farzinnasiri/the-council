@@ -12,9 +12,12 @@ import {
 } from '../contexts/chamber/contracts';
 import { startHallFollowUpThreadUseCase } from '../contexts/chamber/application/startHallFollowUpThread';
 import { createAiProvider } from '../contexts/shared/convexGateway';
-import { requireAuthUser, requireOwnedConversation } from '../contexts/shared/auth';
+import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../contexts/shared/auth';
 import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
 import { wideEventError } from '../observability/errors';
+import { runHallClosureGraph } from './graphs/hallClosureGraph';
+import type { Id } from '../_generated/dataModel';
+import { api } from '../_generated/api';
 
 export const chatWithMember = action({
   args: {
@@ -117,5 +120,96 @@ export const startHallFollowUpThread = action({
       'message.id': String(args.hallMessageId),
     });
     return await startHallFollowUpThreadUseCase(ctx, args);
+  }),
+});
+
+function buildHallClosureTranscript(messages: any[], memberNames: Map<string, string>) {
+  return messages
+    .filter((message) => !message.deletedAt && !message.supersededAt)
+    .filter((message) => message.status !== 'error')
+    .filter((message) => message.role === 'user' || message.role === 'member')
+    .map((message) => {
+      if (message.role === 'user') {
+        return `User: ${message.content}`;
+      }
+      const name = memberNames.get(String(message.authorMemberId)) ?? 'Member';
+      return `${name}: ${message.content}`;
+    })
+    .join('\n\n');
+}
+
+export const closeHall = action({
+  args: {
+    conversationId: v.id('conversations'),
+    model: v.optional(v.string()),
+  },
+  handler: observeAction('ai.chat.closeHall', async (
+    ctx,
+    args
+  ): Promise<{ conversation: any; closingMessage: any; model: string }> => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+    });
+    await requireAuthUser(ctx);
+    const conversation = await requireOwnedConversation(ctx, args.conversationId);
+    if (conversation.kind !== 'hall') {
+      throw wideEventError('hall-close-kind-invalid', 'Only hall conversations can be closed.', {
+        statusCode: 400,
+      });
+    }
+    assertHallConversationOpen(conversation, {
+      errorCode: 'hall-close-already-closed',
+      message: 'This table is closed.',
+      statusCode: 409,
+    });
+
+    const messages = (await ctx.runQuery(api.messages.listVisible, {
+      conversationId: args.conversationId,
+    })) as any[];
+    const memberIds = Array.from(
+      new Set(
+        messages
+          .filter((message) => message.role === 'member' && message.authorMemberId)
+          .map((message) => message.authorMemberId as Id<'members'>)
+      )
+    );
+    const memberRows = await Promise.all(
+      memberIds.map((memberId) =>
+        ctx.runQuery(api.members.getById, {
+          memberId,
+          includeArchived: true,
+        })
+      )
+    );
+    const memberNames = new Map(
+      memberRows
+        .filter((row: any) => row)
+        .map((row: any) => [String(row._id), String(row.name)])
+    );
+
+    const transcript = buildHallClosureTranscript(messages, memberNames);
+    const generated = await runHallClosureGraph({
+      hallTitle: conversation.title,
+      hallMode: conversation.hallMode ?? 'advisory',
+      transcript,
+      model: args.model,
+    });
+    const closureContent =
+      generated.text.trim() ||
+      'This table is now closed. The discussion has been distilled into a final council synthesis.';
+
+    await ctx.runMutation(api.hallRounds.supersedeOpenRounds as any, {
+      conversationId: args.conversationId,
+    });
+
+    const result: { conversation: any; closingMessage: any } = await ctx.runMutation(api.conversations.closeHallFinalize as any, {
+      conversationId: args.conversationId,
+      closureContent,
+    });
+
+    return {
+      ...result,
+      model: generated.model,
+    };
   }),
 });

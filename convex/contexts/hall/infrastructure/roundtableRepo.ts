@@ -13,7 +13,7 @@ export async function getRoundtableState(
   });
 }
 
-export async function createRoundWithIntents(
+export async function createRoundWithCandidates(
   ctx: ActionCtxLike,
   args: {
     conversationId: Id<'conversations'>;
@@ -21,33 +21,100 @@ export async function createRoundWithIntents(
     triggerMessageId?: Id<'messages'>;
     maxSpeakers: number;
     initialStatus?: 'awaiting_user' | 'completed';
-    intents: Array<{
+    bids: Array<{
       memberId: Id<'members'>;
-      intent: 'speak' | 'challenge' | 'support' | 'pass';
+      wantsToSpeak: boolean;
+      moveType: 'rebuttal' | 'caveat' | 'synthesis' | 'evidence' | 'reframing' | 'clarification' | 'agreement' | 'pass';
       targetMemberId?: Id<'members'>;
-      rationale: string;
-      selected: boolean;
-      source: 'mention' | 'intent_default' | 'user_manual';
+      noveltyClaim: string;
+      confidence: number;
+      estimatedValue: number;
+      relevanceScore: number;
+      noveltyScore: number;
+      tensionScore: number;
+      coverageScore: number;
+      recencyPenalty: number;
+      dominancePenalty: number;
+      mentionBoost: number;
+      overlapPenalty: number;
+      allocatorScore: number;
+      allocatorReason: string;
+    }>;
+    candidates: Array<{
+      memberId: Id<'members'>;
+      rank: number;
+      status: 'shortlisted' | 'speaking' | 'spoken' | 'dismissed';
+      moveType: 'rebuttal' | 'caveat' | 'synthesis' | 'evidence' | 'reframing' | 'clarification' | 'agreement' | 'pass';
+      targetMemberId?: Id<'members'>;
+      rationaleTag: 'pushback' | 'new angle' | 'evidence' | 'synthesis' | 'clarify';
+      allocatorReason: string;
+      score: number;
+      selectedBy: 'allocator' | 'mention_boost' | 'user_manual_fallback';
     }>;
   }
 ): Promise<RoundtableState> {
-  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:createRoundWithIntents', args);
+  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:createRoundWithCandidates', args);
 }
 
-export async function updateRoundAfterTurn(
+export async function updateRoundSnapshot(
   ctx: ActionCtxLike,
   args: {
     conversationId: Id<'conversations'>;
     roundNumber: number;
     nextStatus: 'awaiting_user' | 'completed';
-    updates: Array<{
+    bids: Array<{
       memberId: Id<'members'>;
-      intent?: 'speak' | 'challenge' | 'support' | 'pass';
+      wantsToSpeak: boolean;
+      moveType: 'rebuttal' | 'caveat' | 'synthesis' | 'evidence' | 'reframing' | 'clarification' | 'agreement' | 'pass';
       targetMemberId?: Id<'members'>;
-      rationale?: string;
-      selected: boolean;
+      noveltyClaim: string;
+      confidence: number;
+      estimatedValue: number;
+      relevanceScore: number;
+      noveltyScore: number;
+      tensionScore: number;
+      coverageScore: number;
+      recencyPenalty: number;
+      dominancePenalty: number;
+      mentionBoost: number;
+      overlapPenalty: number;
+      allocatorScore: number;
+      allocatorReason: string;
+    }>;
+    candidates: Array<{
+      memberId: Id<'members'>;
+      rank: number;
+      status: 'shortlisted' | 'speaking' | 'spoken' | 'dismissed';
+      moveType: 'rebuttal' | 'caveat' | 'synthesis' | 'evidence' | 'reframing' | 'clarification' | 'agreement' | 'pass';
+      targetMemberId?: Id<'members'>;
+      rationaleTag: 'pushback' | 'new angle' | 'evidence' | 'synthesis' | 'clarify';
+      allocatorReason: string;
+      score: number;
+      selectedBy: 'allocator' | 'mention_boost' | 'user_manual_fallback';
     }>;
   }
 ): Promise<RoundtableState> {
-  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:updateRoundAfterTurn', args);
+  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:updateRoundSnapshot', args);
+}
+
+export async function markRoundInProgress(
+  ctx: ActionCtxLike,
+  args: {
+    conversationId: Id<'conversations'>;
+    roundNumber: number;
+    speakingMemberId?: Id<'members'>;
+    selectedBy?: 'allocator' | 'mention_boost' | 'user_manual_fallback';
+  }
+): Promise<RoundtableState> {
+  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:markRoundInProgress', args);
+}
+
+export async function markRoundCompleted(
+  ctx: ActionCtxLike,
+  args: {
+    conversationId: Id<'conversations'>;
+    roundNumber: number;
+  }
+): Promise<RoundtableState> {
+  return await runNamedMutation<RoundtableState>(ctx, 'hallRounds:markRoundCompleted', args);
 }

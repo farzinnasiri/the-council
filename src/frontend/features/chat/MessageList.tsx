@@ -101,10 +101,22 @@ export function MessageList({
     };
   }, [typingMembers]);
 
+  const latestTranscriptMemberId = useMemo(() => {
+    const latestTranscriptMessage = [...messages]
+      .reverse()
+      .find((message) => message.role !== 'system' && message.status !== 'error');
+
+    return latestTranscriptMessage?.role === 'member'
+      ? latestTranscriptMessage.authorMemberId
+      : undefined;
+  }, [messages]);
+
   const visibleTypingMembers = useMemo(() => {
     const visible = new Set(visibleTypingMemberIds);
-    return typingMembers.filter((member) => visible.has(member.id));
-  }, [typingMembers, visibleTypingMemberIds]);
+    return typingMembers.filter(
+      (member) => visible.has(member.id) && member.id !== latestTranscriptMemberId
+    );
+  }, [typingMembers, visibleTypingMemberIds, latestTranscriptMemberId]);
 
   useEffect(() => {
     if (isRouting || visibleTypingMembers.length > 0) {
@@ -171,10 +183,11 @@ export function MessageList({
       items.push({ kind: 'message', message });
     }
 
+    // Roundtable state can briefly lag behind an optimistic user message.
+    // Only append a trailing round marker when it moves the transcript forward.
     if (
       typeof pendingRoundNumber === 'number' &&
-      pendingRoundNumber > 0 &&
-      pendingRoundNumber !== renderedRound
+      pendingRoundNumber > Math.max(0, renderedRound ?? 0)
     ) {
       items.push({ kind: 'round', roundNumber: pendingRoundNumber });
     }

@@ -1,5 +1,5 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { LoaderCircle, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
+import { LoaderCircle, Lock, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -42,6 +42,8 @@ export function TopBar({
 }: TopBarProps) {
   const addMemberToConversation = useAppStore((state) => state.addMemberToConversation);
   const removeMemberFromConversation = useAppStore((state) => state.removeMemberFromConversation);
+  const closeHall = useAppStore((state) => state.closeHall);
+  const closingConversationId = useAppStore((state) => state.closingConversationId);
   const members = useAppStore((state) => state.members);
   const messages = useAppStore((state) => state.messages);
   const setMessagePinned = useAppStore((state) => state.setMessagePinned);
@@ -55,10 +57,11 @@ export function TopBar({
   const activeCount = participants.length;
   const isChamber = conversation?.kind === 'chamber';
   const showHallParticipants = showParticipants && !isChamber;
-  const canManageHall = conversation?.kind === 'hall';
+  const canManageHall = conversation?.kind === 'hall' && !conversation.closedAt;
   const [presenceNow, setPresenceNow] = useState(() => Date.now());
   const [isChamberTypingVisible, setIsChamberTypingVisible] = useState(false);
   const [isPinnedManagerOpen, setIsPinnedManagerOpen] = useState(false);
+  const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
   const typingVisibilityTimerRef = useRef<number | null>(null);
   const {
     hasPlayback,
@@ -148,6 +151,9 @@ export function TopBar({
         presenceNow - chamberLastMemberActivityAt <= CHAMBER_INACTIVITY_TIMEOUT_MS
       )
     );
+  const isHall = conversation?.kind === 'hall';
+  const isHallClosed = Boolean(conversation?.kind === 'hall' && conversation.closedAt);
+  const isClosingHall = Boolean(conversation && closingConversationId === conversation.id);
 
   const playbackControls = (
     <>
@@ -390,6 +396,65 @@ export function TopBar({
               }`}
             />
             {isChamberOnline ? 'Online' : 'Offline'}
+          </span>
+        ) : null}
+        {isHall && !isHallClosed && conversation ? (
+          <DialogPrimitive.Root open={isCloseDialogOpen} onOpenChange={setIsCloseDialogOpen}>
+            <DialogPrimitive.Trigger asChild>
+              <Button type="button" variant="outline" className="h-9 shrink-0 px-3 text-xs" disabled={isClosingHall}>
+                {isClosingHall ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Closing table...
+                  </>
+                ) : (
+                  'Close table'
+                )}
+              </Button>
+            </DialogPrimitive.Trigger>
+            <DialogPrimitive.Portal>
+              <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-background/80 backdrop-blur-sm" />
+              <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[81] w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 shadow-2xl focus:outline-none">
+                <DialogPrimitive.Title className="font-mono text-sm font-semibold uppercase tracking-[0.22em] text-foreground">
+                  Close this table?
+                </DialogPrimitive.Title>
+                <DialogPrimitive.Description className="mt-3 text-sm leading-6 text-muted-foreground">
+                  This will generate a final council synthesis and lock the hall from further discussion. This cannot be undone.
+                </DialogPrimitive.Description>
+                <div className="mt-5 flex justify-end gap-2">
+                  <DialogPrimitive.Close asChild>
+                    <Button type="button" variant="ghost" className="h-9 px-3 text-sm" disabled={isClosingHall}>
+                      Cancel
+                    </Button>
+                  </DialogPrimitive.Close>
+                  <Button
+                    type="button"
+                    className="h-9 px-3 text-sm"
+                    disabled={isClosingHall}
+                    onClick={() => {
+                      void closeHall(conversation.id)
+                        .then(() => setIsCloseDialogOpen(false))
+                        .catch(() => undefined);
+                    }}
+                  >
+                    {isClosingHall ? (
+                      <>
+                        <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        Closing table...
+                      </>
+                    ) : (
+                      'Close table'
+                    )}
+                  </Button>
+                </div>
+              </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
+        ) : null}
+        {isHallClosed ? (
+          <span className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" />
+            Closed
           </span>
         ) : null}
         {showHallParticipants ? (

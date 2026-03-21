@@ -30,6 +30,8 @@ const conversationDoc = v.object({
     guidanceLastReflectedUserTurnCount: v.optional(v.number()),
     title: v.string(),
   chamberMemberId: v.optional(v.id('members')),
+  closedAt: v.optional(v.number()),
+  closedReason: v.optional(v.literal('user_closed')),
   // Legacy compatibility while old rows still include status.
   status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
   deletedAt: v.optional(v.number()),
@@ -54,7 +56,7 @@ const messageDoc = v.object({
   userId: v.id('users'),
   conversationId: v.id('conversations'),
   role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
-  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
+  systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'), v.literal('hall_closure'))),
   authorMemberId: v.optional(v.id('members')),
   content: v.string(),
   status: v.union(v.literal('sent'), v.literal('error')),
@@ -109,6 +111,12 @@ async function getOwnedConversation(ctx: any, userId: any, conversationId: any) 
     throw new Error('Conversation not found');
   }
   return conversation;
+}
+
+function assertHallConversationOpen(conversation: any) {
+  if (conversation.kind === 'hall' && conversation.closedAt) {
+    throw new Error('This table is closed.');
+  }
 }
 
 async function createChamberThreadDoc(ctx: any, userId: any, memberId: any) {
@@ -545,6 +553,7 @@ export const addHallParticipant = mutation({
     if (conversation.kind !== 'hall' || conversation.deletedAt) {
       throw new Error('Only active hall conversations support participants');
     }
+    assertHallConversationOpen(conversation);
     await assertOwnedMember(ctx, userId, args.memberId);
 
     const existing = await ctx.db
@@ -585,6 +594,7 @@ export const removeHallParticipant = mutation({
     if (conversation.kind !== 'hall' || conversation.deletedAt) {
       throw new Error('Only active hall conversations support participants');
     }
+    assertHallConversationOpen(conversation);
 
     const existing = await ctx.db
       .query('conversationParticipants')
@@ -790,6 +800,59 @@ export const createHallFollowUpThreadInternal = internalMutation({
       conversation,
       messages: [summaryMessage, anchorMessage],
       memory: args.summary,
+    };
+  },
+});
+
+export const closeHallFinalize = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    closureContent: v.string(),
+  },
+  returns: v.object({
+    conversation: conversationDoc,
+    closingMessage: messageDoc,
+  }),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'hall' || conversation.deletedAt) {
+      throw new Error('Hall not found');
+    }
+    if (conversation.closedAt) {
+      throw new Error('This table is closed.');
+    }
+
+    const now = Date.now();
+    const messageId = await ctx.db.insert('messages', {
+      userId,
+      conversationId: args.conversationId,
+      role: 'system',
+      systemKind: 'hall_closure',
+      content: args.closureContent.trim(),
+      status: 'sent',
+      compacted: false,
+    });
+
+    await ctx.db.patch(args.conversationId, {
+      closedAt: now,
+      closedReason: 'user_closed',
+      updatedAt: now,
+      lastMessageAt: now,
+    });
+
+    const [updatedConversation, closingMessage] = await Promise.all([
+      ctx.db.get(args.conversationId),
+      ctx.db.get(messageId),
+    ]);
+
+    if (!updatedConversation || !closingMessage) {
+      throw new Error('Failed to close hall');
+    }
+
+    return {
+      conversation: updatedConversation,
+      closingMessage,
     };
   },
 });

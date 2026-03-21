@@ -36,6 +36,8 @@ export interface OwnedConversation {
   chamberMemberId?: Id<'members'>;
   guidanceLastReflectedUserTurnCount?: number;
   deletedAt?: number;
+  closedAt?: number;
+  closedReason?: 'user_closed';
 }
 
 export async function requireAuthUser(ctx: any): Promise<Id<'users'>> {
@@ -78,4 +80,17 @@ export async function requireOwnedConversation(
     'conversation.kind': conversation.kind,
   });
   return conversation as OwnedConversation;
+}
+
+export function assertHallConversationOpen(
+  conversation: OwnedConversation,
+  options?: { statusCode?: number; errorCode?: string; message?: string }
+): void {
+  if (conversation.kind !== 'hall') return;
+  if (!conversation.closedAt) return;
+  throw wideEventError(
+    options?.errorCode ?? 'hall-conversation-closed',
+    options?.message ?? 'This table is closed.',
+    { statusCode: options?.statusCode ?? 409 }
+  );
 }

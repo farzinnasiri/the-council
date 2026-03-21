@@ -69,6 +69,39 @@ export function MessageBubble({ message }: { message: Message }) {
       return <RoutePill memberIds={message.routing?.memberIds ?? []} label={isManual ? 'Manually routed to' : 'Routed to'} />;
     }
 
+    if (systemKind === 'hall_closure') {
+      return (
+        <div className="mx-auto flex max-w-[92%] animate-fade-in-up">
+          <div className="w-full rounded-2xl border border-border/80 bg-card px-4 py-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-background">
+                <img src="/icons/favicon.svg" alt="The Council" className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">The Council</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Table closed</p>
+              </div>
+            </div>
+            <div className="mt-4 text-sm leading-relaxed text-foreground">
+              <MarkdownMessage content={message.content} />
+            </div>
+            <div className="mt-4 flex items-center justify-end">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={() => void appendMessageToNotebook(message.conversationId, message.content, 'The Council')}
+                title="Add to Notebook"
+                aria-label="Add to Notebook"
+              >
+                <NotebookPen className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="mx-auto flex max-w-[88%] animate-fade-in-up">
         <div className="w-full rounded-2xl border border-border/80 bg-card px-4 py-3 shadow-sm">

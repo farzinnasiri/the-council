@@ -2,16 +2,20 @@
 
 import type { Id } from '../../../_generated/dataModel';
 import { buildRoundContext } from '../../../ai/orchestration/roundtableHall';
-import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
+import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, withTimeout } from '../../shared/convexGateway';
-import type { RoundtableState } from '../../shared/types';
+import type { RoundtableState, RoundtableCandidateStatus } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
+import { allocateRoundCandidates, type RoundBidDraft } from '../domain/roundtableAllocator';
 import type { RefreshRoundtableRoundInput } from '../contracts';
 import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages } from '../infrastructure/messagesRepo';
-import { updateRoundAfterTurn, getRoundtableState } from '../infrastructure/roundtableRepo';
+import { listActiveParticipants } from '../infrastructure/participantsRepo';
+import { getRoundtableState, updateRoundSnapshot } from '../infrastructure/roundtableRepo';
 import { setMainSpanAttributes } from '../../../observability/wideEvents';
 import { wideEventError } from '../../../observability/errors';
+
+const BID_TIMEOUT_MS = 3000;
 
 export async function refreshRoundtableRoundUseCase(
   ctx: any,
@@ -25,6 +29,10 @@ export async function refreshRoundtableRoundUseCase(
       statusCode: 400,
     });
   }
+  assertHallConversationOpen(conversation, {
+    errorCode: 'roundtable-refresh-conversation-closed',
+    message: 'This table is closed.',
+  });
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
     throw wideEventError('roundtable-refresh-mode-invalid', 'Conversation is not in roundtable mode', {
@@ -32,10 +40,11 @@ export async function refreshRoundtableRoundUseCase(
     });
   }
 
-  const [state, membersById, activeMessages] = await Promise.all([
+  const [state, membersById, activeMessages, participants] = await Promise.all([
     getRoundtableState(ctx, args.conversationId),
     loadActiveMembersMap(ctx),
     listActiveMessages(ctx, args.conversationId),
+    listActiveParticipants(ctx, args.conversationId),
   ]);
 
   if (!state || state.round.roundNumber !== args.roundNumber) {
@@ -47,7 +56,8 @@ export async function refreshRoundtableRoundUseCase(
   }
   setMainSpanAttributes({ 'hall.round_number': args.roundNumber });
 
-  const spokenSet = new Set(state.spokenMemberIds.map((memberId) => memberId as string));
+  const activeMemberIds = participants.map((row) => row.memberId);
+  const spokenSet = new Set(state.spokenMemberIds.map((memberId) => String(memberId)));
   const recentMessages = activeMessages
     .filter((message) => message.role !== 'system' && message.status !== 'error')
     .slice(-12)
@@ -66,41 +76,63 @@ export async function refreshRoundtableRoundUseCase(
     recentMessages,
   });
 
-  const speakerRows = state.intents.filter((row) => spokenSet.has(row.memberId as string));
-  const pendingCandidates = state.intents.filter(
-    (row) => row.intent !== 'pass' && !spokenSet.has(row.memberId as string)
-  );
-  const remainingUnspoken = state.intents.filter((row) => !spokenSet.has(row.memberId as string));
-
+  const remainingUnspoken = activeMemberIds.filter((memberId) => !spokenSet.has(String(memberId)));
   if (state.spokenMemberIds.length >= state.round.maxSpeakers || remainingUnspoken.length === 0) {
-    return await updateRoundAfterTurn(ctx, {
+    const completedCandidates = state.candidates.map((candidate) => ({
+      memberId: candidate.memberId as Id<'members'>,
+      rank: candidate.rank,
+      status: spokenSet.has(String(candidate.memberId)) ? ('spoken' as const) : ('dismissed' as const),
+      moveType: candidate.moveType,
+      targetMemberId: candidate.targetMemberId as Id<'members'> | undefined,
+      rationaleTag: candidate.rationaleTag,
+      allocatorReason: candidate.allocatorReason,
+      score: candidate.score,
+      selectedBy: candidate.selectedBy,
+    }));
+
+    return await updateRoundSnapshot(ctx, {
       conversationId: args.conversationId,
       roundNumber: args.roundNumber,
       nextStatus: 'completed',
-      updates: speakerRows.map((row) => ({
-        memberId: row.memberId,
-        selected: false,
-      })),
+      bids: [],
+      candidates: completedCandidates,
     });
   }
 
+  const recentSpeakerIds = Array.from(
+    new Set(
+      activeMessages
+        .filter(
+          (message) =>
+            message.role === 'member' &&
+            message.status !== 'error' &&
+            typeof message.roundNumber === 'number' &&
+            message.roundNumber >= Math.max(1, args.roundNumber - 3)
+        )
+        .map((message) => message.authorMemberId)
+        .filter(Boolean)
+    )
+  ) as Id<'members'>[];
   const provider = createAiProvider();
-  const reevaluated = await Promise.all(
-    pendingCandidates.map(async (row) => {
-      const member = membersById.get(row.memberId as string);
+
+  const bids = await Promise.all(
+    remainingUnspoken.map(async (memberId) => {
+      const member = membersById.get(memberId as string);
       if (!member) {
         return {
-          memberId: row.memberId,
-          intent: row.intent,
-          targetMemberId: row.targetMemberId,
-          rationale: 'Member unavailable.',
-          selected: false,
-        };
+          memberId,
+          wantsToSpeak: false,
+          moveType: 'pass' as const,
+          targetMemberId: undefined,
+          noveltyClaim: 'Member unavailable.',
+          confidence: 0.1,
+          estimatedValue: 0.05,
+        } satisfies RoundBidDraft;
       }
 
       try {
-        const next = await withTimeout(
-          provider.proposeRoundIntentPromptOnly({
+        const bid = await withTimeout(
+          provider.proposeRoundBidPromptOnly({
             member: {
               id: member._id as string,
               name: member.name,
@@ -108,50 +140,109 @@ export async function refreshRoundtableRoundUseCase(
               systemPrompt: member.systemPrompt,
             },
             conversationContext: roundContext,
-            memberIds: state.intents.map((item) => item.memberId as string),
+            memberIds: activeMemberIds.map((id) => id as string),
+            recentSpeakerIds: recentSpeakerIds.map((id) => id as string),
           }),
-          2500
+          BID_TIMEOUT_MS
         );
 
-        if (next.intent === 'pass') {
-          return {
-            memberId: row.memberId,
-            intent: row.intent,
-            targetMemberId: row.targetMemberId,
-            rationale: next.rationale,
-            selected: false,
-          };
-        }
-
         return {
-          memberId: row.memberId,
-          intent: next.intent,
-          targetMemberId: next.targetMemberId as Id<'members'> | undefined,
-          rationale: next.rationale,
-          selected: true,
-        };
+          memberId,
+          wantsToSpeak: bid.wantsToSpeak,
+          moveType: bid.moveType,
+          targetMemberId: bid.targetMemberId as Id<'members'> | undefined,
+          noveltyClaim: bid.noveltyClaim,
+          confidence: bid.confidence,
+          estimatedValue: bid.estimatedValue,
+        } satisfies RoundBidDraft;
       } catch {
         return {
-          memberId: row.memberId,
-          intent: row.intent,
-          targetMemberId: row.targetMemberId,
-          rationale: 'Will keep listening for now.',
-          selected: false,
-        };
+          memberId,
+          wantsToSpeak: false,
+          moveType: 'pass' as const,
+          targetMemberId: undefined,
+          noveltyClaim: 'No reliable bid available.',
+          confidence: 0.15,
+          estimatedValue: 0.1,
+        } satisfies RoundBidDraft;
       }
     })
   );
 
-  return await updateRoundAfterTurn(ctx, {
+  const allocated = allocateRoundCandidates({
+    bids,
+    activeMemberIds,
+    currentRound: args.roundNumber,
+    maxSpeakers: Math.max(1, state.round.maxSpeakers - state.spokenMemberIds.length),
+    recentMessages: activeMessages,
+    spokenMemberIds: state.spokenMemberIds,
+    existingCandidatesByMemberId: new Map(
+      state.candidates.map((candidate) => [String(candidate.memberId), { selectedBy: candidate.selectedBy }])
+    ),
+  });
+
+  const mergedCandidates: Array<{
+    memberId: Id<'members'>;
+    rank: number;
+    status: RoundtableCandidateStatus;
+    moveType: typeof state.candidates[number]['moveType'];
+    targetMemberId?: Id<'members'>;
+    rationaleTag: typeof state.candidates[number]['rationaleTag'];
+    allocatorReason: string;
+    score: number;
+    selectedBy: typeof state.candidates[number]['selectedBy'];
+  }> = state.candidates
+    .filter((candidate) => spokenSet.has(String(candidate.memberId)))
+    .map((candidate) => ({
+      memberId: candidate.memberId as Id<'members'>,
+      rank: 0,
+      status: 'spoken' as const,
+      moveType: candidate.moveType,
+      targetMemberId: candidate.targetMemberId as Id<'members'> | undefined,
+      rationaleTag: candidate.rationaleTag,
+      allocatorReason: candidate.allocatorReason,
+      score: candidate.score,
+      selectedBy: candidate.selectedBy,
+    }));
+
+  for (const candidate of allocated.candidates) {
+    if (spokenSet.has(String(candidate.memberId))) continue;
+    mergedCandidates.push({
+      memberId: candidate.memberId,
+      rank: candidate.rank,
+      status: candidate.status,
+      moveType: candidate.moveType,
+      targetMemberId: candidate.targetMemberId,
+      rationaleTag: candidate.rationaleTag,
+      allocatorReason: candidate.allocatorReason,
+      score: candidate.score,
+      selectedBy: candidate.selectedBy,
+    });
+  }
+
+  return await updateRoundSnapshot(ctx, {
     conversationId: args.conversationId,
     roundNumber: args.roundNumber,
     nextStatus: 'awaiting_user',
-    updates: [
-      ...speakerRows.map((row) => ({
-        memberId: row.memberId,
-        selected: false,
-      })),
-      ...reevaluated,
-    ],
+    bids: allocated.bids.map((row) => ({
+      memberId: row.memberId,
+      wantsToSpeak: row.wantsToSpeak,
+      moveType: row.moveType,
+      targetMemberId: row.targetMemberId,
+      noveltyClaim: row.noveltyClaim,
+      confidence: row.confidence,
+      estimatedValue: row.estimatedValue,
+      relevanceScore: row.relevanceScore,
+      noveltyScore: row.noveltyScore,
+      tensionScore: row.tensionScore,
+      coverageScore: row.coverageScore,
+      recencyPenalty: row.recencyPenalty,
+      dominancePenalty: row.dominancePenalty,
+      mentionBoost: row.mentionBoost,
+      overlapPenalty: row.overlapPenalty,
+      allocatorScore: row.allocatorScore,
+      allocatorReason: row.allocatorReason,
+    })),
+    candidates: mergedCandidates,
   });
 }

@@ -732,7 +732,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               >
                 <p className="text-sm font-semibold">Roundtable</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Deliberation mode. Members signal intent each round and you approve who speaks.
+                  Deliberation mode. The system suggests the best next speakers each round and you approve who speaks.
                 </p>
               </button>
             </div>

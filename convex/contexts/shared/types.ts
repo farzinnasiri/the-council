@@ -1,7 +1,7 @@
 'use node';
 
 import type { Id } from '../../_generated/dataModel';
-import type { RoundIntent } from '../../ai/provider/types';
+import type { RoundBidMoveType, RoundIntent } from '../../ai/provider/types';
 
 export interface ActionCtxLike {
   runQuery: (...args: any[]) => Promise<unknown>;
@@ -12,6 +12,9 @@ export type RoundStatus = 'awaiting_user' | 'in_progress' | 'completed' | 'super
 export type RoundTrigger = 'user_message' | 'continue';
 export type RoundIntentSource = 'mention' | 'intent_default' | 'user_manual';
 export type RoundtableSpeakIntent = Exclude<RoundIntent, 'pass'>;
+export type RoundtableRationaleTag = 'pushback' | 'new angle' | 'evidence' | 'synthesis' | 'clarify';
+export type RoundtableCandidateStatus = 'shortlisted' | 'speaking' | 'spoken' | 'dismissed';
+export type RoundtableCandidateSelectedBy = 'allocator' | 'mention_boost' | 'user_manual_fallback';
 
 export interface ContextMessageInput {
   role: 'user' | 'assistant';
@@ -53,7 +56,7 @@ export interface MessageRow {
   userId: Id<'users'>;
   conversationId: Id<'conversations'>;
   role: 'user' | 'member' | 'system';
-  systemKind?: 'routing' | 'hall_followup_context';
+  systemKind?: 'routing' | 'hall_followup_context' | 'hall_closure';
   authorMemberId?: Id<'members'>;
   content: string;
   status: 'sent' | 'error';
@@ -111,9 +114,53 @@ export interface RoundIntentRow {
   updatedAt: number;
 }
 
+export interface RoundBidRow {
+  _id: Id<'hallRoundBids'>;
+  _creationTime: number;
+  userId: Id<'users'>;
+  conversationId: Id<'conversations'>;
+  roundNumber: number;
+  memberId: Id<'members'>;
+  wantsToSpeak: boolean;
+  moveType: RoundBidMoveType;
+  targetMemberId?: Id<'members'>;
+  noveltyClaim: string;
+  confidence: number;
+  estimatedValue: number;
+  relevanceScore: number;
+  noveltyScore: number;
+  tensionScore: number;
+  coverageScore: number;
+  recencyPenalty: number;
+  dominancePenalty: number;
+  mentionBoost: number;
+  overlapPenalty: number;
+  allocatorScore: number;
+  allocatorReason: string;
+  updatedAt: number;
+}
+
+export interface RoundCandidateRow {
+  _id: Id<'hallRoundCandidates'>;
+  _creationTime: number;
+  userId: Id<'users'>;
+  conversationId: Id<'conversations'>;
+  roundNumber: number;
+  memberId: Id<'members'>;
+  rank: number;
+  status: RoundtableCandidateStatus;
+  moveType: RoundBidMoveType;
+  targetMemberId?: Id<'members'>;
+  rationaleTag: RoundtableRationaleTag;
+  allocatorReason: string;
+  score: number;
+  selectedBy: RoundtableCandidateSelectedBy;
+  updatedAt: number;
+}
+
 export interface RoundtableState {
   round: RoundRow;
-  intents: RoundIntentRow[];
+  candidates: RoundCandidateRow[];
   spokenMemberIds: Id<'members'>[];
 }
 
@@ -126,11 +173,14 @@ export interface RoundtableSpeakerResult {
   error?: string;
 }
 
-export interface PreparedRoundIntent {
-  memberId: string;
-  intent: RoundIntent;
-  targetMemberId?: string;
-  rationale: string;
-  selected: boolean;
-  source: RoundIntentSource;
+export interface ConversationRow {
+  _id: Id<'conversations'>;
+  kind: 'hall' | 'chamber';
+  hallMode?: 'advisory' | 'roundtable';
+  title: string;
+  chamberMemberId?: Id<'members'>;
+  guidanceLastReflectedUserTurnCount?: number;
+  deletedAt?: number;
+  closedAt?: number;
+  closedReason?: 'user_closed';
 }

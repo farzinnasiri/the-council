@@ -1,9 +1,11 @@
 export type ModelSlot =
   | 'chatResponse'
   | 'chatThinking'
+  | 'hallClosure'
   | 'transcription'
   | 'retrieval'
   | 'router'
+  | 'roundtableBid'
   | 'archiveParse'
   | 'hallTitle'
   | 'hallMemory'
@@ -29,9 +31,11 @@ export interface ModelTarget {
 const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   chatResponse: 'AI_MODEL_CHAT_RESPONSE',
   chatThinking: 'AI_MODEL_CHAT_THINKING',
+  hallClosure: 'AI_MODEL_HALL_CLOSURE',
   transcription: 'AI_MODEL_TRANSCRIPTION',
   retrieval: 'AI_MODEL_RETRIEVAL',
   router: 'AI_MODEL_ROUTER',
+  roundtableBid: 'AI_MODEL_ROUNDTABLE_BID',
   archiveParse: 'AI_MODEL_ARCHIVE_PARSE',
   hallTitle: 'AI_MODEL_HALL_TITLE',
   hallMemory: 'AI_MODEL_HALL_MEMORY',
@@ -51,9 +55,11 @@ const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
 const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
   chatResponse: ['GEMINI_CHAT_MODEL', 'GEMINI_MODEL'],
   chatThinking: ['GEMINI_CHAT_THINKING_MODEL', 'GEMINI_CHAT_MODEL', 'GEMINI_MODEL'],
+  hallClosure: ['GEMINI_HALL_CLOSURE_MODEL', 'GEMINI_MODEL'],
   transcription: ['GEMINI_TRANSCRIPTION_MODEL', 'GEMINI_MODEL'],
   retrieval: ['GEMINI_RETRIEVAL_MODEL', 'GEMINI_MODEL'],
   router: ['GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
+  roundtableBid: ['GEMINI_ROUNDTABLE_BID_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   archiveParse: ['GEMINI_ARCHIVE_PARSE_MODEL', 'GEMINI_MODEL'],
   hallTitle: ['GEMINI_HALL_TITLE_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   hallMemory: ['GEMINI_HALL_MEMORY_MODEL', 'GEMINI_MODEL'],
@@ -73,9 +79,11 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
 const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   chatResponse: { provider: 'openai', model: 'gpt-5.3-chat-latest' },
   chatThinking: { provider: 'google', model: 'gemini-3-flash-preview' },
+  hallClosure: { provider: 'google', model: 'gemini-3-flash-preview' },
   transcription: { provider: 'google', model: 'gemini-2.5-flash' },
   retrieval: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   router: { provider: 'google', model: 'gemini-2.5-flash' },
+  roundtableBid: { provider: 'google', model: 'gemini-2.5-flash' },
   archiveParse: { provider: 'google', model: 'gemini-3-flash-preview' },
   hallTitle: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   hallMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
@@ -138,9 +146,11 @@ export function resolveModelTarget(slot: ModelSlot, override?: string): ModelTar
 export const MODEL_IDS: Record<ModelSlot, string> = {
   chatResponse: resolveModelTarget('chatResponse').model,
   chatThinking: resolveModelTarget('chatThinking').model,
+  hallClosure: resolveModelTarget('hallClosure').model,
   transcription: resolveModelTarget('transcription').model,
   retrieval: resolveModelTarget('retrieval').model,
   router: resolveModelTarget('router').model,
+  roundtableBid: resolveModelTarget('roundtableBid').model,
   archiveParse: resolveModelTarget('archiveParse').model,
   hallTitle: resolveModelTarget('hallTitle').model,
   hallMemory: resolveModelTarget('hallMemory').model,

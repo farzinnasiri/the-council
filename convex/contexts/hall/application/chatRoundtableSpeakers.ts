@@ -3,10 +3,11 @@
 import type { Id } from '../../../_generated/dataModel';
 import { ensureMemberStore } from '../../../ai/kbIngest';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
-import { requireAuthUser, requireOwnedConversation } from '../../shared/auth';
+import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, createKnowledgeRetriever, toKBDigestHints, withTimeout } from '../../shared/convexGateway';
-import type { MemberListRow, MessageRow, RoundIntentRow, RoundtableSpeakerResult } from '../../shared/types';
+import type { MemberListRow, MessageRow, RoundCandidateRow, RoundtableSpeakerResult } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
+import { moveTypeToRoundIntent } from '../domain/roundtableAllocator';
 import { buildContextMessages, buildHallSystemPrompt } from '../domain/hallPrompt';
 import type { ChatRoundtableSpeakersInput } from '../contracts';
 import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
@@ -20,7 +21,7 @@ interface RunRoundtableSpeakerOptions {
   conversationId: Id<'conversations'>;
   roundNumber: number;
   memberId: Id<'members'>;
-  intentRow: RoundIntentRow;
+  candidateRow: RoundCandidateRow;
   membersById: Map<string, MemberListRow>;
   rawContextMessages: MessageRow[];
   roundSummaries: string[];
@@ -109,17 +110,17 @@ export async function runRoundtableSpeakerContribution(
       memberId: options.memberId,
       status: 'error',
       answer: `${memberName} could not speak in this round.`,
-      intent: options.intentRow.intent === 'pass' ? 'speak' : options.intentRow.intent,
-      targetMemberId: options.intentRow.targetMemberId,
+      intent: moveTypeToRoundIntent(options.candidateRow.moveType),
+      targetMemberId: options.candidateRow.targetMemberId,
       error: 'Member not found',
     };
   }
 
-  const targetName = options.intentRow.targetMemberId
-    ? (options.membersById.get(options.intentRow.targetMemberId as string)?.name ?? 'another member')
+  const targetName = options.candidateRow.targetMemberId
+    ? (options.membersById.get(options.candidateRow.targetMemberId as string)?.name ?? 'another member')
     : undefined;
 
-  const effectiveIntent = options.intentRow.intent === 'pass' ? 'speak' : options.intentRow.intent;
+  const effectiveIntent = moveTypeToRoundIntent(options.candidateRow.moveType);
 
   const roundPrompt = [
     `Round #${options.roundNumber} intent: ${effectiveIntent}.`,
@@ -174,7 +175,7 @@ export async function runRoundtableSpeakerContribution(
       status: 'sent',
       answer: stripLeadingSpeakerLabel(result.answer, member.name),
       intent: effectiveIntent,
-      targetMemberId: options.intentRow.targetMemberId,
+      targetMemberId: options.candidateRow.targetMemberId,
       model: result.model,
       retrievalModel: result.retrievalModel,
       usedKnowledgeBase: result.usedKnowledgeBase,
@@ -188,7 +189,7 @@ export async function runRoundtableSpeakerContribution(
       status: 'error',
       answer: `${memberName} could not speak in this round.`,
       intent: effectiveIntent,
-      targetMemberId: options.intentRow.targetMemberId,
+      targetMemberId: options.candidateRow.targetMemberId,
       error: errorMessage,
     };
   }
@@ -204,6 +205,10 @@ export async function chatRoundtableSpeakersUseCase(
   if (conversation.kind !== 'hall') {
     throw new Error('Roundtable speaking is only supported for hall conversations');
   }
+  assertHallConversationOpen(conversation, {
+    errorCode: 'roundtable-speakers-conversation-closed',
+    message: 'This table is closed.',
+  });
 
   if (normalizeHallMode(conversation) !== 'roundtable') {
     throw new Error('Conversation is not in roundtable mode');
@@ -219,7 +224,7 @@ export async function chatRoundtableSpeakersUseCase(
     throw new Error('Round is not open for speaking');
   }
 
-  const selectedRows = state.intents.filter((row) => row.selected);
+  const selectedRows = state.candidates.filter((row) => row.status === 'shortlisted' || row.status === 'speaking');
 
   if (selectedRows.length === 0) {
     return { results: [] };
@@ -249,13 +254,13 @@ export async function chatRoundtableSpeakersUseCase(
     rawRoundTail,
   });
   const results = await Promise.all(
-    selectedRows.map((intentRow) =>
+    selectedRows.map((candidateRow) =>
       runRoundtableSpeakerContribution({
         ctx,
         conversationId: args.conversationId,
         roundNumber: args.roundNumber,
-        memberId: intentRow.memberId,
-        intentRow,
+        memberId: candidateRow.memberId,
+        candidateRow,
         membersById,
         rawContextMessages,
         roundSummaries,

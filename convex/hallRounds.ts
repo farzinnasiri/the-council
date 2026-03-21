@@ -12,17 +12,36 @@ const roundStatusValidator = v.union(
 
 const roundTriggerValidator = v.union(v.literal('user_message'), v.literal('continue'));
 
-const roundIntentValidator = v.union(
-  v.literal('speak'),
-  v.literal('challenge'),
-  v.literal('support'),
+const roundBidMoveTypeValidator = v.union(
+  v.literal('rebuttal'),
+  v.literal('caveat'),
+  v.literal('synthesis'),
+  v.literal('evidence'),
+  v.literal('reframing'),
+  v.literal('clarification'),
+  v.literal('agreement'),
   v.literal('pass'),
 );
 
-const roundIntentSourceValidator = v.union(
-  v.literal('mention'),
-  v.literal('intent_default'),
-  v.literal('user_manual'),
+const roundtableRationaleTagValidator = v.union(
+  v.literal('pushback'),
+  v.literal('new angle'),
+  v.literal('evidence'),
+  v.literal('synthesis'),
+  v.literal('clarify'),
+);
+
+const roundtableCandidateStatusValidator = v.union(
+  v.literal('shortlisted'),
+  v.literal('speaking'),
+  v.literal('spoken'),
+  v.literal('dismissed'),
+);
+
+const roundtableCandidateSelectedByValidator = v.union(
+  v.literal('allocator'),
+  v.literal('mention_boost'),
+  v.literal('user_manual_fallback'),
 );
 
 const roundDoc = v.object({
@@ -38,24 +57,27 @@ const roundDoc = v.object({
   updatedAt: v.number(),
 });
 
-const roundIntentDoc = v.object({
-  _id: v.id('hallRoundIntents'),
+const roundCandidateDoc = v.object({
+  _id: v.id('hallRoundCandidates'),
   _creationTime: v.number(),
   userId: v.id('users'),
   conversationId: v.id('conversations'),
   roundNumber: v.number(),
   memberId: v.id('members'),
-  intent: roundIntentValidator,
+  rank: v.number(),
+  status: roundtableCandidateStatusValidator,
+  moveType: roundBidMoveTypeValidator,
   targetMemberId: v.optional(v.id('members')),
-  rationale: v.string(),
-  selected: v.boolean(),
-  source: roundIntentSourceValidator,
+  rationaleTag: roundtableRationaleTagValidator,
+  allocatorReason: v.string(),
+  score: v.number(),
+  selectedBy: roundtableCandidateSelectedByValidator,
   updatedAt: v.number(),
 });
 
 const roundState = v.object({
   round: roundDoc,
-  intents: v.array(roundIntentDoc),
+  candidates: v.array(roundCandidateDoc),
   spokenMemberIds: v.array(v.id('members')),
 });
 
@@ -73,12 +95,40 @@ async function assertOwnedHallConversation(ctx: any, userId: any, conversationId
   return conversation;
 }
 
+function assertHallConversationWritable(conversation: { closedAt?: number }) {
+  if (conversation.closedAt) {
+    throw new Error('This table is closed.');
+  }
+}
+
 async function assertOwnedMember(ctx: any, userId: any, memberId: any) {
   const member = await ctx.db.get(memberId);
   if (!member || member.userId !== userId || member.deletedAt) {
     throw new Error('Member not found');
   }
   return member;
+}
+
+async function loadSpokenMemberIds(ctx: any, conversationId: any, roundNumber: number) {
+  const spokenMessages = await ctx.db
+    .query('messages')
+    .withIndex('by_conversation', (q: any) => q.eq('conversationId', conversationId))
+    .collect();
+
+  return Array.from(
+    new Set(
+      spokenMessages
+        .filter(
+          (row: any) =>
+            !row.deletedAt &&
+            !row.supersededAt &&
+            row.role === 'member' &&
+            row.roundNumber === roundNumber &&
+            row.authorMemberId
+        )
+        .map((row: any) => row.authorMemberId)
+    )
+  ) as Id<'members'>[];
 }
 
 async function loadRoundState(ctx: any, conversationId: any, roundNumber: number) {
@@ -94,34 +144,25 @@ async function loadRoundState(ctx: any, conversationId: any, roundNumber: number
     throw new Error('Round not found');
   }
 
-  const intents = await ctx.db
-    .query('hallRoundIntents')
+  const candidates = await ctx.db
+    .query('hallRoundCandidates')
     .withIndex('by_conversation_round', (q: any) =>
       q.eq('conversationId', conversationId).eq('roundNumber', roundNumber)
     )
     .collect();
 
-  const spokenMessages = await ctx.db
-    .query('messages')
-    .withIndex('by_conversation', (q: any) => q.eq('conversationId', conversationId))
-    .collect();
+  const spokenMemberIds = await loadSpokenMemberIds(ctx, conversationId, roundNumber);
 
-  const spokenMemberIds = Array.from(
-    new Set(
-      spokenMessages
-        .filter(
-          (row: any) =>
-            !row.deletedAt &&
-            !row.supersededAt &&
-            row.role === 'member' &&
-            row.roundNumber === roundNumber &&
-            row.authorMemberId
-        )
-        .map((row: any) => row.authorMemberId)
-    )
-  ) as Id<'members'>[];
-
-  return { round, intents, spokenMemberIds };
+  return {
+    round,
+    candidates: candidates.sort((a: any, b: any) => {
+      if ((a.rank ?? 0) !== (b.rank ?? 0)) {
+        return (a.rank ?? 0) - (b.rank ?? 0);
+      }
+      return a._creationTime - b._creationTime;
+    }),
+    spokenMemberIds,
+  };
 }
 
 async function supersedePendingRounds(ctx: any, conversationId: any) {
@@ -157,7 +198,8 @@ export const getRoundtableState = query({
   returns: v.union(roundState, v.null()),
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
-    await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    const conversation = await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    assertHallConversationWritable(conversation);
 
     const rows = await ctx.db
       .query('hallRounds')
@@ -174,38 +216,63 @@ export const getRoundtableState = query({
   },
 });
 
-export const createRoundWithIntents = mutation({
+export const createRoundWithCandidates = mutation({
   args: {
     conversationId: v.id('conversations'),
     trigger: roundTriggerValidator,
     triggerMessageId: v.optional(v.id('messages')),
     maxSpeakers: v.number(),
     initialStatus: v.optional(v.union(v.literal('awaiting_user'), v.literal('completed'))),
-    intents: v.array(
+    bids: v.array(
       v.object({
         memberId: v.id('members'),
-        intent: roundIntentValidator,
+        wantsToSpeak: v.boolean(),
+        moveType: roundBidMoveTypeValidator,
         targetMemberId: v.optional(v.id('members')),
-        rationale: v.string(),
-        selected: v.boolean(),
-        source: roundIntentSourceValidator,
+        noveltyClaim: v.string(),
+        confidence: v.number(),
+        estimatedValue: v.number(),
+        relevanceScore: v.number(),
+        noveltyScore: v.number(),
+        tensionScore: v.number(),
+        coverageScore: v.number(),
+        recencyPenalty: v.number(),
+        dominancePenalty: v.number(),
+        mentionBoost: v.number(),
+        overlapPenalty: v.number(),
+        allocatorScore: v.number(),
+        allocatorReason: v.string(),
+      })
+    ),
+    candidates: v.array(
+      v.object({
+        memberId: v.id('members'),
+        rank: v.number(),
+        status: roundtableCandidateStatusValidator,
+        moveType: roundBidMoveTypeValidator,
+        targetMemberId: v.optional(v.id('members')),
+        rationaleTag: roundtableRationaleTagValidator,
+        allocatorReason: v.string(),
+        score: v.number(),
+        selectedBy: roundtableCandidateSelectedByValidator,
       })
     ),
   },
   returns: roundState,
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
-    await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    const conversation = await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    assertHallConversationWritable(conversation);
 
-    const uniqueMemberIds = new Set<string>();
-    for (const intent of args.intents) {
-      if (uniqueMemberIds.has(intent.memberId)) {
-        throw new Error('Duplicate member intents are not allowed');
+    const uniqueMembers = new Set<string>();
+    for (const row of [...args.bids, ...args.candidates]) {
+      if (uniqueMembers.has(row.memberId)) {
+        continue;
       }
-      uniqueMemberIds.add(intent.memberId);
-      await assertOwnedMember(ctx, userId, intent.memberId);
-      if (intent.targetMemberId) {
-        await assertOwnedMember(ctx, userId, intent.targetMemberId);
+      uniqueMembers.add(row.memberId);
+      await assertOwnedMember(ctx, userId, row.memberId);
+      if ('targetMemberId' in row && row.targetMemberId) {
+        await assertOwnedMember(ctx, userId, row.targetMemberId);
       }
     }
 
@@ -232,17 +299,48 @@ export const createRoundWithIntents = mutation({
     });
 
     await Promise.all(
-      args.intents.map((intent) =>
-        ctx.db.insert('hallRoundIntents', {
+      args.bids.map((bid) =>
+        ctx.db.insert('hallRoundBids', {
           userId,
           conversationId: args.conversationId,
           roundNumber: nextRoundNumber,
-          memberId: intent.memberId,
-          intent: intent.intent,
-          targetMemberId: intent.targetMemberId,
-          rationale: intent.rationale,
-          selected: intent.selected,
-          source: intent.source,
+          memberId: bid.memberId,
+          wantsToSpeak: bid.wantsToSpeak,
+          moveType: bid.moveType,
+          targetMemberId: bid.targetMemberId,
+          noveltyClaim: bid.noveltyClaim,
+          confidence: bid.confidence,
+          estimatedValue: bid.estimatedValue,
+          relevanceScore: bid.relevanceScore,
+          noveltyScore: bid.noveltyScore,
+          tensionScore: bid.tensionScore,
+          coverageScore: bid.coverageScore,
+          recencyPenalty: bid.recencyPenalty,
+          dominancePenalty: bid.dominancePenalty,
+          mentionBoost: bid.mentionBoost,
+          overlapPenalty: bid.overlapPenalty,
+          allocatorScore: bid.allocatorScore,
+          allocatorReason: bid.allocatorReason,
+          updatedAt: now,
+        })
+      )
+    );
+
+    await Promise.all(
+      args.candidates.map((candidate) =>
+        ctx.db.insert('hallRoundCandidates', {
+          userId,
+          conversationId: args.conversationId,
+          roundNumber: nextRoundNumber,
+          memberId: candidate.memberId,
+          rank: candidate.rank,
+          status: candidate.status,
+          moveType: candidate.moveType,
+          targetMemberId: candidate.targetMemberId,
+          rationaleTag: candidate.rationaleTag,
+          allocatorReason: candidate.allocatorReason,
+          score: candidate.score,
+          selectedBy: candidate.selectedBy,
           updatedAt: now,
         })
       )
@@ -252,47 +350,143 @@ export const createRoundWithIntents = mutation({
   },
 });
 
-export const setRoundSelections = mutation({
+export const updateRoundSnapshot = mutation({
   args: {
     conversationId: v.id('conversations'),
     roundNumber: v.number(),
-    selectedMemberIds: v.array(v.id('members')),
+    nextStatus: v.union(v.literal('awaiting_user'), v.literal('completed')),
+    bids: v.array(
+      v.object({
+        memberId: v.id('members'),
+        wantsToSpeak: v.boolean(),
+        moveType: roundBidMoveTypeValidator,
+        targetMemberId: v.optional(v.id('members')),
+        noveltyClaim: v.string(),
+        confidence: v.number(),
+        estimatedValue: v.number(),
+        relevanceScore: v.number(),
+        noveltyScore: v.number(),
+        tensionScore: v.number(),
+        coverageScore: v.number(),
+        recencyPenalty: v.number(),
+        dominancePenalty: v.number(),
+        mentionBoost: v.number(),
+        overlapPenalty: v.number(),
+        allocatorScore: v.number(),
+        allocatorReason: v.string(),
+      })
+    ),
+    candidates: v.array(
+      v.object({
+        memberId: v.id('members'),
+        rank: v.number(),
+        status: roundtableCandidateStatusValidator,
+        moveType: roundBidMoveTypeValidator,
+        targetMemberId: v.optional(v.id('members')),
+        rationaleTag: roundtableRationaleTagValidator,
+        allocatorReason: v.string(),
+        score: v.number(),
+        selectedBy: roundtableCandidateSelectedByValidator,
+      })
+    ),
   },
   returns: roundState,
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
-    await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    const conversation = await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    assertHallConversationWritable(conversation);
 
-    const { round, intents } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
-    if (round.status !== 'awaiting_user') {
-      throw new Error('Only awaiting_user rounds can be edited');
-    }
-
-    const uniqueSelections = Array.from(new Set(args.selectedMemberIds.map((id) => id as string)));
-    const selectableIds = new Set(intents.map((row: any) => row.memberId as string));
-    const maxSelectable = Math.max(1, selectableIds.size);
-    if (uniqueSelections.length > maxSelectable) {
-      throw new Error(`At most ${maxSelectable} speakers can be selected`);
-    }
-
-    for (const memberId of uniqueSelections) {
-      if (!selectableIds.has(memberId)) {
-        throw new Error('Selected member is not eligible for this round');
-      }
+    const { round } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
+    if (round.status === 'superseded') {
+      throw new Error('Cannot update a superseded round');
     }
 
     const now = Date.now();
-    await Promise.all(
-      intents.map((row: any) =>
-        ctx.db.patch(row._id, {
-          selected: uniqueSelections.includes(row.memberId as string),
-          source: 'user_manual',
-          updatedAt: now,
-        })
+    const existingBids = await ctx.db
+      .query('hallRoundBids')
+      .withIndex('by_conversation_round', (q: any) =>
+        q.eq('conversationId', args.conversationId).eq('roundNumber', args.roundNumber)
       )
+      .collect();
+    const existingCandidates = await ctx.db
+      .query('hallRoundCandidates')
+      .withIndex('by_conversation_round', (q: any) =>
+        q.eq('conversationId', args.conversationId).eq('roundNumber', args.roundNumber)
+      )
+      .collect();
+
+    const bidByMember = new Map(existingBids.map((row: any) => [row.memberId as string, row]));
+    const candidateByMember = new Map(existingCandidates.map((row: any) => [row.memberId as string, row]));
+
+    await Promise.all(
+      args.bids.map(async (bid) => {
+        const existing = bidByMember.get(bid.memberId as string);
+        const patch = {
+          wantsToSpeak: bid.wantsToSpeak,
+          moveType: bid.moveType,
+          targetMemberId: bid.targetMemberId,
+          noveltyClaim: bid.noveltyClaim,
+          confidence: bid.confidence,
+          estimatedValue: bid.estimatedValue,
+          relevanceScore: bid.relevanceScore,
+          noveltyScore: bid.noveltyScore,
+          tensionScore: bid.tensionScore,
+          coverageScore: bid.coverageScore,
+          recencyPenalty: bid.recencyPenalty,
+          dominancePenalty: bid.dominancePenalty,
+          mentionBoost: bid.mentionBoost,
+          overlapPenalty: bid.overlapPenalty,
+          allocatorScore: bid.allocatorScore,
+          allocatorReason: bid.allocatorReason,
+          updatedAt: now,
+        };
+        if (existing) {
+          await ctx.db.patch(existing._id, patch);
+          return;
+        }
+        await ctx.db.insert('hallRoundBids', {
+          userId,
+          conversationId: args.conversationId,
+          roundNumber: args.roundNumber,
+          memberId: bid.memberId,
+          ...patch,
+        });
+      })
     );
 
-    await ctx.db.patch(round._id, { updatedAt: now });
+    await Promise.all(
+      args.candidates.map(async (candidate) => {
+        const existing = candidateByMember.get(candidate.memberId as string);
+        const patch = {
+          rank: candidate.rank,
+          status: candidate.status,
+          moveType: candidate.moveType,
+          targetMemberId: candidate.targetMemberId,
+          rationaleTag: candidate.rationaleTag,
+          allocatorReason: candidate.allocatorReason,
+          score: candidate.score,
+          selectedBy: candidate.selectedBy,
+          updatedAt: now,
+        };
+        if (existing) {
+          await ctx.db.patch(existing._id, patch);
+          return;
+        }
+        await ctx.db.insert('hallRoundCandidates', {
+          userId,
+          conversationId: args.conversationId,
+          roundNumber: args.roundNumber,
+          memberId: candidate.memberId,
+          ...patch,
+        });
+      })
+    );
+
+    await ctx.db.patch(round._id, {
+      status: args.nextStatus,
+      updatedAt: now,
+    });
+
     return await loadRoundState(ctx, args.conversationId, args.roundNumber);
   },
 });
@@ -301,23 +495,56 @@ export const markRoundInProgress = mutation({
   args: {
     conversationId: v.id('conversations'),
     roundNumber: v.number(),
+    speakingMemberId: v.optional(v.id('members')),
+    selectedBy: v.optional(roundtableCandidateSelectedByValidator),
   },
   returns: roundState,
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
-    await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    const conversation = await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    assertHallConversationWritable(conversation);
 
     const { round } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
     if (round.status !== 'awaiting_user') {
       throw new Error('Round is not awaiting user approval');
     }
 
+    const now = Date.now();
+    if (args.speakingMemberId) {
+      const existing = await ctx.db
+        .query('hallRoundCandidates')
+        .withIndex('by_round_member', (q: any) =>
+          q.eq('conversationId', args.conversationId).eq('roundNumber', args.roundNumber).eq('memberId', args.speakingMemberId)
+        )
+        .first();
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          status: 'speaking',
+          selectedBy: args.selectedBy ?? existing.selectedBy,
+          updatedAt: now,
+        });
+      }
+    }
+
     await ctx.db.patch(round._id, {
       status: 'in_progress',
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
 
     return await loadRoundState(ctx, args.conversationId, args.roundNumber);
+  },
+});
+
+export const supersedeOpenRounds = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await assertOwnedHallConversation(ctx, userId, args.conversationId);
+    await supersedePendingRounds(ctx, args.conversationId);
+    return null;
   },
 });
 
@@ -331,68 +558,26 @@ export const markRoundCompleted = mutation({
     const userId = await requireUser(ctx);
     await assertOwnedHallConversation(ctx, userId, args.conversationId);
 
-    const { round } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
+    const { round, candidates } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
 
     if (round.status === 'superseded') {
       throw new Error('Cannot complete a superseded round');
     }
 
-    await ctx.db.patch(round._id, {
-      status: 'completed',
-      updatedAt: Date.now(),
-    });
-
-    return await loadRoundState(ctx, args.conversationId, args.roundNumber);
-  },
-});
-
-export const updateRoundAfterTurn = mutation({
-  args: {
-    conversationId: v.id('conversations'),
-    roundNumber: v.number(),
-    nextStatus: v.union(v.literal('awaiting_user'), v.literal('completed')),
-    updates: v.array(
-      v.object({
-        memberId: v.id('members'),
-        intent: v.optional(roundIntentValidator),
-        targetMemberId: v.optional(v.id('members')),
-        rationale: v.optional(v.string()),
-        selected: v.boolean(),
-      })
-    ),
-  },
-  returns: roundState,
-  handler: async (ctx, args) => {
-    const userId = await requireUser(ctx);
-    await assertOwnedHallConversation(ctx, userId, args.conversationId);
-
-    const { round, intents } = await loadRoundState(ctx, args.conversationId, args.roundNumber);
-    if (round.status === 'superseded') {
-      throw new Error('Cannot update a superseded round');
-    }
-
-    const updateMap = new Map(args.updates.map((row) => [row.memberId as string, row]));
+    const spokenSet = new Set(await loadSpokenMemberIds(ctx, args.conversationId, args.roundNumber));
     const now = Date.now();
 
     await Promise.all(
-      intents.map((row: any) => {
-        const next = updateMap.get(row.memberId as string);
-        if (!next) return Promise.resolve();
-        return ctx.db.patch(row._id, {
-          intent: next.intent ?? row.intent,
-          targetMemberId:
-            typeof next.intent === 'string' || Object.prototype.hasOwnProperty.call(next, 'targetMemberId')
-              ? next.targetMemberId
-              : row.targetMemberId,
-          rationale: next.rationale ?? row.rationale,
-          selected: next.selected,
+      candidates.map((candidate: any) =>
+        ctx.db.patch(candidate._id, {
+          status: spokenSet.has(candidate.memberId) ? 'spoken' : 'dismissed',
           updatedAt: now,
-        });
-      })
+        })
+      )
     );
 
     await ctx.db.patch(round._id, {
-      status: args.nextStatus,
+      status: 'completed',
       updatedAt: now,
     });
 

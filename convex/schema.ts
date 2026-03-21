@@ -80,6 +80,8 @@ export default defineSchema({
     guidanceLastReflectedUserTurnCount: v.optional(v.number()),
     title: v.string(),
     chamberMemberId: v.optional(v.id('members')),
+    closedAt: v.optional(v.number()),
+    closedReason: v.optional(v.literal('user_closed')),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
     status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
     deletedAt: v.optional(v.number()),
@@ -144,6 +146,84 @@ export default defineSchema({
     .index('by_conversation_round', ['conversationId', 'roundNumber'])
     .index('by_conversation_round_selected', ['conversationId', 'roundNumber', 'selected']),
 
+  hallRoundBids: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    roundNumber: v.number(),
+    memberId: v.id('members'),
+    wantsToSpeak: v.boolean(),
+    moveType: v.union(
+      v.literal('rebuttal'),
+      v.literal('caveat'),
+      v.literal('synthesis'),
+      v.literal('evidence'),
+      v.literal('reframing'),
+      v.literal('clarification'),
+      v.literal('agreement'),
+      v.literal('pass'),
+    ),
+    targetMemberId: v.optional(v.id('members')),
+    noveltyClaim: v.string(),
+    confidence: v.number(),
+    estimatedValue: v.number(),
+    relevanceScore: v.number(),
+    noveltyScore: v.number(),
+    tensionScore: v.number(),
+    coverageScore: v.number(),
+    recencyPenalty: v.number(),
+    dominancePenalty: v.number(),
+    mentionBoost: v.number(),
+    overlapPenalty: v.number(),
+    allocatorScore: v.number(),
+    allocatorReason: v.string(),
+    updatedAt: v.number(),
+  })
+    .index('by_round_member', ['conversationId', 'roundNumber', 'memberId'])
+    .index('by_conversation_round', ['conversationId', 'roundNumber']),
+
+  hallRoundCandidates: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    roundNumber: v.number(),
+    memberId: v.id('members'),
+    rank: v.number(),
+    status: v.union(
+      v.literal('shortlisted'),
+      v.literal('speaking'),
+      v.literal('spoken'),
+      v.literal('dismissed'),
+    ),
+    moveType: v.union(
+      v.literal('rebuttal'),
+      v.literal('caveat'),
+      v.literal('synthesis'),
+      v.literal('evidence'),
+      v.literal('reframing'),
+      v.literal('clarification'),
+      v.literal('agreement'),
+      v.literal('pass'),
+    ),
+    targetMemberId: v.optional(v.id('members')),
+    rationaleTag: v.union(
+      v.literal('pushback'),
+      v.literal('new angle'),
+      v.literal('evidence'),
+      v.literal('synthesis'),
+      v.literal('clarify'),
+    ),
+    allocatorReason: v.string(),
+    score: v.number(),
+    selectedBy: v.union(
+      v.literal('allocator'),
+      v.literal('mention_boost'),
+      v.literal('user_manual_fallback'),
+    ),
+    updatedAt: v.number(),
+  })
+    .index('by_round_member', ['conversationId', 'roundNumber', 'memberId'])
+    .index('by_conversation_round', ['conversationId', 'roundNumber'])
+    .index('by_conversation_round_status', ['conversationId', 'roundNumber', 'status']),
+
   conversationMemoryLogs: defineTable({
     userId: v.id('users'),
     conversationId: v.id('conversations'),
@@ -204,7 +284,7 @@ export default defineSchema({
     userId: v.id('users'),
     conversationId: v.id('conversations'),
     role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
-    systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'))),
+    systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'), v.literal('hall_closure'))),
     authorMemberId: v.optional(v.id('members')),
     content: v.string(),
     status: v.union(v.literal('sent'), v.literal('error')),

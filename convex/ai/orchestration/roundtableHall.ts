@@ -1,26 +1,3 @@
-import type { RoundIntent } from '../provider/types';
-
-export interface DraftRoundIntent {
-  memberId: string;
-  intent: RoundIntent;
-  targetMemberId?: string;
-  rationale: string;
-  selected: boolean;
-  source: 'mention' | 'intent_default' | 'user_manual';
-}
-
-export function applyRoundDefaultSelection(options: {
-  intents: DraftRoundIntent[];
-  mentionedMemberIds?: string[];
-  maxSpeakers: number;
-}): DraftRoundIntent[] {
-  return options.intents.map((intent) => ({
-    ...intent,
-    selected: intent.intent !== 'pass',
-    source: 'intent_default' as DraftRoundIntent['source'],
-  }));
-}
-
 export function buildRoundContext(options: {
   userMessage?: string;
   recentMessages: Array<{ author: string; content: string }>;

@@ -8,9 +8,21 @@ export type MessageRole = 'user' | 'member' | 'system';
 export type MessageStatus = 'sent' | 'error';
 export type RoutingSource = 'llm' | 'fallback' | 'chamber-fixed';
 export type RoundtableIntent = 'speak' | 'challenge' | 'support' | 'pass';
+export type RoundtableMoveType =
+  | 'rebuttal'
+  | 'caveat'
+  | 'synthesis'
+  | 'evidence'
+  | 'reframing'
+  | 'clarification'
+  | 'agreement'
+  | 'pass';
 export type RoundtableRoundStatus = 'awaiting_user' | 'in_progress' | 'completed' | 'superseded';
+export type RoundtableCandidateStatus = 'shortlisted' | 'speaking' | 'spoken' | 'dismissed';
+export type RoundtableCandidateSelectedBy = 'allocator' | 'mention_boost' | 'user_manual_fallback';
+export type RoundtableRationaleTag = 'pushback' | 'new angle' | 'evidence' | 'synthesis' | 'clarify';
 export type PersonalArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
-export type SystemMessageKind = 'routing' | 'hall_followup_context';
+export type SystemMessageKind = 'routing' | 'hall_followup_context' | 'hall_closure';
 export type MemberVoiceName = 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
 export type MessageFeedbackKey =
   | 'like'
@@ -114,6 +126,8 @@ export interface Conversation {
   guidanceLastReflectedUserTurnCount?: number;
   title: string;
   chamberMemberId?: string;
+  closedAt?: number;
+  closedReason?: 'user_closed';
   deletedAt?: number;
   lastMessageAt?: number;
   createdAt: number;
@@ -221,23 +235,26 @@ export interface RoundtableRound {
   createdAt: number;
 }
 
-export interface RoundtableIntentState {
+export interface RoundtableCandidateState {
   id: string;
   conversationId: string;
   roundNumber: number;
   memberId: string;
-  intent: RoundtableIntent;
+  rank: number;
+  status: RoundtableCandidateStatus;
+  moveType: RoundtableMoveType;
   targetMemberId?: string;
-  rationale: string;
-  selected: boolean;
-  source: 'mention' | 'intent_default' | 'user_manual';
+  rationaleTag: RoundtableRationaleTag;
+  allocatorReason: string;
+  score: number;
+  selectedBy: RoundtableCandidateSelectedBy;
   updatedAt: number;
   createdAt: number;
 }
 
 export interface RoundtableState {
   round: RoundtableRound;
-  intents: RoundtableIntentState[];
+  candidates: RoundtableCandidateState[];
   spokenMemberIds: string[];
 }
 
