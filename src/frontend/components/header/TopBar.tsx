@@ -221,9 +221,11 @@ export function TopBar({
     </>
   );
 
+  const hasSecondaryRow = Boolean(subtitle || showHallParticipants);
+
   return (
-    <header className="grid min-h-[74px] grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 border-b border-border bg-background px-4 py-3 md:min-h-16 md:items-center md:gap-y-2 md:px-6 md:py-2">
-      <div className="flex min-w-0 items-start gap-3 md:items-center">
+    <header className="grid min-h-[74px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-border bg-background px-4 py-3 md:min-h-16 md:items-center md:gap-y-2 md:px-6 md:py-2">
+      <div className={hasSecondaryRow ? 'flex min-w-0 items-start gap-3 md:items-center' : 'flex min-w-0 items-center gap-3'}>
         <Button size="icon" variant="ghost" onClick={onToggleSidebar} aria-label="Toggle sidebar">
           <Menu className="h-5 w-5" />
         </Button>
