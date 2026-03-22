@@ -40,6 +40,7 @@ import type * as ai_provider_types from "../ai/provider/types.js";
 import type * as ai_ragConfig from "../ai/ragConfig.js";
 import type * as ai_ragExtraction from "../ai/ragExtraction.js";
 import type * as ai_ragStore from "../ai/ragStore.js";
+import type * as ai_retrievalStrategyConfig from "../ai/retrievalStrategyConfig.js";
 import type * as ai_roundtable from "../ai/roundtable.js";
 import type * as ai_roundtablePolicy from "../ai/roundtablePolicy.js";
 import type * as ai_routing from "../ai/routing.js";
@@ -151,6 +152,7 @@ declare const fullApi: ApiFromModules<{
   "ai/ragConfig": typeof ai_ragConfig;
   "ai/ragExtraction": typeof ai_ragExtraction;
   "ai/ragStore": typeof ai_ragStore;
+  "ai/retrievalStrategyConfig": typeof ai_retrievalStrategyConfig;
   "ai/roundtable": typeof ai_roundtable;
   "ai/roundtablePolicy": typeof ai_roundtablePolicy;
   "ai/routing": typeof ai_routing;

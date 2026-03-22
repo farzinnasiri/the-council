@@ -26,11 +26,12 @@ interface DigestEditorState {
   digestId: string;
   kbDocumentId?: string;
   displayName: string;
-  topics: string;
-  entities: string;
-  lexicalAnchors: string;
-  styleAnchors: string;
-  digestSummary: string;
+  docType: string;
+  about: string;
+  bestFor: string;
+  evidenceKinds: string;
+  notFor: string;
+  queryHints: string;
 }
 
 interface MemberMemoryBundleState {
@@ -452,11 +453,12 @@ export function MembersPage() {
       digestId: digest.id,
       kbDocumentId,
       displayName: digest.displayName,
-      topics: listToText(digest.topics),
-      entities: listToText(digest.entities),
-      lexicalAnchors: listToText(digest.lexicalAnchors),
-      styleAnchors: listToText(digest.styleAnchors),
-      digestSummary: digest.digestSummary,
+      docType: digest.documentCard.docType,
+      about: digest.documentCard.about,
+      bestFor: listToText(digest.documentCard.bestFor),
+      evidenceKinds: listToText(digest.documentCard.evidenceKinds),
+      notFor: listToText(digest.documentCard.notFor),
+      queryHints: listToText(digest.queryHints),
     });
     setIsDigestEditorOpen(true);
   };
@@ -468,11 +470,14 @@ export function MembersPage() {
       await convexRepository.updateMemberDigestMetadata({
         digestId: digestEditor.digestId,
         displayName: digestEditor.displayName.trim() || 'Untitled document',
-        topics: textToList(digestEditor.topics),
-        entities: textToList(digestEditor.entities),
-        lexicalAnchors: textToList(digestEditor.lexicalAnchors),
-        styleAnchors: textToList(digestEditor.styleAnchors),
-        digestSummary: digestEditor.digestSummary.trim(),
+        documentCard: {
+          docType: digestEditor.docType.trim() || 'other',
+          about: digestEditor.about.trim(),
+          bestFor: textToList(digestEditor.bestFor),
+          evidenceKinds: textToList(digestEditor.evidenceKinds),
+          notFor: textToList(digestEditor.notFor),
+        },
+        queryHints: textToList(digestEditor.queryHints),
       });
       const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
       setKbDigests(rows);
@@ -506,11 +511,12 @@ export function MembersPage() {
             ? {
                 ...current,
                 displayName: refreshed.displayName,
-                topics: listToText(refreshed.topics),
-                entities: listToText(refreshed.entities),
-                lexicalAnchors: listToText(refreshed.lexicalAnchors),
-                styleAnchors: listToText(refreshed.styleAnchors),
-                digestSummary: refreshed.digestSummary,
+                docType: refreshed.documentCard.docType,
+                about: refreshed.documentCard.about,
+                bestFor: listToText(refreshed.documentCard.bestFor),
+                evidenceKinds: listToText(refreshed.documentCard.evidenceKinds),
+                notFor: listToText(refreshed.documentCard.notFor),
+                queryHints: listToText(refreshed.queryHints),
               }
             : current
         );
@@ -1160,8 +1166,11 @@ export function MembersPage() {
                               ) : null}
                               {digest ? (
                                 <>
-                                  {digest.digestSummary ? (
-                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">{digest.digestSummary}</p>
+                                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    {digest.documentCard.docType || 'other'}
+                                  </p>
+                                  {digest.documentCard.about ? (
+                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">{digest.documentCard.about}</p>
                                   ) : null}
                                 </>
                               ) : isDigestLoading ? (
@@ -1628,52 +1637,62 @@ export function MembersPage() {
                         />
                       </label>
                       <label className="grid gap-1 text-sm">
-                        Topics (comma-separated)
+                        Document type
                         <input
                           className="h-10 rounded-lg border border-border bg-background px-3"
-                          value={digestEditor.topics}
+                          value={digestEditor.docType}
                           onChange={(event) =>
-                            setDigestEditor((current) => (current ? { ...current, topics: event.target.value } : current))
+                            setDigestEditor((current) => (current ? { ...current, docType: event.target.value } : current))
                           }
                         />
                       </label>
                       <label className="grid gap-1 text-sm">
-                        Entities (comma-separated)
-                        <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
-                          value={digestEditor.entities}
-                          onChange={(event) =>
-                            setDigestEditor((current) => (current ? { ...current, entities: event.target.value } : current))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        Lexical anchors (comma-separated)
-                        <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
-                          value={digestEditor.lexicalAnchors}
-                          onChange={(event) =>
-                            setDigestEditor((current) => (current ? { ...current, lexicalAnchors: event.target.value } : current))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        Style anchors (comma-separated)
-                        <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
-                          value={digestEditor.styleAnchors}
-                          onChange={(event) =>
-                            setDigestEditor((current) => (current ? { ...current, styleAnchors: event.target.value } : current))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        Digest summary
+                        Document card
                         <textarea
                           className="min-h-28 rounded-lg border border-border bg-background px-3 py-2"
-                          value={digestEditor.digestSummary}
+                          value={digestEditor.about}
                           onChange={(event) =>
-                            setDigestEditor((current) => (current ? { ...current, digestSummary: event.target.value } : current))
+                            setDigestEditor((current) => (current ? { ...current, about: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Best for questions (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.bestFor}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, bestFor: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Evidence kinds (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.evidenceKinds}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, evidenceKinds: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Not for (comma-separated)
+                        <input
+                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          value={digestEditor.notFor}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, notFor: event.target.value } : current))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        Query hints (comma-separated)
+                        <textarea
+                          className="min-h-28 rounded-lg border border-border bg-background px-3 py-2"
+                          value={digestEditor.queryHints}
+                          onChange={(event) =>
+                            setDigestEditor((current) => (current ? { ...current, queryHints: event.target.value } : current))
                           }
                         />
                       </label>

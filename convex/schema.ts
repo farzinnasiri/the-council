@@ -59,6 +59,7 @@ export default defineSchema({
         v.literal('instant'),
         v.literal('short'),
         v.literal('think'),
+        v.literal('brainstorm'),
         v.literal('deep_dive')
       )
     ),
@@ -306,6 +307,7 @@ export default defineSchema({
         v.literal('instant'),
         v.literal('short'),
         v.literal('think'),
+        v.literal('brainstorm'),
         v.literal('deep_dive')
       )
     ),
@@ -416,11 +418,14 @@ export default defineSchema({
     kbDocumentName: v.optional(v.string()),
     displayName: v.string(),
     storageId: v.optional(v.id('_storage')),
-    topics: v.array(v.string()),
-    entities: v.array(v.string()),
-    lexicalAnchors: v.array(v.string()),
-    styleAnchors: v.array(v.string()),
-    digestSummary: v.string(),
+    documentCard: v.object({
+      docType: v.string(),
+      about: v.string(),
+      bestFor: v.array(v.string()),
+      evidenceKinds: v.array(v.string()),
+      notFor: v.array(v.string()),
+    }),
+    queryHints: v.array(v.string()),
     status: v.union(v.literal('active'), v.literal('deleted')),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number()),
@@ -445,7 +450,7 @@ export default defineSchema({
     .vectorIndex('by_embedding', {
       vectorField: 'embedding',
       dimensions: 1536,
-      filterFields: ['userId', 'memberId', 'kbStoreName'],
+      filterFields: ['userId', 'memberId', 'kbStoreName', 'kbDocumentName'],
     }),
 
   personalArchiveProfiles: defineTable({

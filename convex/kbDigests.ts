@@ -3,6 +3,13 @@ import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 
 const digestStatus = v.union(v.literal('active'), v.literal('deleted'));
+const documentCardValidator = v.object({
+  docType: v.string(),
+  about: v.string(),
+  bestFor: v.array(v.string()),
+  evidenceKinds: v.array(v.string()),
+  notFor: v.array(v.string()),
+});
 
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -25,11 +32,8 @@ export const upsertForDocument = mutation({
     kbDocumentName: v.optional(v.string()),
     displayName: v.string(),
     storageId: v.optional(v.id('_storage')),
-    topics: v.array(v.string()),
-    entities: v.array(v.string()),
-    lexicalAnchors: v.array(v.string()),
-    styleAnchors: v.array(v.string()),
-    digestSummary: v.string(),
+    documentCard: documentCardValidator,
+    queryHints: v.array(v.string()),
     status: v.optional(digestStatus),
     updatedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
@@ -73,11 +77,8 @@ export const upsertForDocument = mutation({
       kbDocumentName: args.kbDocumentName,
       displayName: args.displayName,
       storageId: args.storageId,
-      topics: args.topics,
-      entities: args.entities,
-      lexicalAnchors: args.lexicalAnchors,
-      styleAnchors: args.styleAnchors,
-      digestSummary: args.digestSummary,
+      documentCard: args.documentCard,
+      queryHints: args.queryHints,
       status: args.status ?? 'active',
       updatedAt: now,
       deletedAt: args.deletedAt,
@@ -111,11 +112,8 @@ export const listByMember = query({
       kbDocumentName: v.optional(v.string()),
       displayName: v.string(),
       storageId: v.optional(v.id('_storage')),
-      topics: v.array(v.string()),
-      entities: v.array(v.string()),
-      lexicalAnchors: v.array(v.string()),
-      styleAnchors: v.array(v.string()),
-      digestSummary: v.string(),
+      documentCard: documentCardValidator,
+      queryHints: v.array(v.string()),
       status: digestStatus,
       updatedAt: v.number(),
       deletedAt: v.optional(v.number()),
@@ -141,6 +139,11 @@ export const listByMember = query({
     return rows
       .flat()
       .filter((row: any) => includeDeleted || !row.deletedAt)
+      .map((row: any) => ({
+        ...row,
+        documentCard: row.documentCard ?? buildDocumentCardFromLegacy(row),
+        queryHints: Array.isArray(row.queryHints) ? row.queryHints : buildQueryHintsFromLegacy(row),
+      }))
       .sort((a: any, b: any) => b.updatedAt - a.updatedAt);
   },
 });
@@ -178,11 +181,8 @@ export const updateDigestMetadata = mutation({
   args: {
     digestId: v.id('kbDocumentDigests'),
     displayName: v.optional(v.string()),
-    topics: v.optional(v.array(v.string())),
-    entities: v.optional(v.array(v.string())),
-    lexicalAnchors: v.optional(v.array(v.string())),
-    styleAnchors: v.optional(v.array(v.string())),
-    digestSummary: v.optional(v.string()),
+    documentCard: v.optional(documentCardValidator),
+    queryHints: v.optional(v.array(v.string())),
     updatedAt: v.optional(v.number()),
   },
   returns: v.id('kbDocumentDigests'),
@@ -200,13 +200,116 @@ export const updateDigestMetadata = mutation({
     };
 
     if (args.displayName !== undefined) patch.displayName = args.displayName;
-    if (args.topics !== undefined) patch.topics = args.topics;
-    if (args.entities !== undefined) patch.entities = args.entities;
-    if (args.lexicalAnchors !== undefined) patch.lexicalAnchors = args.lexicalAnchors;
-    if (args.styleAnchors !== undefined) patch.styleAnchors = args.styleAnchors;
-    if (args.digestSummary !== undefined) patch.digestSummary = args.digestSummary;
+    if (args.documentCard !== undefined) patch.documentCard = args.documentCard;
+    if (args.queryHints !== undefined) patch.queryHints = args.queryHints;
 
     await ctx.db.patch(args.digestId, patch);
     return args.digestId;
+  },
+});
+
+function normalizeLegacyItems(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+    .map((item) => item.slice(0, 120))
+    .filter((item, index, list) => list.indexOf(item) === index);
+}
+
+function inferLegacyDocType(displayName: string): string {
+  const normalized = displayName.toLowerCase();
+  if (normalized.endsWith('.pdf') || normalized.includes('book')) return 'book';
+  if (normalized.includes('transcript') || normalized.includes('interview') || normalized.includes('podcast')) return 'transcript';
+  if (normalized.includes('report')) return 'report';
+  if (normalized.includes('essay')) return 'essay';
+  if (normalized.includes('article')) return 'article';
+  if (normalized.includes('notes')) return 'notes';
+  return 'other';
+}
+
+function buildDocumentCardFromLegacy(row: any) {
+  const topics = normalizeLegacyItems(row.topics);
+  const entities = normalizeLegacyItems(row.entities);
+  const lexicalAnchors = normalizeLegacyItems(row.lexicalAnchors);
+  const digestSummary = typeof row.digestSummary === 'string' ? row.digestSummary.trim() : '';
+  const about =
+    digestSummary ||
+    (topics.length > 0
+      ? `Document covering ${topics.slice(0, 4).join(', ')}.`
+      : `Document titled ${row.displayName ?? 'Untitled document'}.`);
+
+  const bestFor = topics.slice(0, 4).map((topic) => `questions about ${topic}`);
+  const evidenceKinds = (() => {
+    const docType = inferLegacyDocType(String(row.displayName ?? ''));
+    if (docType === 'transcript') return ['quotes', 'story'];
+    if (docType === 'report') return ['reference', 'argument'];
+    if (docType === 'essay' || docType === 'article') return ['argument', 'framework'];
+    if (docType === 'book') return ['story', 'framework', 'advice'];
+    if (lexicalAnchors.length > 0 || entities.length > 0) return ['reference'];
+    return ['reference'];
+  })();
+
+  return {
+    docType: inferLegacyDocType(String(row.displayName ?? '')),
+    about: about.slice(0, 600),
+    bestFor,
+    evidenceKinds,
+    notFor: [] as string[],
+  };
+}
+
+function buildQueryHintsFromLegacy(row: any): string[] {
+  return normalizeLegacyItems([
+    ...(Array.isArray(row.topics) ? row.topics : []),
+    ...(Array.isArray(row.entities) ? row.entities : []),
+    ...(Array.isArray(row.lexicalAnchors) ? row.lexicalAnchors : []),
+  ]).slice(0, 24);
+}
+
+export const migrateLegacySchema = mutation({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    scannedCount: v.number(),
+    migratedCount: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 500, 1000));
+    const rows = (await ctx.db.query('kbDocumentDigests').take(limit)) as Array<any>;
+
+    let migratedCount = 0;
+    for (const row of rows) {
+      const hasDocumentCard =
+        row.documentCard &&
+        typeof row.documentCard.docType === 'string' &&
+        typeof row.documentCard.about === 'string' &&
+        Array.isArray(row.documentCard.bestFor) &&
+        Array.isArray(row.documentCard.evidenceKinds) &&
+        Array.isArray(row.documentCard.notFor);
+      const hasQueryHints = Array.isArray(row.queryHints);
+      if (hasDocumentCard && hasQueryHints) continue;
+
+      await ctx.db.replace(row._id, {
+        userId: row.userId,
+        memberId: row.memberId,
+        kbStoreName: row.kbStoreName,
+        kbDocumentName: row.kbDocumentName,
+        displayName: row.displayName,
+        storageId: row.storageId,
+        documentCard: hasDocumentCard ? row.documentCard : buildDocumentCardFromLegacy(row),
+        queryHints: hasQueryHints ? row.queryHints : buildQueryHintsFromLegacy(row),
+        status: row.status ?? 'active',
+        updatedAt: row.updatedAt ?? Date.now(),
+        deletedAt: row.deletedAt,
+      });
+      migratedCount += 1;
+    }
+
+    return {
+      scannedCount: rows.length,
+      migratedCount,
+    };
   },
 });

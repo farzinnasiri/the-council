@@ -10,7 +10,13 @@ const conversationDoc = v.object({
   kind: v.union(v.literal('hall'), v.literal('chamber')),
   hallMode: v.optional(v.union(v.literal('advisory'), v.literal('roundtable'))),
   chamberResponseMode: v.optional(
-    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
+    v.union(
+      v.literal('instant'),
+      v.literal('short'),
+      v.literal('think'),
+      v.literal('brainstorm'),
+      v.literal('deep_dive')
+    )
   ),
   timeAwareReentryEnabled: v.optional(v.boolean()),
   timeAwareReentryState: v.optional(
@@ -74,7 +80,13 @@ const messageDoc = v.object({
     )
   ),
   generationProfile: v.optional(
-    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
+    v.union(
+      v.literal('instant'),
+      v.literal('short'),
+      v.literal('think'),
+      v.literal('brainstorm'),
+      v.literal('deep_dive')
+    )
   ),
   routing: v.optional(v.object({
     memberIds: v.array(v.id('members')),
@@ -317,7 +329,13 @@ export const renameConversation = mutation({
 export const setChamberResponseMode = mutation({
   args: {
     conversationId: v.id('conversations'),
-    mode: v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive')),
+    mode: v.union(
+      v.literal('instant'),
+      v.literal('short'),
+      v.literal('think'),
+      v.literal('brainstorm'),
+      v.literal('deep_dive')
+    ),
   },
   returns: conversationDoc,
   handler: async (ctx, args) => {

@@ -19,6 +19,19 @@ import { runHallClosureGraph } from './graphs/hallClosureGraph';
 import type { Id } from '../_generated/dataModel';
 import { api } from '../_generated/api';
 
+function resolveLegacyRetrievalProfile(
+  retrievalStrategy?: 'instant' | 'brainstorm' | 'deep_dive',
+  retrievalProfile?: 'default' | 'deep_dive'
+): 'default' | 'deep_dive' | undefined {
+  if (retrievalProfile) {
+    return retrievalProfile;
+  }
+  if (!retrievalStrategy) {
+    return undefined;
+  }
+  return retrievalStrategy === 'deep_dive' ? 'deep_dive' : 'default';
+}
+
 export const chatWithMember = action({
   args: {
     conversationId: v.id('conversations'),
@@ -29,9 +42,18 @@ export const chatWithMember = action({
     hallContext: v.optional(v.string()),
     chatModel: v.optional(v.string()),
     chatProfile: v.optional(
-      v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive'))
+      v.union(
+        v.literal('instant'),
+        v.literal('short'),
+        v.literal('think'),
+        v.literal('brainstorm'),
+        v.literal('deep_dive')
+      )
     ),
     retrievalModel: v.optional(v.string()),
+    retrievalStrategy: v.optional(
+      v.union(v.literal('instant'), v.literal('brainstorm'), v.literal('deep_dive'))
+    ),
     retrievalProfile: v.optional(v.union(v.literal('default'), v.literal('deep_dive'))),
     turnDirective: v.optional(v.union(v.literal('shorter'), v.literal('elaborate'))),
     timeAwareReentry: v.optional(timeAwareReentryDirectiveValidator),
@@ -42,7 +64,10 @@ export const chatWithMember = action({
       'conversation.id': String(args.conversationId),
       'member.id': String(args.memberId),
     });
-    return await chatWithMemberUseCase(ctx, args);
+    return await chatWithMemberUseCase(ctx, {
+      ...args,
+      retrievalProfile: resolveLegacyRetrievalProfile(args.retrievalStrategy, args.retrievalProfile),
+    });
   }),
 });
 

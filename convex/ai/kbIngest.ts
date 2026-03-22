@@ -9,7 +9,8 @@ import { extractTextFromStorage } from './ragExtraction';
 import { deleteDocumentChunks, indexDocumentChunks, listMemberChunkDocuments } from './ragStore';
 
 export const KB_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
-const DIGEST_SAMPLE_CHAR_LIMIT = 6000;
+const DIGEST_FULL_TEXT_CHAR_LIMIT = 600_000;
+const DIGEST_SEGMENT_CHAR_LIMIT = 180_000;
 
 export interface StagedUploadInput {
   storageId: Id<'_storage'>;
@@ -26,6 +27,32 @@ function normalizeDigestItems(items: string[], min: number, max: number): string
     .filter((item, index, list) => list.indexOf(item) === index)
     .slice(0, max)
     .slice(0, Math.max(min, Math.min(max, items.length || min)));
+}
+
+function buildDigestInputText(text: string): string {
+  const normalized = text.trim();
+  if (normalized.length <= DIGEST_FULL_TEXT_CHAR_LIMIT) {
+    return normalized;
+  }
+
+  const head = normalized.slice(0, DIGEST_SEGMENT_CHAR_LIMIT);
+  const middleStart = Math.max(
+    DIGEST_SEGMENT_CHAR_LIMIT,
+    Math.floor(normalized.length / 2) - Math.floor(DIGEST_SEGMENT_CHAR_LIMIT / 2),
+  );
+  const middle = normalized.slice(middleStart, middleStart + DIGEST_SEGMENT_CHAR_LIMIT);
+  const tail = normalized.slice(-DIGEST_SEGMENT_CHAR_LIMIT);
+
+  return [
+    '[Document beginning]',
+    head,
+    '',
+    '[Document middle]',
+    middle,
+    '',
+    '[Document end]',
+    tail,
+  ].join('\n');
 }
 
 function resolveStoreName(memberId: Id<'members'>): string {
@@ -47,7 +74,7 @@ async function readStorageSampleText(
   if (!displayName) return undefined;
   try {
     const extracted = await extractTextFromStorage(ctx, { storageId, displayName, mimeType });
-    return extracted.slice(0, DIGEST_SAMPLE_CHAR_LIMIT);
+    return buildDigestInputText(extracted);
   } catch {
     return undefined;
   }
@@ -85,11 +112,14 @@ async function upsertDigestFromDocument(
     kbDocumentName: input.kbDocumentName,
     displayName: input.displayName,
     storageId: input.storageId,
-    topics: normalizeDigestItems(digest.topics, 3, 8),
-    entities: normalizeDigestItems(digest.entities, 3, 12),
-    lexicalAnchors: normalizeDigestItems(digest.lexicalAnchors, 3, 12),
-    styleAnchors: normalizeDigestItems(digest.styleAnchors, 3, 8),
-    digestSummary: digest.digestSummary.slice(0, 300),
+    documentCard: {
+      docType: digest.documentCard.docType.trim().slice(0, 40) || 'other',
+      about: digest.documentCard.about.trim().slice(0, 800),
+      bestFor: normalizeDigestItems(digest.documentCard.bestFor, 1, 6),
+      evidenceKinds: normalizeDigestItems(digest.documentCard.evidenceKinds, 1, 4),
+      notFor: normalizeDigestItems(digest.documentCard.notFor, 0, 4),
+    },
+    queryHints: normalizeDigestItems(digest.queryHints, 8, 20),
     status: 'active',
     updatedAt: Date.now(),
     deletedAt: undefined,
@@ -263,7 +293,7 @@ export async function uploadStagedDocuments(
       digestCandidates.push({
         file,
         documentName,
-        sampleText: extractedText.slice(0, DIGEST_SAMPLE_CHAR_LIMIT),
+        sampleText: buildDigestInputText(extractedText),
       });
     } catch (error) {
       await patchIngestRecord(ctx, recordId, {
@@ -369,7 +399,7 @@ export async function rehydrateMemberStore(
     digestCandidates.push({
       file: stagedFile,
       documentName,
-      sampleText: extractedText.slice(0, DIGEST_SAMPLE_CHAR_LIMIT),
+      sampleText: buildDigestInputText(extractedText),
     });
   }
 

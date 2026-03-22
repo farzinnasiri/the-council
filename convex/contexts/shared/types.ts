@@ -67,6 +67,14 @@ export interface MessageRow {
   originMessageId?: Id<'messages'>;
 }
 
+export interface KBDocumentCardRow {
+  docType: string;
+  about: string;
+  bestFor: string[];
+  evidenceKinds: string[];
+  notFor: string[];
+}
+
 export interface KBDigestRow {
   _id: Id<'kbDocumentDigests'>;
   _creationTime: number;
@@ -76,11 +84,8 @@ export interface KBDigestRow {
   kbDocumentName?: string;
   displayName: string;
   storageId?: Id<'_storage'>;
-  topics: string[];
-  entities: string[];
-  lexicalAnchors: string[];
-  styleAnchors: string[];
-  digestSummary: string;
+  documentCard: KBDocumentCardRow;
+  queryHints: string[];
   status: 'active' | 'deleted';
   updatedAt: number;
   deletedAt?: number;

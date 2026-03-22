@@ -12,6 +12,7 @@ import type {
   MessageRouting,
   PersonalArchiveAccess,
   RoundtableState,
+  RetrievalStrategy,
   TimeAwareReentryGapBucket,
   ThemeMode,
 } from '../types/domain';
@@ -220,31 +221,33 @@ function isClosedHallConversation(conversation: Conversation | undefined) {
 
 function getBaseGenerationProfile(mode: ChamberResponseMode | undefined): {
   chatProfile: ChamberResponseMode;
-  retrievalProfile: 'default' | 'deep_dive';
+  retrievalStrategy: RetrievalStrategy;
 } {
   switch (mode) {
     case 'short':
-      return { chatProfile: 'short', retrievalProfile: 'default' };
+      return { chatProfile: 'short', retrievalStrategy: 'instant' };
     case 'think':
-      return { chatProfile: 'think', retrievalProfile: 'default' };
+      return { chatProfile: 'think', retrievalStrategy: 'instant' };
+    case 'brainstorm':
+      return { chatProfile: 'instant', retrievalStrategy: 'brainstorm' };
     case 'deep_dive':
-      return { chatProfile: 'instant', retrievalProfile: 'deep_dive' };
+      return { chatProfile: 'think', retrievalStrategy: 'deep_dive' };
     default:
-      return { chatProfile: 'instant', retrievalProfile: 'default' };
+      return { chatProfile: 'instant', retrievalStrategy: 'instant' };
   }
 }
 
 function resolveRefinementProfiles(action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate') {
   if (action === 'think_harder') {
-    return { chatProfile: 'think' as const, retrievalProfile: 'default' as const, turnDirective: undefined };
+    return { chatProfile: 'think' as const, retrievalStrategy: 'instant' as const, turnDirective: undefined };
   }
   if (action === 'deep_dive') {
-    return { chatProfile: 'instant' as const, retrievalProfile: 'deep_dive' as const, turnDirective: undefined };
+    return { chatProfile: 'think' as const, retrievalStrategy: 'deep_dive' as const, turnDirective: undefined };
   }
   if (action === 'shorter') {
-    return { chatProfile: 'instant' as const, retrievalProfile: 'default' as const, turnDirective: 'shorter' as const };
+    return { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const, turnDirective: 'shorter' as const };
   }
-  return { chatProfile: 'instant' as const, retrievalProfile: 'default' as const, turnDirective: 'elaborate' as const };
+  return { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const, turnDirective: 'elaborate' as const };
 }
 
 function getRefinementGenerationProfile(
@@ -2258,7 +2261,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const chamberGeneration =
       conversation.kind === 'chamber'
         ? getBaseGenerationProfile(conversation.chamberResponseMode)
-        : { chatProfile: 'instant' as const, retrievalProfile: 'default' as const };
+        : { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const };
     const replyTasks = memberIds.map(async (memberId) => {
       const member = membersMap.get(memberId);
       const sourceUserMessage = [...get().messages]
@@ -2306,7 +2309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 )
                 : undefined,
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
-            retrievalProfile: conversation.kind === 'chamber' ? chamberGeneration.retrievalProfile : undefined,
+            retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
           });
 
           reply = buildMessage({
@@ -2574,7 +2577,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         previousSummary,
         contextMessages,
         chatProfile: refinementProfiles.chatProfile,
-        retrievalProfile: refinementProfiles.retrievalProfile,
+        retrievalStrategy: refinementProfiles.retrievalStrategy,
         turnDirective: refinementProfiles.turnDirective,
       });
 
@@ -2935,7 +2938,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const chamberGeneration =
           conversation.kind === 'chamber'
             ? getBaseGenerationProfile(conversation.chamberResponseMode)
-            : { chatProfile: 'instant' as const, retrievalProfile: 'default' as const };
+            : { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const };
 
         try {
           const result = await chatWithMember({
@@ -2962,7 +2965,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                   )
                 : undefined,
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
-            retrievalProfile: conversation.kind === 'chamber' ? chamberGeneration.retrievalProfile : undefined,
+            retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
           });
 
           retriedReply = buildMessage({

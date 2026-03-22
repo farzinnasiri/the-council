@@ -17,12 +17,13 @@ import { requireOwnedMember } from '../contexts/shared/auth';
 import { createKnowledgeAiProvider } from '../contexts/knowledge/infrastructure/knowledgeIngestGateway';
 import { KB_RETENTION_MS, ensureMemberStore } from './kbIngest';
 import { extractTextFromStorage } from './ragExtraction';
-import { deleteDocumentChunks, indexDocumentChunks, listMemberChunkDocuments, searchMemberChunks, splitIntoChunks } from './ragStore';
+import { deleteDocumentChunks, indexDocumentChunks, splitIntoChunks } from './ragStore';
 import { sanitizeLabel } from './graphs/utils';
 import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
 import { wideEventError } from '../observability/errors';
 
-const DIGEST_SAMPLE_CHAR_LIMIT = 6000;
+const DIGEST_FULL_TEXT_CHAR_LIMIT = 600_000;
+const DIGEST_SEGMENT_CHAR_LIMIT = 180_000;
 
 type ProcessingMode = 'all' | 'index-only' | 'metadata-only';
 type KbDocumentRow = Doc<'kbDocuments'>;
@@ -35,6 +36,32 @@ function normalizeDigestItems(items: string[], min: number, max: number): string
     .filter((item, index, list) => list.indexOf(item) === index)
     .slice(0, max)
     .slice(0, Math.max(min, Math.min(max, items.length || min)));
+}
+
+function buildDigestInputText(text: string): string {
+  const normalized = text.trim();
+  if (normalized.length <= DIGEST_FULL_TEXT_CHAR_LIMIT) {
+    return normalized;
+  }
+
+  const head = normalized.slice(0, DIGEST_SEGMENT_CHAR_LIMIT);
+  const middleStart = Math.max(
+    DIGEST_SEGMENT_CHAR_LIMIT,
+    Math.floor(normalized.length / 2) - Math.floor(DIGEST_SEGMENT_CHAR_LIMIT / 2),
+  );
+  const middle = normalized.slice(middleStart, middleStart + DIGEST_SEGMENT_CHAR_LIMIT);
+  const tail = normalized.slice(-DIGEST_SEGMENT_CHAR_LIMIT);
+
+  return [
+    '[Document beginning]',
+    head,
+    '',
+    '[Document middle]',
+    middle,
+    '',
+    '[Document end]',
+    tail,
+  ].join('\n');
 }
 
 function buildDocumentName(storeName: string, file: { displayName: string; storageId: string }): string {
@@ -159,7 +186,7 @@ async function processKbDocumentLifecycle(
           const provider = createKnowledgeAiProvider();
           const digest = await provider.summarizeDocumentDigest({
             displayName: row.displayName,
-            sampleText: extractedText.slice(0, DIGEST_SAMPLE_CHAR_LIMIT),
+            sampleText: buildDigestInputText(extractedText),
           });
 
           await ctx.runMutation(api.kbDigests.upsertForDocument as any, {
@@ -168,11 +195,14 @@ async function processKbDocumentLifecycle(
             kbDocumentName: row.kbDocumentName,
             displayName: row.displayName,
             storageId: row.storageId,
-            topics: normalizeDigestItems(digest.topics, 3, 8),
-            entities: normalizeDigestItems(digest.entities, 3, 12),
-            lexicalAnchors: normalizeDigestItems(digest.lexicalAnchors, 3, 12),
-            styleAnchors: normalizeDigestItems(digest.styleAnchors, 3, 8),
-            digestSummary: digest.digestSummary.slice(0, 300),
+            documentCard: {
+              docType: digest.documentCard.docType.trim().slice(0, 40) || 'other',
+              about: digest.documentCard.about.trim().slice(0, 800),
+              bestFor: normalizeDigestItems(digest.documentCard.bestFor, 1, 6),
+              evidenceKinds: normalizeDigestItems(digest.documentCard.evidenceKinds, 1, 4),
+              notFor: normalizeDigestItems(digest.documentCard.notFor, 0, 4),
+            },
+            queryHints: normalizeDigestItems(digest.queryHints, 8, 20),
             status: 'active',
             updatedAt: Date.now(),
             deletedAt: undefined,
@@ -289,6 +319,27 @@ export const rebuildMemberKnowledgeDigests = action({
   handler: observeAction('ai.knowledge.rebuildMemberKnowledgeDigests', async (ctx, args) => {
     setMainSpanAttributes({ 'member.id': String(args.memberId) });
     return await rebuildMemberKnowledgeDigestsUseCase(ctx, args);
+  }),
+});
+
+export const migrateKbDigestSchema = action({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    scannedCount: v.number(),
+    migratedCount: v.number(),
+  }),
+  handler: observeAction('ai.knowledge.migrateKbDigestSchema', async (
+    ctx,
+    args
+  ): Promise<{ scannedCount: number; migratedCount: number }> => {
+    return (await ctx.runMutation(api.kbDigests.migrateLegacySchema as any, {
+      limit: args.limit,
+    })) as {
+      scannedCount: number;
+      migratedCount: number;
+    };
   }),
 });
 
@@ -466,32 +517,5 @@ export const deleteKbDocument = action({
         error: error instanceof Error ? error.message : 'Delete failed',
       };
     }
-  }),
-});
-
-export const queryMemberKnowledgeChunks = action({
-  args: {
-    memberId: v.id('members'),
-    query: v.string(),
-    limit: v.optional(v.number()),
-  },
-  handler: observeAction('ai.knowledge.queryMemberKnowledgeChunks', async (ctx, args) => {
-    setMainSpanAttributes({
-      'member.id': String(args.memberId),
-      'knowledge.query.length': args.query.trim().length,
-    });
-    await requireOwnedMember(ctx, args.memberId);
-
-    const docs = await listMemberChunkDocuments(ctx, { memberId: args.memberId });
-    const evidence = await searchMemberChunks(ctx, {
-      memberId: args.memberId,
-      query: args.query,
-      limit: args.limit,
-    });
-
-    return {
-      docsCount: docs.length,
-      ...evidence,
-    };
   }),
 });

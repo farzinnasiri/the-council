@@ -32,6 +32,10 @@ const deleteBatchResult = v.object({
 });
 const MAX_DELETE_BATCH = 64;
 
+function clipText(text: string | undefined, maxChars: number): string {
+  return (text ?? '').trim().replace(/\s+/g, ' ').slice(0, maxChars).trim();
+}
+
 export const upsertDocumentChunks = mutation({
   args: {
     memberId: v.id('members'),
@@ -177,6 +181,8 @@ export const hydrateVectorResults = query({
     const citations: Array<{ title: string; uri?: string }> = [];
     const citationIndexByDoc = new Map<string, number>();
     const snippets: Array<{ text: string; citationIndices: number[] }> = [];
+    const scoreById = new Map(args.vectorResults.map((result) => [String(result._id), result._score]));
+    const hydratedChunks: Array<Record<string, unknown>> = [];
 
     for (const result of args.vectorResults) {
       const chunk = await ctx.db.get(result._id);
@@ -195,6 +201,14 @@ export const hydrateVectorResults = query({
       snippets.push({
         text: chunk.text,
         citationIndices: [citationIndex],
+      });
+      hydratedChunks.push({
+        chunkId: String(chunk._id),
+        displayName: chunk.displayName,
+        kbDocumentName: chunk.kbDocumentName,
+        chunkIndex: chunk.chunkIndex,
+        score: Number((scoreById.get(String(chunk._id)) ?? 0).toFixed(4)),
+        text: clipText(chunk.text, 180),
       });
     }
 

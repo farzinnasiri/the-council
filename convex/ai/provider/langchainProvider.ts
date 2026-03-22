@@ -10,17 +10,33 @@ import { runRouteMembersGraph } from '../graphs/routeMembersGraph';
 import { runSpecialtiesGraph } from '../graphs/specialtiesGraph';
 import { runChamberSummaryGraph, runHallFollowUpSeedGraph, runHallRoundSummaryGraph, runSummaryGraph } from '../graphs/summaryGraph';
 import type {
+  ChamberChatProfile,
   CouncilAiProvider,
   CouncilContextMessage,
   CouncilKBDocumentDigestHint,
   CouncilKnowledgeRetriever,
+  LegacyRetrievalProfile,
   CouncilPersonalArchiveAccess,
   CouncilPersonalArchiveRetriever,
+  RetrievalStrategy,
   CouncilRouteMemberCandidate,
   RoundBidProposal,
 } from './types';
 
 export class LangChainCouncilAiProvider implements CouncilAiProvider {
+  private resolveLegacyRetrievalProfile(
+    retrievalStrategy?: RetrievalStrategy,
+    retrievalProfile?: LegacyRetrievalProfile
+  ): LegacyRetrievalProfile | undefined {
+    if (retrievalProfile) {
+      return retrievalProfile;
+    }
+    if (!retrievalStrategy) {
+      return undefined;
+    }
+    return retrievalStrategy === 'deep_dive' ? 'deep_dive' : 'default';
+  }
+
   async routeMembers(input: {
     message: string;
     candidates: CouncilRouteMemberCandidate[];
@@ -97,17 +113,22 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;
     responseModel?: string;
-    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
-    retrievalProfile?: 'default' | 'deep_dive';
+    chatProfile?: ChamberChatProfile;
+    retrievalStrategy?: RetrievalStrategy;
+    retrievalProfile?: LegacyRetrievalProfile;
     temperature?: number;
-    metadataFilter?: string;
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
     knowledgeMode?: 'auto' | 'force' | 'off';
     turnDirective?: 'shorter' | 'elaborate';
   }) {
-    return await runMemberChatGraph(input);
+    const graphInput = {
+      ...input,
+      retrievalStrategy: input.retrievalStrategy,
+      retrievalProfile: this.resolveLegacyRetrievalProfile(input.retrievalStrategy, input.retrievalProfile),
+    };
+    return await runMemberChatGraph(graphInput as Parameters<typeof runMemberChatGraph>[0]);
   }
 
   async summarizeConversation(input: {
@@ -155,11 +176,14 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     memberSystemPrompt?: string;
     model?: string;
   }): Promise<{
-    topics: string[];
-    entities: string[];
-    lexicalAnchors: string[];
-    styleAnchors: string[];
-    digestSummary: string;
+    documentCard: {
+      docType: string;
+      about: string;
+      bestFor: string[];
+      evidenceKinds: string[];
+      notFor: string[];
+    };
+    queryHints: string[];
     model: string;
   }> {
     return await runKBDigestGraph(input);

@@ -320,6 +320,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     responseModel: args.chatModel,
     chatProfile: args.chatProfile,
     retrievalModel: args.retrievalModel,
+    retrievalStrategy: args.retrievalStrategy,
     retrievalProfile: args.retrievalProfile,
     temperature: 0.35,
     contextMessages: chamberRuntimeContext.contextMessages.slice(-12),

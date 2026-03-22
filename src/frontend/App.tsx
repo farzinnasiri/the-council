@@ -12,7 +12,6 @@ const MembersPage = lazy(() => import('./routes/MembersPage').then((m) => ({ def
 const PersonalArchivePage = lazy(() => import('./routes/PersonalArchivePage').then((m) => ({ default: m.PersonalArchivePage })));
 const NotebooksPage = lazy(() => import('./routes/NotebooksPage').then((m) => ({ default: m.NotebooksPage })));
 const ProfilePage = lazy(() => import('./routes/ProfilePage').then((m) => ({ default: m.ProfilePage })));
-const KbQueryPage = lazy(() => import('./routes/KbQueryPage').then((m) => ({ default: m.KbQueryPage })));
 
 export default function App() {
   const hydrated = useAppStore((state) => state.hydrated);
@@ -35,7 +34,6 @@ export default function App() {
           <Route path="/archive" element={<PersonalArchivePage />} />
           <Route path="/notebooks" element={<NotebooksPage />} />
           <Route path="/notebooks/:conversationId" element={<NotebooksPage />} />
-          <Route path="/kb-query" element={<KbQueryPage />} />
           <Route path="/settings" element={<ProfilePage />} />
           <Route path="/profile" element={<Navigate to="/settings" replace />} />
         </Route>

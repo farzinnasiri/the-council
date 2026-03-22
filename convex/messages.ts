@@ -35,7 +35,7 @@ const messageDoc = v.object({
     ),
   ),
   generationProfile: v.optional(
-    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive')),
+    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('brainstorm'), v.literal('deep_dive')),
   ),
   routing: v.optional(routingValidator),
   inReplyToMessageId: v.optional(v.id('messages')),
@@ -69,7 +69,7 @@ const messageInputValidator = v.object({
     ),
   ),
   generationProfile: v.optional(
-    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('deep_dive')),
+    v.union(v.literal('instant'), v.literal('short'), v.literal('think'), v.literal('brainstorm'), v.literal('deep_dive')),
   ),
   routing: v.optional(routingValidator),
   inReplyToMessageId: v.optional(v.id('messages')),
@@ -170,36 +170,21 @@ export const listActivePage = query({
     await getOwnedConversation(ctx, userId, args.conversationId);
 
     const limit = Math.max(10, Math.min(args.limit ?? 40, 120));
-    let cursor = args.cursor ?? null;
-    let hasMore = true;
-    const collected: any[] = [];
-
-    while (collected.length < limit && hasMore) {
-      const page = await ctx.db
-        .query('messages')
-        .withIndex('by_conversation_active', (q) =>
-          q.eq('conversationId', args.conversationId).eq('compacted', false)
-        )
-        .order('desc')
-        .paginate({
-          numItems: limit - collected.length,
-          cursor,
-        });
-
-      const visibleRows = page.page.filter(isVisibleHistoryRow);
-      collected.push(...visibleRows);
-      cursor = page.continueCursor;
-      hasMore = !page.isDone;
-
-      if (page.page.length === 0) {
-        break;
-      }
-    }
+    const page = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation_active', (q) =>
+        q.eq('conversationId', args.conversationId).eq('compacted', false)
+      )
+      .order('desc')
+      .paginate({
+        numItems: limit,
+        cursor: args.cursor ?? null,
+      });
 
     return {
-      messages: collected.slice(0, limit).reverse(),
-      continueCursor: hasMore ? cursor : null,
-      hasMore,
+      messages: page.page.filter(isVisibleHistoryRow).reverse(),
+      continueCursor: page.isDone ? null : page.continueCursor,
+      hasMore: !page.isDone,
     };
   },
 });
@@ -220,34 +205,19 @@ export const listPage = query({
     await getOwnedConversation(ctx, userId, args.conversationId);
 
     const limit = Math.max(10, Math.min(args.limit ?? 40, 120));
-    let cursor = args.cursor ?? null;
-    let hasMore = true;
-    const collected: any[] = [];
-
-    while (collected.length < limit && hasMore) {
-      const page = await ctx.db
-        .query('messages')
-        .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
-        .order('desc')
-        .paginate({
-          numItems: limit - collected.length,
-          cursor,
-        });
-
-      const visibleRows = page.page.filter(isVisibleHistoryRow);
-      collected.push(...visibleRows);
-      cursor = page.continueCursor;
-      hasMore = !page.isDone;
-
-      if (page.page.length === 0) {
-        break;
-      }
-    }
+    const page = await ctx.db
+      .query('messages')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', args.conversationId))
+      .order('desc')
+      .paginate({
+        numItems: limit,
+        cursor: args.cursor ?? null,
+      });
 
     return {
-      messages: collected.slice(0, limit).reverse(),
-      continueCursor: hasMore ? cursor : null,
-      hasMore,
+      messages: page.page.filter(isVisibleHistoryRow).reverse(),
+      continueCursor: page.isDone ? null : page.continueCursor,
+      hasMore: !page.isDone,
     };
   },
 });

@@ -17,6 +17,7 @@ import type {
   PersonalArchiveEntry,
   PersonalArchiveProfile,
   RoundtableState,
+  RetrievalStrategy,
   ConversationGuidanceDirective,
   TimeAwareReentryGapBucket,
   MemberVoiceName,
@@ -101,16 +102,21 @@ export interface MessageSpeechResult {
   cacheKey: string;
 }
 
+export interface KBDocumentCardMetadata {
+  docType: string;
+  about: string;
+  bestFor: string[];
+  evidenceKinds: string[];
+  notFor: string[];
+}
+
 export interface KBDigestMetadata {
   id: string;
   memberId: string;
   kbDocumentName?: string;
   displayName: string;
-  topics: string[];
-  entities: string[];
-  lexicalAnchors: string[];
-  styleAnchors: string[];
-  digestSummary: string;
+  documentCard: KBDocumentCardMetadata;
+  queryHints: string[];
   updatedAt: number;
 }
 
@@ -346,7 +352,7 @@ export interface CouncilRepository {
     contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     hallContext?: string;
     chatProfile?: ChamberResponseMode;
-    retrievalProfile?: 'default' | 'deep_dive';
+    retrievalStrategy?: RetrievalStrategy;
     turnDirective?: 'shorter' | 'elaborate';
     timeAwareReentry?: {
       gapBucket: TimeAwareReentryGapBucket;
@@ -437,11 +443,8 @@ export interface CouncilRepository {
   updateMemberDigestMetadata(input: {
     digestId: string;
     displayName: string;
-    topics: string[];
-    entities: string[];
-    lexicalAnchors: string[];
-    styleAnchors: string[];
-    digestSummary: string;
+    documentCard: KBDocumentCardMetadata;
+    queryHints: string[];
   }): Promise<{ ok: boolean }>;
   rehydrateMemberStore(input: {
     memberId: string;

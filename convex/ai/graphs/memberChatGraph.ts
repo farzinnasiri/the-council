@@ -1,6 +1,13 @@
 'use node';
 
 import { z } from 'zod';
+import {
+  getRetrievalStrategyConfig,
+  resolveRetrievalStrategyConfig,
+  type QueryFamily,
+  type ResolvedRetrievalStrategyConfig,
+  type RetrievalStrategy,
+} from '../retrievalStrategyConfig';
 import { modelRegistry } from '../runtime/modelRegistry';
 import { createChatModel } from '../runtime/modelFactory';
 import { formatContextMessages } from '../runtime/messages';
@@ -9,6 +16,9 @@ import type { Citation, ContextMessage, GroundedSnippet, KBDocumentDigestHint, K
 import { getMainTraceId, setMainSpanAttributes } from '../../observability/wideEvents';
 
 type ArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
+type RetrievalSource = 'knowledge_base' | 'personal_archive';
+type RetrievalTurnType = 'style_only' | 'continuation' | 'autobiographical' | 'tactical' | 'factual' | 'mixed';
+type PlannerResponseDirective = 'normal' | 'brief' | 'continue';
 
 interface PersonalArchiveAccess {
   reflection: boolean;
@@ -37,9 +47,39 @@ interface PersonalArchiveRetriever {
   }>;
 }
 
-interface QueryRewriteResult {
-  standaloneQuery: string;
-  alternates: string[];
+interface PlannedQueryVariant {
+  source: RetrievalSource;
+  family: QueryFamily;
+  query: string;
+  rationale: string;
+}
+
+interface RetrievalTurnPlan {
+  turnType: RetrievalTurnType;
+  activeTopic: string;
+  responseDirective: PlannerResponseDirective;
+  reason: string;
+  skipRetrieval: boolean;
+  queryVariants: PlannedQueryVariant[];
+}
+
+interface RankedDigestCandidate {
+  digest: KBDocumentDigestHint;
+  score: number;
+  matchedBestFor: string[];
+  matchedHints: string[];
+  evidenceMatches: string[];
+}
+
+interface KnowledgeRoutePlan {
+  mode: 'targeted' | 'broad';
+  routeConfidence: 'low' | 'medium' | 'high';
+  selectedDocumentNames: string[];
+  selectedDisplayNames: string[];
+  wildcardDocumentNames: string[];
+  hintTerms: string[];
+  summary: string;
+  rankedCandidates: RankedDigestCandidate[];
 }
 
 interface GroundedEvidence {
@@ -54,11 +94,6 @@ interface RetrievePass {
   evidence: GroundedEvidence;
 }
 
-interface SourceDecision {
-  sources: Array<'knowledge_base' | 'personal_archive'>;
-  reason: string;
-}
-
 export interface MemberChatInput {
   query: string;
   storeName?: string | null;
@@ -70,10 +105,9 @@ export interface MemberChatInput {
   kbDigests?: KBDocumentDigestHint[];
   retrievalModel?: string;
   responseModel?: string;
-  chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
-  retrievalProfile?: 'default' | 'deep_dive';
+  chatProfile?: 'instant' | 'short' | 'think' | 'brainstorm' | 'deep_dive';
+  retrievalStrategy?: RetrievalStrategy;
   temperature?: number;
-  metadataFilter?: string;
   personaPrompt?: string;
   contextMessages?: ContextMessage[];
   includeConversationContext?: boolean;
@@ -91,37 +125,32 @@ export interface MemberChatOutput {
   usedPersonalArchive?: boolean;
 }
 
-const rewriteSchema = z.object({
-  standaloneQuery: z.string().default(''),
-  alternates: z.array(z.string()).default([]),
-});
-
-const plannerSchema = z.object({
-  sources: z.array(z.enum(['knowledge_base', 'personal_archive'])).max(2).default([]),
-  reason: z.string().default('context-planner'),
-});
-
-const deepDiveSchema = z.object({
-  subqueries: z.array(z.string()).max(3).default([]),
-});
-
-function collectDigestSignals(query: string, kbDigests: KBDocumentDigestHint[]): string[] {
-  const normalizedQuery = query.toLowerCase();
-  const matches = kbDigests.flatMap((digest) => [
-    ...digest.topics,
-    ...digest.entities,
-    ...digest.lexicalAnchors,
-    ...digest.styleAnchors,
-  ]);
-  return Array.from(
-    new Set(
-      matches.filter((term) => {
-        const normalized = term.toLowerCase().trim();
-        return normalized.length >= 3 && normalizedQuery.includes(normalized);
+const retrievalTurnSchema = z.object({
+  turnType: z
+    .enum(['style_only', 'continuation', 'autobiographical', 'tactical', 'factual', 'mixed'])
+    .default('factual'),
+  activeTopic: z.string().default(''),
+  responseDirective: z.enum(['normal', 'brief', 'continue']).default('normal'),
+  reason: z.string().default('turn-planner'),
+  skipRetrieval: z.boolean().default(false),
+  queryVariants: z
+    .array(
+      z.object({
+        source: z.enum(['knowledge_base', 'personal_archive']),
+        family: z.enum(['anchor', 'tactical', 'autobiographical', 'thematic', 'contrast', 'adjacent', 'wildcard', 'archive_personal']),
+        query: z.string().default(''),
+        rationale: z.string().default(''),
       }),
-    ),
-  ).slice(0, 12);
-}
+    )
+    .max(5)
+    .default([]),
+});
+
+const MATCH_STOPWORDS = new Set([
+  'about', 'after', 'again', 'also', 'been', 'being', 'between', 'could', 'does', 'doing', 'from', 'have',
+  'into', 'just', 'like', 'more', 'much', 'over', 'really', 'should', 'some', 'than', 'that', 'them', 'then',
+  'they', 'this', 'very', 'want', 'what', 'when', 'where', 'which', 'with', 'would', 'your',
+]);
 
 function bucketDescriptions(buckets: ArchiveBucket[]): string {
   return buckets
@@ -138,6 +167,540 @@ function bucketDescriptions(buckets: ArchiveBucket[]): string {
       }
     })
     .join('\n');
+}
+
+function clipText(text: string | undefined, maxChars: number): string {
+  return (text ?? '').trim().replace(/\s+/g, ' ').slice(0, maxChars).trim();
+}
+
+function normalizeQuery(query: string): string {
+  return query.trim().replace(/\s+/g, ' ');
+}
+
+function formatPlannerConversation(messages: ContextMessage[], limit = 8): string {
+  return messages
+    .slice(-limit)
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
+    .join('\n');
+}
+
+function formatDigestHints(kbDigests: KBDocumentDigestHint[]): string {
+  return kbDigests
+    .slice(0, 6)
+    .map((digest) => {
+      const bestFor = digest.documentCard.bestFor.slice(0, 3).join(', ');
+      const evidenceKinds = digest.documentCard.evidenceKinds.slice(0, 3).join(', ');
+      const summary = clipText(digest.documentCard.about, 220);
+      const queryHints = digest.queryHints.slice(0, 6).join(', ');
+      return [
+        digest.displayName,
+        `type: ${digest.documentCard.docType || 'other'}`,
+        `best for: ${bestFor || 'n/a'}`,
+        `evidence: ${evidenceKinds || 'n/a'}`,
+        `summary: ${summary || 'n/a'}`,
+        `hints: ${queryHints || 'n/a'}`,
+      ].join(' | ');
+    })
+    .join('\n');
+}
+
+function dedupeQueries(queries: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const query of queries) {
+    const normalized = normalizeQuery(query);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function normalizeMatchText(text: string | undefined): string {
+  return (text ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeMatchText(text: string | undefined): string[] {
+  const normalized = normalizeMatchText(text);
+  if (!normalized) return [];
+  return normalized
+    .split(' ')
+    .filter((token) => token.length >= 3 && !MATCH_STOPWORDS.has(token));
+}
+
+function uniqueItems(items: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const normalized = item.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function scorePhraseMatches(
+  phrases: string[],
+  contextText: string,
+  contextTokens: Set<string>,
+  weight: number,
+  maxMatches: number,
+): { score: number; matches: string[] } {
+  const matches: string[] = [];
+  let score = 0;
+  for (const phrase of phrases) {
+    const normalized = normalizeMatchText(phrase);
+    if (!normalized) continue;
+    const phraseTokens = tokenizeMatchText(phrase);
+    if (phraseTokens.length === 0) continue;
+    const overlapCount = phraseTokens.filter((token) => contextTokens.has(token)).length;
+    const exact = contextText.includes(normalized);
+    const overlapRatio = overlapCount / phraseTokens.length;
+    if (!exact && overlapCount === 0) continue;
+
+    matches.push(phrase.trim());
+    score += exact ? weight * 1.35 : weight * Math.max(0.55, overlapRatio);
+    if (matches.length >= maxMatches) break;
+  }
+  return { score, matches };
+}
+
+function preferredEvidenceKinds(turnType: RetrievalTurnType): string[] {
+  switch (turnType) {
+    case 'autobiographical':
+      return ['story', 'biographical', 'quotes', 'case study'];
+    case 'tactical':
+      return ['advice', 'framework', 'case study', 'reference'];
+    case 'mixed':
+      return ['story', 'advice', 'framework', 'quotes', 'reference'];
+    case 'factual':
+      return ['reference', 'argument', 'framework', 'quotes'];
+    default:
+      return ['reference', 'framework'];
+  }
+}
+
+function docTypeBoost(turnType: RetrievalTurnType, docType: string): number {
+  const normalized = docType.trim().toLowerCase();
+  if (turnType === 'autobiographical' && ['book', 'transcript', 'notes'].includes(normalized)) return 0.7;
+  if (turnType === 'tactical' && ['book', 'report', 'essay', 'article'].includes(normalized)) return 0.6;
+  if (turnType === 'factual' && ['report', 'essay', 'article'].includes(normalized)) return 0.6;
+  if (turnType === 'mixed' && ['book', 'transcript', 'article'].includes(normalized)) return 0.5;
+  return 0;
+}
+
+function rankKnowledgeDigests(input: MemberChatInput, plan: RetrievalTurnPlan, kbDigests: KBDocumentDigestHint[]): RankedDigestCandidate[] {
+  const recentConversation = (input.contextMessages ?? [])
+    .slice(-4)
+    .map((message) => message.content)
+    .join('\n');
+  const contextText = normalizeMatchText([
+    input.query,
+    plan.activeTopic,
+    input.memoryHint,
+    recentConversation,
+  ].filter(Boolean).join('\n'));
+  const contextTokens = new Set(tokenizeMatchText(contextText));
+  const preferredEvidence = new Set(preferredEvidenceKinds(plan.turnType));
+
+  return kbDigests
+    .map((digest) => {
+      const hintMatches = scorePhraseMatches(digest.queryHints, contextText, contextTokens, 1.15, 4);
+      const bestForMatches = scorePhraseMatches(digest.documentCard.bestFor, contextText, contextTokens, 1.55, 3);
+      const notForMatches = scorePhraseMatches(digest.documentCard.notFor, contextText, contextTokens, 1.1, 2);
+      const aboutOverlap = uniqueItems(
+        tokenizeMatchText(digest.documentCard.about).filter((token) => contextTokens.has(token)),
+        4,
+      );
+      const evidenceMatches = uniqueItems(
+        digest.documentCard.evidenceKinds.filter((kind) => preferredEvidence.has(normalizeMatchText(kind))),
+        3,
+      );
+      const score =
+        hintMatches.score +
+        bestForMatches.score +
+        aboutOverlap.length * 0.35 +
+        evidenceMatches.length * 0.9 +
+        docTypeBoost(plan.turnType, digest.documentCard.docType) -
+        notForMatches.score * 0.9;
+
+      return {
+        digest,
+        score,
+        matchedBestFor: bestForMatches.matches,
+        matchedHints: hintMatches.matches.length ? hintMatches.matches : aboutOverlap,
+        evidenceMatches,
+      };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score);
+}
+
+function buildKnowledgeRoute(
+  input: MemberChatInput,
+  plan: RetrievalTurnPlan,
+  strategyConfig: ResolvedRetrievalStrategyConfig,
+  strategy: RetrievalStrategy,
+): KnowledgeRoutePlan {
+  const rankedCandidates = rankKnowledgeDigests(input, plan, input.kbDigests ?? []);
+  const topScore = rankedCandidates[0]?.score ?? 0;
+  const routeConfidence: KnowledgeRoutePlan['routeConfidence'] =
+    topScore >= 5.5 ? 'high' : topScore >= 3.4 ? 'medium' : 'low';
+  const selectionThreshold =
+    routeConfidence === 'high'
+      ? Math.max(3.6, topScore * 0.62)
+      : routeConfidence === 'medium'
+        ? Math.max(2.8, topScore * 0.52)
+        : Math.max(2.1, topScore * 0.45);
+  const rankedWithDocs = rankedCandidates.filter((candidate) => Boolean(candidate.digest.kbDocumentName));
+  const primarySelected = rankedWithDocs
+    .filter((candidate) => candidate.score >= selectionThreshold)
+    .slice(0, strategyConfig.targetedDocCount);
+  const selectedIds = new Set(primarySelected.map((candidate) => candidate.digest.kbDocumentName));
+  const wildcardSelected =
+    strategyConfig.wildcardDocCount > 0
+      ? rankedWithDocs
+          .filter((candidate, index) =>
+            !selectedIds.has(candidate.digest.kbDocumentName) &&
+            ((strategy === 'brainstorm' && index < strategyConfig.targetedDocCount + 4) ||
+              (routeConfidence === 'medium' && index < strategyConfig.targetedDocCount + 3) ||
+              (routeConfidence === 'low' && index < strategyConfig.targetedDocCount + 2)),
+          )
+          .slice(0, strategyConfig.wildcardDocCount)
+      : [];
+  const selected = uniqueRankedCandidates([...primarySelected, ...wildcardSelected]);
+  const wildcardDocumentNames = wildcardSelected
+    .map((candidate) => candidate.digest.kbDocumentName)
+    .filter((name): name is string => Boolean(name));
+
+  const selectedDisplayNames = selected.map((candidate) => candidate.digest.displayName);
+  const selectedDocumentNames = selected
+    .map((candidate) => candidate.digest.kbDocumentName)
+    .filter((name): name is string => Boolean(name));
+  const hintTerms = uniqueItems(
+    selected.flatMap((candidate) => [
+      ...candidate.matchedHints,
+      ...candidate.digest.queryHints.slice(0, 3),
+      ...candidate.matchedBestFor,
+    ]),
+    10,
+  );
+
+  if (selected.length === 0) {
+    const nearest = rankedCandidates
+      .slice(0, 2)
+      .map((candidate) => candidate.digest.displayName)
+      .join(', ');
+    return {
+      mode: 'broad',
+      routeConfidence,
+      selectedDocumentNames: [],
+      selectedDisplayNames: [],
+      wildcardDocumentNames: [],
+      hintTerms: [],
+      summary: nearest
+        ? `Broad KB search across all documents. Closest metadata matches were ${nearest}, but the match was not strong enough to narrow to specific documents.`
+        : 'Broad KB search across all documents. No strong metadata match.',
+      rankedCandidates,
+    };
+  }
+
+  const reasons = uniqueItems(
+    selected.flatMap((candidate) => [
+      ...candidate.matchedBestFor,
+      ...candidate.matchedHints,
+      ...candidate.evidenceMatches,
+    ]),
+    6,
+  );
+
+  return {
+    mode: 'targeted',
+    routeConfidence,
+    selectedDocumentNames,
+    selectedDisplayNames,
+    wildcardDocumentNames,
+    hintTerms,
+    summary: `Targeted KB route to ${selectedDisplayNames.join(', ')} because of metadata matches: ${reasons.join(', ') || 'topic overlap'}.`,
+    rankedCandidates,
+  };
+}
+
+function uniqueRankedCandidates(candidates: RankedDigestCandidate[]): RankedDigestCandidate[] {
+  const seen = new Set<string>();
+  const out: RankedDigestCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = candidate.digest.kbDocumentName ?? candidate.digest.displayName;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
+  }
+  return out;
+}
+
+function preferredFamiliesForStrategy(strategy: RetrievalStrategy): QueryFamily[] {
+  switch (strategy) {
+    case 'brainstorm':
+      return ['anchor', 'adjacent', 'thematic', 'contrast', 'wildcard', 'archive_personal'];
+    case 'deep_dive':
+      return ['anchor', 'tactical', 'autobiographical', 'thematic', 'adjacent', 'archive_personal'];
+    default:
+      return ['anchor', 'tactical', 'autobiographical', 'adjacent', 'archive_personal'];
+  }
+}
+
+function selectQueryVariants(
+  plan: RetrievalTurnPlan,
+  source: RetrievalSource,
+  strategyConfig: ResolvedRetrievalStrategyConfig,
+  strategy: RetrievalStrategy,
+  budget: number,
+): PlannedQueryVariant[] {
+  const allowedFamilies = new Set(strategyConfig.allowedQueryFamilies);
+  const familyPriority = preferredFamiliesForStrategy(strategy);
+  const priorityMap = new Map(familyPriority.map((family, index) => [family, index]));
+  return dedupeQueryVariants(plan.queryVariants)
+    .filter((variant) => variant.source === source)
+    .filter((variant) => allowedFamilies.has(variant.family))
+    .sort((left, right) => {
+      const leftPriority = priorityMap.get(left.family) ?? 99;
+      const rightPriority = priorityMap.get(right.family) ?? 99;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      return left.query.length - right.query.length;
+    })
+    .slice(0, budget);
+}
+
+function buildKnowledgeQueries(
+  input: MemberChatInput,
+  plan: RetrievalTurnPlan,
+  route: KnowledgeRoutePlan,
+  strategyConfig: ResolvedRetrievalStrategyConfig,
+  strategy: RetrievalStrategy,
+  budget: number,
+): string[] {
+  const selectedVariants = selectQueryVariants(plan, 'knowledge_base', strategyConfig, strategy, budget);
+  const topic = normalizeQuery(plan.activeTopic || input.query);
+  const hintText = route.hintTerms.slice(0, 8).join(', ');
+  const targetDocs = route.selectedDisplayNames.slice(0, 2).join(', ');
+  const plannedQueries = selectedVariants.map((variant) => variant.query);
+  const secondaryQuery = buildSecondaryKnowledgeQuery(plan.turnType, topic || normalizeQuery(input.query));
+  const candidates = [
+    route.mode === 'targeted' && hintText
+      ? `${buildContextualFallbackQuery(input)}\nRelevant document hints: ${hintText}`
+      : '',
+    ...plannedQueries,
+    route.mode === 'targeted' && hintText && topic
+      ? `${topic}; related concepts and names: ${hintText}`
+      : '',
+    route.mode === 'targeted' && hintText && secondaryQuery
+      ? `${secondaryQuery}; related concepts: ${hintText}`
+      : '',
+    route.mode === 'targeted' && targetDocs && topic
+      ? `material from ${targetDocs} about ${topic}`
+      : '',
+    buildContextualFallbackQuery(input),
+  ];
+  return dedupeQueries(candidates).slice(0, budget);
+}
+
+function dedupeQueryVariants(variants: PlannedQueryVariant[]): PlannedQueryVariant[] {
+  const seen = new Set<string>();
+  const out: PlannedQueryVariant[] = [];
+  for (const variant of variants) {
+    const query = normalizeQuery(variant.query);
+    if (!query) continue;
+    const key = `${variant.source}::${variant.family}::${query.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      source: variant.source,
+      family: variant.family,
+      query,
+      rationale: variant.rationale.trim(),
+    });
+  }
+  return out;
+}
+
+function looksLikeStyleOnlyTurn(query: string): boolean {
+  const normalized = query.toLowerCase().trim();
+  if (!normalized) return false;
+  if (normalized.length > 120) return false;
+  return (
+    /\b(shorter|shorter replies|short reply|brief|be brief|concise|more concise|less verbose|one sentence|two sentences)\b/.test(
+      normalized,
+    ) ||
+    /^(shorter|brief|concise|less verbose|more concise)\b/.test(normalized)
+  );
+}
+
+function looksLikeContinuationTurn(query: string): boolean {
+  const normalized = query.toLowerCase().trim();
+  if (!normalized) return false;
+  if (normalized.length > 120) return false;
+  return (
+    /\b(elaborate|expand|go deeper|continue|go on|tell me more|more detail|more details|say more)\b/.test(normalized) ||
+    /^(continue|go on|elaborate|expand)\b/.test(normalized)
+  );
+}
+
+function hasPersonalArchiveSignal(query: string): boolean {
+  const normalized = query.toLowerCase();
+  return (
+    /\b(i|me|my|myself)\b/.test(normalized) ||
+    /\b(about me|my pattern|my patterns|my history|my background|hold me accountable|remind me)\b/.test(normalized)
+  );
+}
+
+function inferFallbackTurnType(query: string): RetrievalTurnType {
+  const normalized = query.toLowerCase();
+  if (looksLikeStyleOnlyTurn(normalized)) return 'style_only';
+  if (looksLikeContinuationTurn(normalized)) return 'continuation';
+  if (/\b(has this ever happened to you|have you ever|tell me a story|tell me about a time|from your experience)\b/.test(normalized)) {
+    return 'autobiographical';
+  }
+  if (/\b(what should i do|what do i do|how should i|next step|next steps|advice|tactic|tactics|plan)\b/.test(normalized)) {
+    return 'tactical';
+  }
+  if (/\b(example|story|stories)\b/.test(normalized) && /\b(advice|what should i do|how should i)\b/.test(normalized)) {
+    return 'mixed';
+  }
+  return 'factual';
+}
+
+function findRecentTopic(messages: ContextMessage[], memoryHint?: string): string {
+  const reversed = [...messages].reverse();
+  const recentUser = reversed.find((message) => message.role === 'user' && clipText(message.content, 180));
+  if (recentUser) return clipText(recentUser.content, 180);
+  return clipText(memoryHint, 180);
+}
+
+function buildContextualFallbackQuery(input: MemberChatInput): string {
+  const current = normalizeQuery(input.query);
+  if (!current) return '';
+  const recent = input.contextMessages ?? [];
+  const reversed = [...recent].reverse();
+  const previousAssistant = reversed.find((message) => message.role === 'assistant');
+  const previousUser = reversed.find((message) => message.role === 'user');
+  const queryLooksVague = current.split(/\s+/).length <= 8 || /^(so|and|then|now|what|how|has|have|can|should)\b/i.test(current);
+  if (!queryLooksVague) {
+    return current;
+  }
+  const parts = [
+    previousUser ? `User context: ${clipText(previousUser.content, 220)}` : '',
+    previousAssistant ? `Assistant context: ${clipText(previousAssistant.content, 220)}` : '',
+    input.memoryHint && !previousUser && !previousAssistant ? `Thread memory: ${clipText(input.memoryHint, 220)}` : '',
+    `Current need: ${current}`,
+  ].filter(Boolean);
+  return parts.join('\n');
+}
+
+function buildSecondaryKnowledgeQuery(turnType: RetrievalTurnType, topic: string): string {
+  const normalizedTopic = normalizeQuery(topic);
+  if (!normalizedTopic) return '';
+  switch (turnType) {
+    case 'autobiographical':
+      return `first-person story, anecdote, or lived example about ${normalizedTopic}`;
+    case 'tactical':
+      return `practical advice, tactics, or next steps about ${normalizedTopic}`;
+    case 'mixed':
+      return `examples and practical advice about ${normalizedTopic}`;
+    case 'factual':
+      return `key ideas, principles, or references about ${normalizedTopic}`;
+    default:
+      return '';
+  }
+}
+
+function buildFallbackArchiveQuery(topic: string, input: MemberChatInput): string {
+  const normalizedTopic = normalizeQuery(topic || input.query);
+  if (!normalizedTopic) return '';
+  return `user background, patterns, reflections, or accountability context about ${normalizedTopic}`;
+}
+
+function buildFallbackTurnPlan(input: MemberChatInput, context: {
+  docsCount: number;
+  availableArchiveBuckets: ArchiveBucket[];
+  knowledgeAvailable: boolean;
+}): RetrievalTurnPlan {
+  if (input.turnDirective === 'shorter' || looksLikeStyleOnlyTurn(input.query)) {
+    return {
+      turnType: 'style_only',
+      activeTopic: findRecentTopic(input.contextMessages ?? [], input.memoryHint),
+      responseDirective: 'brief',
+      reason: input.turnDirective === 'shorter' ? 'explicit-brief-directive' : 'style-only-fallback',
+      skipRetrieval: true,
+      queryVariants: [],
+    };
+  }
+
+  if (input.turnDirective === 'elaborate' || looksLikeContinuationTurn(input.query)) {
+    return {
+      turnType: 'continuation',
+      activeTopic: findRecentTopic(input.contextMessages ?? [], input.memoryHint),
+      responseDirective: 'continue',
+      reason: input.turnDirective === 'elaborate' ? 'explicit-continue-directive' : 'continuation-fallback',
+      skipRetrieval: true,
+      queryVariants: [],
+    };
+  }
+
+  const turnType = inferFallbackTurnType(input.query);
+  const activeTopic = findRecentTopic(input.contextMessages ?? [], input.memoryHint) || normalizeQuery(input.query);
+  const queryVariants: PlannedQueryVariant[] = [];
+
+  if (context.knowledgeAvailable) {
+    const primary = buildContextualFallbackQuery(input);
+    if (primary) {
+      queryVariants.push({
+        source: 'knowledge_base',
+        family: 'anchor',
+        query: primary,
+        rationale: 'contextual-primary',
+      });
+    }
+    const secondary = buildSecondaryKnowledgeQuery(turnType, activeTopic);
+    if (secondary) {
+      queryVariants.push({
+        source: 'knowledge_base',
+        family: turnType === 'autobiographical' ? 'autobiographical' : turnType === 'tactical' ? 'tactical' : 'thematic',
+        query: secondary,
+        rationale: 'fallback-secondary-angle',
+      });
+    }
+  }
+
+  if (context.availableArchiveBuckets.length > 0 && hasPersonalArchiveSignal(input.query)) {
+    const archiveQuery = buildFallbackArchiveQuery(activeTopic, input);
+    if (archiveQuery) {
+      queryVariants.push({
+        source: 'personal_archive',
+        family: 'archive_personal',
+        query: archiveQuery,
+        rationale: 'personal-context-fallback',
+      });
+    }
+  }
+
+  return {
+    turnType,
+    activeTopic,
+    responseDirective: 'normal',
+    reason: 'fallback-turn-plan',
+    skipRetrieval: false,
+    queryVariants: dedupeQueryVariants(queryVariants),
+  };
 }
 
 function buildEvidencePack(evidence: GroundedEvidence): string[] {
@@ -176,7 +739,7 @@ function mergeEvidencePacks(passes: RetrievePass[]): GroundedEvidence {
       }
       localToGlobal.set(
         pass.evidence.citations.indexOf(citation),
-        citationKeyToIndex.get(key) as number
+        citationKeyToIndex.get(key) as number,
       );
     }
 
@@ -196,6 +759,28 @@ function mergeEvidencePacks(passes: RetrievePass[]): GroundedEvidence {
   return {
     citations: citations.slice(0, 15),
     snippets: snippets.slice(0, 15),
+  };
+}
+
+function mergeRetrievePasses(queries: string[], passes: RetrievePass[]): { pass?: RetrievePass; queries: string[]; passes: RetrievePass[] } {
+  const groundedPasses = passes.filter((pass) => pass.grounded);
+  const chosen = groundedPasses.length > 0 ? groundedPasses : passes;
+  if (chosen.length === 0) {
+    return {
+      pass: undefined,
+      queries,
+      passes,
+    };
+  }
+  return {
+    queries,
+    passes,
+    pass: {
+      query: queries.join(' | '),
+      grounded: chosen.some((pass) => pass.grounded),
+      retrievalText: chosen.map((pass) => pass.retrievalText).filter(Boolean).join('\n\n'),
+      evidence: mergeEvidencePacks(chosen),
+    },
   };
 }
 
@@ -228,178 +813,179 @@ async function safeListArchiveSources(input: MemberChatInput): Promise<{ availab
   }
 }
 
-async function rewriteContextQuery(
+function buildPlannerPrompt(
+  strategy: RetrievalStrategy,
+  strategyConfig: ResolvedRetrievalStrategyConfig,
   input: MemberChatInput,
-  availableArchiveBuckets: ArchiveBucket[],
-): Promise<QueryRewriteResult> {
-  const target = modelRegistry.resolve('kbQueryRewrite');
-  const model = createChatModel(target, { temperature: 0.1 });
-  const kbDigests = input.kbDigests ?? [];
-  const contextBlock = (input.contextMessages ?? [])
-    .slice(-8)
-    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
-    .join('\n');
+  context: {
+    docsCount: number;
+    availableArchiveBuckets: ArchiveBucket[];
+    totalArchiveEntries: number;
+    knowledgeAvailable: boolean;
+  },
+): string {
+  const variantGuidance =
+    strategyConfig.plannerPromptVariant === 'brainstorm'
+      ? [
+          'This is a brainstorm turn.',
+          'Favor wider semantic spread and interesting adjacent angles.',
+          'Actively include thematic, contrast, and wildcard ideas when defensible.',
+          'Do not over-converge too early on one interpretation.',
+        ]
+      : strategyConfig.plannerPromptVariant === 'deep_dive'
+        ? [
+            'This is a deep-dive turn.',
+            'Explore broadly enough to avoid tunnel vision, but produce queries that can support later narrowing.',
+            'Prefer anchor, tactical, autobiographical, and thematic families over novelty-for-novelty.',
+          ]
+        : [
+            'This is an instant turn.',
+            'Balance direct answer relevance with light exploration.',
+            'Prefer anchor plus one or two supporting angles.',
+          ];
+  const lengthGuidance =
+    strategyConfig.lengthBucket === 'very_long'
+      ? [
+          'The user input is very long.',
+          'Cover multiple parts of the message instead of collapsing everything into one narrow query.',
+          'Use more distinct retrieval angles when they are justified by different parts of the message.',
+        ]
+      : strategyConfig.lengthBucket === 'long'
+        ? [
+            'The user input is long.',
+            'Cover more than one meaningful part of the message if the turn clearly contains multiple ideas.',
+          ]
+        : [];
 
-  const digestHints = kbDigests
-    .slice(0, 6)
-    .map((digest) => {
-      const topics = digest.topics.slice(0, 3).join(', ');
-      const entities = digest.entities.slice(0, 4).join(', ');
-      return `${digest.displayName} | topics: ${topics || 'n/a'} | entities: ${entities || 'n/a'}`;
-    })
-    .join('\n');
-
-  const prompt = [
-    'Rewrite the user question into a standalone retrieval query.',
-    'Resolve pronouns and ellipsis from the recent conversation when needed.',
-    'Keep the query concise, literal, and semantically faithful to the user.',
-    'Return JSON only:',
-    '{"standaloneQuery":"...","alternates":["..."]}',
+  return [
+    'Infer what the user is actually asking for before retrieval.',
+    'The last user message may be vague or under-specified; use the recent conversation to resolve it.',
+    'Classify the turn, identify the active topic, and propose hidden retrieval queries only when they are needed.',
+    'If the turn is only about style, length, tone, or formatting, set skipRetrieval=true and responseDirective=brief when appropriate.',
+    'If the turn only asks to continue, elaborate, or expand on the most recent assistant answer, set skipRetrieval=true and responseDirective=continue.',
+    'Return queryVariants with source, family, query, and rationale.',
+    'Valid families are: anchor, tactical, autobiographical, thematic, contrast, adjacent, wildcard, archive_personal.',
+    'Use archive_personal only for personal archive queries.',
+    'Each queryVariant must target a distinct angle rather than paraphrasing the same search.',
+    ...variantGuidance,
+    ...lengthGuidance,
+    'When retrieval is needed and knowledge-base docs are available, prefer at least one knowledge_base query unless KB is disabled.',
+    'Use personal_archive only when user background, patterns, reflections, accountability, or world-model context is directly relevant.',
+    'Return JSON only with keys: turnType, activeTopic, responseDirective, reason, skipRetrieval, queryVariants.',
     '',
-    `Original user question: ${input.query}`,
+    `Current user question: ${input.query}`,
     '',
     'Recent conversation:',
-    input.includeConversationContext === false ? '(omitted by caller)' : (contextBlock || '(none)'),
+    input.includeConversationContext === false ? '(omitted by caller)' : formatPlannerConversation(input.contextMessages ?? []),
     '',
-    'Conversation memory hint:',
-    input.memoryHint?.slice(0, 500) || '(none)',
+    'Thread working memory:',
+    clipText(input.memoryHint, 600) || '(none)',
     '',
-    'Knowledge-base hints:',
-    digestHints || '(none)',
+    `Knowledge docs available: ${context.knowledgeAvailable ? `yes (${context.docsCount})` : 'no'}`,
+    'Knowledge digest hints:',
+    formatDigestHints(input.kbDigests ?? []) || '(none)',
     '',
-    'Personal Archive buckets:',
-    availableArchiveBuckets.length ? bucketDescriptions(availableArchiveBuckets) : '(none)',
+    `Personal Archive buckets: ${context.availableArchiveBuckets.join(', ') || '(none)'}`,
+    `Personal Archive entry count: ${context.totalArchiveEntries}`,
+    'Personal Archive bucket semantics:',
+    context.availableArchiveBuckets.length ? bucketDescriptions(context.availableArchiveBuckets) : '(none)',
   ].join('\n');
-
-  try {
-    const parsed = await invokeStructured(model, prompt, rewriteSchema);
-    return {
-      standaloneQuery: parsed.standaloneQuery?.trim() || input.query,
-      alternates: parsed.alternates?.map((item) => item.trim()).filter(Boolean).slice(0, 2) ?? [],
-    };
-  } catch {
-    return {
-      standaloneQuery: input.query,
-      alternates: [],
-    };
-  }
 }
 
-async function planSources(input: {
-  query: string;
-  standaloneQuery: string;
+async function planRetrievalTurn(input: MemberChatInput, context: {
   docsCount: number;
-  digestSignals: string[];
   availableArchiveBuckets: ArchiveBucket[];
   totalArchiveEntries: number;
-  hasKnowledgePath?: boolean;
-  knowledgeMode?: 'auto' | 'force' | 'off';
-}): Promise<SourceDecision> {
-  const sources = new Set<'knowledge_base' | 'personal_archive'>();
-  const combinedQuery = `${input.query} ${input.standaloneQuery}`.toLowerCase();
+  knowledgeAvailable: boolean;
+  retrievalStrategy: RetrievalStrategy;
+  strategyConfig: ResolvedRetrievalStrategyConfig;
+}): Promise<RetrievalTurnPlan> {
+  const fallback = buildFallbackTurnPlan(input, {
+    docsCount: context.docsCount,
+    availableArchiveBuckets: context.availableArchiveBuckets,
+    knowledgeAvailable: context.knowledgeAvailable,
+  });
 
-  if (input.knowledgeMode === 'off') {
-    if (input.availableArchiveBuckets.length > 0) {
-      sources.add('personal_archive');
-      return { sources: [...sources], reason: 'kb-disabled' };
-    }
-    return { sources: [], reason: 'kb-disabled-no-archive' };
+  if (fallback.skipRetrieval) {
+    return fallback;
   }
 
-  if (input.knowledgeMode === 'force') {
-    if (input.hasKnowledgePath) {
-      sources.add('knowledge_base');
-    }
-    if (input.availableArchiveBuckets.length > 0) {
-      const explicitArchive = /\b(i|me|my|myself)\b/.test(combinedQuery);
-      if (explicitArchive) {
-        sources.add('personal_archive');
-      }
-    }
-    return { sources: [...sources], reason: 'kb-forced' };
-  }
-
-  if (input.docsCount > 0) {
-    const explicitKb = ['document', 'pdf', 'according to', 'knowledge base', 'from the file', 'in your files'];
-    if (explicitKb.some((term) => combinedQuery.includes(term)) || input.digestSignals.length > 0) {
-      sources.add('knowledge_base');
-    }
-  }
-
-  if (input.availableArchiveBuckets.length > 0) {
-    const explicitArchive = [
-      'about me',
-      'my pattern',
-      'my patterns',
-      'my history',
-      'my background',
-      'hold me accountable',
-      'remind me',
-      'reflection',
-      'cookie jar',
-      'world model',
-    ];
-    const personalSignal =
-      explicitArchive.some((term) => combinedQuery.includes(term)) ||
-      /\b(i|me|my|myself)\b/.test(combinedQuery);
-    if (personalSignal) {
-      sources.add('personal_archive');
-    }
-  }
-
-  if (!input.docsCount && !input.availableArchiveBuckets.length) {
-    return { sources: [], reason: 'no-context-sources' };
-  }
-
-  const target = modelRegistry.resolve('kbGate');
-  const model = createChatModel(target, { temperature: 0 });
-  const prompt = [
-    'Decide which context sources should be retrieved for the next assistant turn.',
-    'Return JSON only: {"sources":["knowledge_base"|"personal_archive"],"reason":"short-string"}',
-    'Choose from:',
-    '- knowledge_base: use for factual grounding from uploaded member documents',
-    '- personal_archive: use for relevant user-authored background, patterns, reflections, accountability, or world-model context',
-    'Identity is already injected separately. Do not include identity in the decision.',
-    'When uncertain, prefer the minimum sufficient source set rather than selecting everything.',
-    '',
-    `User query: ${input.query}`,
-    `Standalone retrieval query: ${input.standaloneQuery}`,
-    `Knowledge docs available: ${input.docsCount > 0 ? `yes (${input.docsCount})` : 'no'}`,
-    `Digest lexical overlap: ${input.digestSignals.join(', ') || 'none'}`,
-    `Personal Archive available buckets: ${input.availableArchiveBuckets.join(', ') || 'none'}`,
-    `Personal Archive entry count: ${input.totalArchiveEntries}`,
-    '',
-    'Personal Archive bucket semantics:',
-    bucketDescriptions(input.availableArchiveBuckets),
-  ].join('\n');
+  const target = modelRegistry.resolve(
+    'kbQueryRewrite',
+    context.strategyConfig.plannerModelOverride ?? input.retrievalModel,
+  );
+  const model = createChatModel(target, { temperature: 0.1 });
+  const prompt = buildPlannerPrompt(context.retrievalStrategy, context.strategyConfig, input, context);
 
   try {
-    const parsed = await invokeStructured(model, prompt, plannerSchema);
-    const filtered = parsed.sources.filter((source) => {
-      if (source === 'knowledge_base') return input.docsCount > 0;
-      return input.availableArchiveBuckets.length > 0;
-    });
-    if (filtered.length) {
-      filtered.forEach((source) => sources.add(source));
+    const parsed = await invokeStructured(model, prompt, retrievalTurnSchema);
+    const queryVariants = dedupeQueryVariants(
+      parsed.queryVariants
+        .map((variant) => ({
+          source: variant.source,
+          family: variant.family,
+          query: variant.query,
+          rationale: variant.rationale,
+        }))
+        .filter((variant) => {
+          if (variant.source === 'knowledge_base') {
+            return context.knowledgeAvailable && input.knowledgeMode !== 'off';
+          }
+          return context.availableArchiveBuckets.length > 0;
+        }),
+    );
+
+    const plan: RetrievalTurnPlan = {
+      turnType: parsed.turnType,
+      activeTopic: parsed.activeTopic.trim() || fallback.activeTopic,
+      responseDirective: parsed.responseDirective,
+      reason: parsed.reason.trim() || 'turn-planner',
+      skipRetrieval: parsed.skipRetrieval,
+      queryVariants,
+    };
+
+    if (plan.turnType === 'style_only' || plan.turnType === 'continuation') {
       return {
-        sources: [...sources],
-        reason: parsed.reason?.trim() || 'context-planner',
+        ...plan,
+        skipRetrieval: true,
+        queryVariants: [],
       };
     }
-  } catch {
-    // Fall through to heuristic-only result.
-  }
 
-  return {
-    sources: [...sources],
-    reason: sources.size > 0 ? 'heuristic-fallback' : 'planner-fallback-none',
-  };
+    if (plan.skipRetrieval) {
+      return plan;
+    }
+
+    if (context.knowledgeAvailable && input.knowledgeMode !== 'off' && !plan.queryVariants.some((variant) => variant.source === 'knowledge_base')) {
+      plan.queryVariants = dedupeQueryVariants([
+        ...plan.queryVariants,
+        {
+          source: 'knowledge_base',
+          family: 'anchor',
+          query: buildContextualFallbackQuery(input),
+          rationale: 'fallback-kb-primary',
+        },
+      ]);
+    }
+
+    if (plan.queryVariants.length === 0) {
+      return {
+        ...fallback,
+        reason: 'turn-planner-empty-fallback',
+      };
+    }
+
+    return plan;
+  } catch {
+    return fallback;
+  }
 }
 
 async function retrieveKnowledgeEvidence(
   input: MemberChatInput,
   traceId: string,
   query: string,
+  documentNames: string[] | undefined,
   limit = 5,
 ): Promise<RetrievePass> {
   if (!input.knowledgeRetriever || !input.storeName) {
@@ -413,8 +999,8 @@ async function retrieveKnowledgeEvidence(
   const retrieved = await input.knowledgeRetriever.retrieve({
     storeName: input.storeName,
     query,
+    documentNames,
     limit,
-    metadataFilter: input.metadataFilter,
     traceId,
   });
 
@@ -429,80 +1015,25 @@ async function retrieveKnowledgeEvidence(
   };
 }
 
-async function planDeepDiveQueries(input: MemberChatInput, rewrite: QueryRewriteResult): Promise<string[]> {
-  const target = modelRegistry.resolve('kbQueryRewrite');
-  const model = createChatModel(target, { temperature: 0.1 });
-  const prompt = [
-    'Split the user question into up to 3 mutually exclusive retrieval subqueries.',
-    'Each query should target different evidence, not rephrase the same angle.',
-    'Keep them concise and grounded in the original request.',
-    'Return JSON only: {"subqueries":["..."]}',
-    '',
-    `Original question: ${input.query}`,
-    `Standalone query: ${rewrite.standaloneQuery}`,
-  ].join('\n');
-
-  try {
-    const parsed = await invokeStructured(model, prompt, deepDiveSchema);
-    const unique = Array.from(
-      new Set(
-        parsed.subqueries
-          .map((item) => item.trim())
-          .filter(Boolean)
-          .filter((item) => item.toLowerCase() !== rewrite.standaloneQuery.toLowerCase())
-      )
-    ).slice(0, 2);
-    return [rewrite.standaloneQuery, ...unique].slice(0, 3);
-  } catch {
-    return [rewrite.standaloneQuery, ...rewrite.alternates].slice(0, 3);
-  }
-}
-
-async function retrieveKnowledgeDeepDive(
+async function retrieveKnowledgePasses(
   input: MemberChatInput,
   traceId: string,
-  rewrite: QueryRewriteResult,
+  queries: string[],
+  documentNames: string[] | undefined,
+  limit: number,
 ): Promise<{ pass?: RetrievePass; queries: string[]; passes: RetrievePass[] }> {
-  const queries = await planDeepDiveQueries(input, rewrite);
-  const passes = await Promise.all(
-    queries.map(async (query) => {
-      try {
-        return await retrieveKnowledgeEvidence(input, traceId, query, 5);
-      } catch {
-        return undefined;
-      }
-    })
-  );
-  const groundedPasses = passes.filter((pass): pass is RetrievePass => Boolean(pass && pass.grounded));
-  const successfulPasses = passes.filter((pass): pass is RetrievePass => Boolean(pass));
-  const chosen = groundedPasses.length > 0 ? groundedPasses : successfulPasses;
-  if (chosen.length === 0) {
-    return { pass: undefined, queries, passes: [] };
-  }
-  const merged: RetrievePass = {
-    query: queries.join(' | '),
-    grounded: chosen.some((pass) => pass.grounded),
-    retrievalText: chosen.map((pass) => pass.retrievalText).filter(Boolean).join('\n\n'),
-    evidence: mergeEvidencePacks(chosen),
-  };
-  return { pass: merged, queries, passes: successfulPasses };
-}
-
-async function retrieveKnowledgeWithAlternate(
-  input: MemberChatInput,
-  traceId: string,
-  rewrite: QueryRewriteResult,
-): Promise<{ pass?: RetrievePass; alternateQuery?: string }> {
-  const primary = await retrieveKnowledgeEvidence(input, traceId, rewrite.standaloneQuery);
-  if (primary.grounded || !rewrite.alternates[0] || rewrite.alternates[0].toLowerCase() === rewrite.standaloneQuery.toLowerCase()) {
-    return { pass: primary };
-  }
-  const alternateQuery = rewrite.alternates[0];
-  const alternate = await retrieveKnowledgeEvidence(input, traceId, alternateQuery);
-  return {
-    pass: alternate.grounded ? alternate : primary,
-    alternateQuery: alternateQuery,
-  };
+  const passes = (
+    await Promise.all(
+      queries.map(async (query) => {
+        try {
+          return await retrieveKnowledgeEvidence(input, traceId, query, documentNames, limit);
+        } catch {
+          return undefined;
+        }
+      }),
+    )
+  ).filter((pass): pass is RetrievePass => Boolean(pass));
+  return mergeRetrievePasses(queries, passes);
 }
 
 async function retrieveArchiveEvidence(
@@ -510,6 +1041,7 @@ async function retrieveArchiveEvidence(
   traceId: string,
   query: string,
   buckets: ArchiveBucket[],
+  limit: number,
 ): Promise<RetrievePass | undefined> {
   if (!input.personalArchiveRetriever || !buckets.length) {
     return undefined;
@@ -518,7 +1050,7 @@ async function retrieveArchiveEvidence(
   const retrieved = await input.personalArchiveRetriever.retrieve({
     query,
     buckets,
-    limit: 3,
+    limit,
     traceId,
   });
 
@@ -533,14 +1065,91 @@ async function retrieveArchiveEvidence(
   };
 }
 
+async function retrieveArchivePasses(
+  input: MemberChatInput,
+  traceId: string,
+  queries: string[],
+  buckets: ArchiveBucket[],
+  limit: number,
+): Promise<{ pass?: RetrievePass; queries: string[]; passes: RetrievePass[] }> {
+  const passes = (
+    await Promise.all(
+      queries.map(async (query) => await retrieveArchiveEvidence(input, traceId, query, buckets, limit)),
+    )
+  ).filter((pass): pass is RetrievePass => Boolean(pass));
+  return mergeRetrievePasses(queries, passes);
+}
+
+function selectSecondPassDocuments(
+  route: KnowledgeRoutePlan,
+  knowledgePass: RetrievePass,
+  collapseDocCount: number,
+): string[] {
+  if (collapseDocCount <= 0) return [];
+  const citationTitles = new Set(knowledgePass.evidence.citations.map((citation) => citation.title.trim().toLowerCase()));
+  const ranked = route.rankedCandidates
+    .filter((candidate) => Boolean(candidate.digest.kbDocumentName))
+    .map((candidate) => {
+      const citationBoost = citationTitles.has(candidate.digest.displayName.trim().toLowerCase()) ? 1.4 : 0;
+      return {
+        candidate,
+        score: candidate.score + citationBoost,
+      };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, collapseDocCount);
+  return ranked
+    .map(({ candidate }) => candidate.digest.kbDocumentName)
+    .filter((name): name is string => Boolean(name));
+}
+
+function buildSecondPassKnowledgeQueries(input: {
+  input: MemberChatInput;
+  planner: RetrievalTurnPlan;
+  knowledgePass: RetrievePass;
+  selectedDisplayNames: string[];
+  secondPassDocNames: string[];
+  budget: number;
+}): string[] {
+  if (input.budget <= 0) return [];
+  const citations = input.knowledgePass.evidence.citations.slice(0, 3).map((citation) => citation.title);
+  const snippets = input.knowledgePass.evidence.snippets.slice(0, 2).map((snippet) => clipText(snippet.text, 120));
+  const activeTopic = normalizeQuery(input.planner.activeTopic || input.input.query);
+  const docHints = input.selectedDisplayNames.slice(0, 2).join(', ');
+  const candidates = [
+    [activeTopic, citations.join(', ')].filter(Boolean).join('; strongest evidence: '),
+    [
+      buildSecondaryKnowledgeQuery(input.planner.turnType, activeTopic),
+      docHints ? `focus on ${docHints}` : '',
+      snippets[0] ? `follow up on: ${snippets[0]}` : '',
+    ]
+      .filter(Boolean)
+      .join('; '),
+    snippets[1] ? `${activeTopic}; supporting detail around: ${snippets[1]}` : '',
+  ];
+  return dedupeQueries(candidates).slice(0, input.budget);
+}
+
 export async function runMemberChatGraph(input: MemberChatInput): Promise<MemberChatOutput> {
   const traceId = getMainTraceId();
-  const effectiveChatProfile = input.chatProfile ?? 'instant';
-  const effectiveRetrievalProfile =
-    input.retrievalProfile ?? (effectiveChatProfile === 'deep_dive' ? 'deep_dive' : 'default');
+  const requestedChatProfile = input.chatProfile ?? 'instant';
+  const effectiveRetrievalStrategy =
+    input.retrievalStrategy ??
+    (requestedChatProfile === 'deep_dive'
+      ? 'deep_dive'
+      : requestedChatProfile === 'brainstorm'
+        ? 'brainstorm'
+        : 'instant');
+  const strategyConfig = resolveRetrievalStrategyConfig(effectiveRetrievalStrategy, input.query);
+  const effectiveChatProfile: 'instant' | 'short' | 'think' =
+    requestedChatProfile === 'short'
+      ? 'short'
+      : requestedChatProfile === 'think' || requestedChatProfile === 'deep_dive'
+        ? 'think'
+        : 'instant';
   const responseModelTarget = modelRegistry.resolve(
     effectiveChatProfile === 'think' ? 'chatThinking' : 'chatResponse',
-    input.responseModel
+    input.responseModel,
   );
   const retrievalModelTarget = modelRegistry.resolve('retrieval', input.retrievalModel);
 
@@ -548,73 +1157,133 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     safeListDocuments(input),
     safeListArchiveSources(input),
   ]);
+  const knowledgeAvailable = docs.length > 0 && Boolean(input.storeName && input.knowledgeRetriever);
+
+  const planner = await planRetrievalTurn(input, {
+    docsCount: docs.length,
+    availableArchiveBuckets: archiveSourceState.availableBuckets,
+    totalArchiveEntries: archiveSourceState.totalEntries,
+    knowledgeAvailable,
+    retrievalStrategy: effectiveRetrievalStrategy,
+    strategyConfig,
+  });
+
+  const runKnowledge = !planner.skipRetrieval && input.knowledgeMode !== 'off' && knowledgeAvailable;
+  const knowledgeRoute = runKnowledge
+    ? buildKnowledgeRoute(input, planner, strategyConfig, effectiveRetrievalStrategy)
+    : {
+        mode: 'broad' as const,
+        routeConfidence: 'low' as const,
+        selectedDocumentNames: [],
+        selectedDisplayNames: [],
+        wildcardDocumentNames: [],
+        hintTerms: [],
+        summary: 'Knowledge retrieval disabled.',
+        rankedCandidates: [],
+      };
+  const archiveRequested = planner.queryVariants.some((variant) => variant.source === 'personal_archive');
+  const runArchive = !planner.skipRetrieval && archiveRequested && archiveSourceState.availableBuckets.length > 0;
+
+  let knowledgeQueries =
+    runKnowledge && (knowledgeRoute.mode !== 'broad' || strategyConfig.allowBroadFallback)
+      ? buildKnowledgeQueries(
+          input,
+          planner,
+          knowledgeRoute,
+          strategyConfig,
+          effectiveRetrievalStrategy,
+          strategyConfig.maxKnowledgeQueries,
+        )
+      : [];
+  if (runKnowledge && knowledgeQueries.length === 0) {
+    knowledgeQueries = [buildContextualFallbackQuery(input)].filter(Boolean);
+  }
+
+  const archiveQueries = runArchive
+    ? selectQueryVariants(
+        planner,
+        'personal_archive',
+        strategyConfig,
+        effectiveRetrievalStrategy,
+        strategyConfig.maxArchiveQueries,
+      ).map((variant) => variant.query)
+    : [];
+
   setMainSpanAttributes({
     'ai.chat_profile': effectiveChatProfile,
-    'ai.retrieval_profile': effectiveRetrievalProfile,
+    'ai.retrieval_strategy': effectiveRetrievalStrategy,
+    'ai.turn_type': planner.turnType,
+    'ai.retrieval_skipped': planner.skipRetrieval,
     'knowledge.docs_count': docs.length,
+    'knowledge.route.mode': knowledgeRoute.mode,
+    'knowledge.route.selected_doc_count': knowledgeRoute.selectedDocumentNames.length,
     'archive.bucket_count': archiveSourceState.availableBuckets.length,
     'archive.entry_count': archiveSourceState.totalEntries,
     'knowledge.list_error': Boolean(listError),
   });
 
-  const rewrite = await rewriteContextQuery(input, archiveSourceState.availableBuckets);
-  const digestSignals = collectDigestSignals(rewrite.standaloneQuery, input.kbDigests ?? []);
-  const planner = await planSources({
-    query: input.query,
-    standaloneQuery: rewrite.standaloneQuery,
-    docsCount: docs.length,
-    digestSignals,
-    availableArchiveBuckets: archiveSourceState.availableBuckets,
-    totalArchiveEntries: archiveSourceState.totalEntries,
-    hasKnowledgePath: Boolean(input.storeName && input.knowledgeRetriever),
-    knowledgeMode: input.knowledgeMode,
-  });
-
-  const forceKnowledgeForDeepDive =
-    effectiveRetrievalProfile === 'deep_dive' &&
-    docs.length > 0 &&
-    Boolean(input.storeName && input.knowledgeRetriever);
-  const requestedSources = new Set(planner.sources);
-  if (forceKnowledgeForDeepDive) {
-    requestedSources.add('knowledge_base');
-  }
-
-  const runKnowledge = requestedSources.has('knowledge_base');
-  const runArchive = requestedSources.has('personal_archive');
-  const contextDecisionReason =
-    forceKnowledgeForDeepDive && !planner.sources.includes('knowledge_base')
-      ? 'deep-dive-forced-kb'
-      : planner.reason;
-
-  const [knowledgeResult, archivePass] = await Promise.all([
-    runKnowledge
-      ? effectiveRetrievalProfile === 'deep_dive'
-        ? retrieveKnowledgeDeepDive(input, traceId, rewrite).then((result) => ({
-            pass: result.pass,
-            deepDiveQueries: result.queries,
-            deepDivePasses: result.passes,
-            alternateQuery: result.queries.slice(1).join(' | ') || undefined,
-          }))
-        : retrieveKnowledgeWithAlternate(input, traceId, rewrite).then((result) => ({
-            ...result,
-            deepDiveQueries: undefined as string[] | undefined,
-            deepDivePasses: undefined as RetrievePass[] | undefined,
-          }))
+  const [knowledgeResult, archiveResult] = await Promise.all([
+    knowledgeQueries.length > 0
+      ? retrieveKnowledgePasses(
+          input,
+          traceId,
+          knowledgeQueries,
+          knowledgeRoute.mode === 'targeted' ? knowledgeRoute.selectedDocumentNames : undefined,
+          strategyConfig.initialKnowledgeChunkLimit,
+        )
       : Promise.resolve({
           pass: undefined as RetrievePass | undefined,
-          alternateQuery: undefined as string | undefined,
-          deepDiveQueries: undefined as string[] | undefined,
-          deepDivePasses: undefined as RetrievePass[] | undefined,
+          queries: [] as string[],
+          passes: [] as RetrievePass[],
         }),
-    runArchive
-      ? retrieveArchiveEvidence(input, traceId, rewrite.standaloneQuery, archiveSourceState.availableBuckets)
-      : Promise.resolve(undefined),
+    archiveQueries.length > 0
+      ? retrieveArchivePasses(input, traceId, archiveQueries, archiveSourceState.availableBuckets, strategyConfig.initialArchiveChunkLimit)
+      : Promise.resolve({
+          pass: undefined as RetrievePass | undefined,
+          queries: [] as string[],
+          passes: [] as RetrievePass[],
+        }),
   ]);
 
   const knowledgePass = knowledgeResult.pass;
+  const archivePass = archiveResult.pass;
   const evidenceMode = runKnowledge || runArchive ? 'with-context' : 'prompt-only';
 
-  const kbEvidencePack = knowledgePass ? buildEvidencePack(knowledgePass.evidence).join('\n\n') : '';
+  let secondPassQueries: string[] = [];
+  let secondPassDocNames: string[] = [];
+  let secondPassResult: { pass?: RetrievePass; queries: string[]; passes: RetrievePass[] } = {
+    pass: undefined,
+    queries: [],
+    passes: [],
+  };
+
+  if (runKnowledge && strategyConfig.runSecondPassExploitation && knowledgePass?.grounded) {
+    secondPassDocNames = selectSecondPassDocuments(knowledgeRoute, knowledgePass, strategyConfig.collapseDocCount);
+    secondPassQueries = buildSecondPassKnowledgeQueries({
+      input,
+      planner,
+      knowledgePass,
+      selectedDisplayNames: knowledgeRoute.selectedDisplayNames,
+      secondPassDocNames,
+      budget: strategyConfig.secondPassKnowledgeQueries,
+    });
+    if (secondPassQueries.length > 0) {
+      secondPassResult = await retrieveKnowledgePasses(
+        input,
+        traceId,
+        secondPassQueries,
+        secondPassDocNames.length > 0 ? secondPassDocNames : undefined,
+        strategyConfig.secondPassKnowledgeChunkLimit,
+      );
+    }
+  }
+
+  const finalKnowledgePass = mergeRetrievePasses(
+    [...knowledgeResult.queries, ...secondPassResult.queries],
+    [...knowledgeResult.passes, ...secondPassResult.passes],
+  ).pass;
+
+  const kbEvidencePack = finalKnowledgePass ? buildEvidencePack(finalKnowledgePass.evidence).join('\n\n') : '';
   const archiveEvidencePack = archivePass ? buildEvidencePack(archivePass.evidence).join('\n\n') : '';
 
   const personaPrompt = [
@@ -631,6 +1300,13 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     .filter(Boolean)
     .join('\n\n');
 
+  const shouldBrief =
+    input.turnDirective === 'shorter' ||
+    (!input.turnDirective && (effectiveChatProfile === 'short' || planner.responseDirective === 'brief'));
+  const shouldContinue =
+    input.turnDirective === 'elaborate' ||
+    (!input.turnDirective && planner.responseDirective === 'continue');
+
   const answerPrompt = [
     personaPrompt,
     ...(input.includeConversationContext === false
@@ -638,6 +1314,11 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
       : ['', 'Conversation so far:', formatContextMessages(input.contextMessages ?? [], 10) || '(none)']),
     '',
     `Current user question: ${input.query}`,
+    '',
+    'Resolved turn interpretation:',
+    `Turn type: ${planner.turnType}`,
+    `Active topic: ${planner.activeTopic || '(none)'}`,
+    `Knowledge routing: ${knowledgeRoute.summary}`,
     '',
     'Knowledge Base Context:',
     kbEvidencePack || '(none)',
@@ -650,7 +1331,7 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         ].join('\n')
       : '(none)',
     '',
-    ...(effectiveRetrievalProfile === 'deep_dive'
+    ...(strategyConfig.answerDirectiveVariant === 'deep_dive'
       ? [
           'Response directive:',
           'This is a deep-dive turn.',
@@ -659,7 +1340,16 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
           '',
         ]
       : []),
-    ...((input.turnDirective === 'shorter' || effectiveChatProfile === 'short')
+    ...(strategyConfig.answerDirectiveVariant === 'brainstorm'
+      ? [
+          'Response directive:',
+          'This is a brainstorm turn.',
+          'Surface interesting possibilities, tensions, adjacent ideas, and grounded counterpoints.',
+          'Do not force a single final conclusion if multiple grounded directions are more useful.',
+          '',
+        ]
+      : []),
+    ...(shouldBrief
       ? [
           'Response directive:',
           'Answer this turn briefly. Prefer 2-4 sentences unless a short list is clearer.',
@@ -667,11 +1357,25 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
           '',
         ]
       : []),
-    ...(input.turnDirective === 'elaborate'
+    ...(shouldContinue
       ? [
           'Response directive:',
           'Continue the most recent assistant answer with more detail.',
           'Do not repeat the opening or restart from scratch.',
+          '',
+        ]
+      : []),
+    ...(planner.turnType === 'style_only'
+      ? [
+          'Turn interpretation directive:',
+          'Treat the current user turn as a meta-instruction about response style, not a new topic request.',
+          '',
+        ]
+      : []),
+    ...(planner.turnType === 'continuation'
+      ? [
+          'Turn interpretation directive:',
+          'Treat the current user turn as a request to continue the current topic rather than switch topics.',
           '',
         ]
       : []),
@@ -684,29 +1388,25 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
   });
   const answer = (await invokeText(model, answerPrompt)) || 'I could not generate a response.';
 
-  const reason =
-    contextDecisionReason ||
-    (evidenceMode === 'prompt-only' ? 'no-context-selected' : undefined);
   setMainSpanAttributes({
     'ai.used_knowledge_base': runKnowledge,
     'ai.used_personal_archive': runArchive,
     'ai.context.mode': evidenceMode,
-    'ai.context.reason': reason ?? 'none',
-    'knowledge.digest_signal_count': digestSignals.length,
-    'knowledge.retrieval.grounded': Boolean(knowledgePass?.grounded),
+    'ai.context.reason': planner.reason || 'none',
+    'knowledge.retrieval.grounded': Boolean(finalKnowledgePass?.grounded),
     'archive.retrieval.grounded': Boolean(archivePass?.grounded),
-    'knowledge.citation_count': knowledgePass?.evidence.citations.length ?? 0,
+    'knowledge.citation_count': finalKnowledgePass?.evidence.citations.length ?? 0,
     'archive.citation_count': archivePass?.evidence.citations.length ?? 0,
-    'knowledge.snippet_count': knowledgePass?.evidence.snippets.length ?? 0,
+    'knowledge.snippet_count': finalKnowledgePass?.evidence.snippets.length ?? 0,
     'archive.snippet_count': archivePass?.evidence.snippets.length ?? 0,
   });
 
   return {
     answer,
-    citations: knowledgePass?.evidence.citations ?? [],
+    citations: finalKnowledgePass?.evidence.citations ?? [],
     model: responseModelTarget.model,
     retrievalModel: retrievalModelTarget.model,
-    grounded: Boolean(knowledgePass?.grounded || archivePass?.grounded),
+    grounded: Boolean(finalKnowledgePass?.grounded || archivePass?.grounded),
     usedKnowledgeBase: runKnowledge,
     usedPersonalArchive: runArchive,
   };

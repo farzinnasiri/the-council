@@ -9,7 +9,6 @@ import {
   NotebookPen,
   Pencil,
   Plus,
-  Search,
   Trash2,
   UserCircle2,
   Users2,
@@ -627,7 +626,6 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           <NavItem to="/members" icon={<Users2 className="h-4 w-4" />} label="Members" onNavigate={onNavigate} />
           <NavItem to="/archive" icon={<Archive className="h-4 w-4" />} label="Personal Archive" onNavigate={onNavigate} />
           <NavItem to="/notebooks" icon={<NotebookPen className="h-4 w-4" />} label="Notebooks" onNavigate={onNavigate} />
-          <NavItem to="/kb-query" icon={<Search className="h-4 w-4" />} label="KB Query" onNavigate={onNavigate} />
           <NavItem
             to="/settings"
             icon={

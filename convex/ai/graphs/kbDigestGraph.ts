@@ -13,11 +13,14 @@ interface DigestState {
   memberSystemPrompt?: string;
   model?: string;
   digestResult?: {
-    topics: string[];
-    entities: string[];
-    lexicalAnchors: string[];
-    styleAnchors: string[];
-    digestSummary: string;
+    documentCard: {
+      docType: string;
+      about: string;
+      bestFor: string[];
+      evidenceKinds: string[];
+      notFor: string[];
+    };
+    queryHints: string[];
     model: string;
   };
 }
@@ -29,11 +32,14 @@ const DigestStateAnnotation = Annotation.Root({
   model: Annotation<string | undefined>(),
   digestResult: Annotation<
     | {
-        topics: string[];
-        entities: string[];
-        lexicalAnchors: string[];
-        styleAnchors: string[];
-        digestSummary: string;
+        documentCard: {
+          docType: string;
+          about: string;
+          bestFor: string[];
+          evidenceKinds: string[];
+          notFor: string[];
+        };
+        queryHints: string[];
         model: string;
       }
     | undefined
@@ -41,11 +47,14 @@ const DigestStateAnnotation = Annotation.Root({
 });
 
 const digestSchema = z.object({
-  topics: z.array(z.string()).default([]),
-  entities: z.array(z.string()).default([]),
-  lexicalAnchors: z.array(z.string()).default([]),
-  styleAnchors: z.array(z.string()).default([]),
-  digestSummary: z.string().default(''),
+  documentCard: z.object({
+    docType: z.string().default('other'),
+    about: z.string().default(''),
+    bestFor: z.array(z.string()).default([]),
+    evidenceKinds: z.array(z.string()).default([]),
+    notFor: z.array(z.string()).default([]),
+  }),
+  queryHints: z.array(z.string()).default([]),
 });
 
 function fallbackDocumentDigest(displayName: string, memberSystemPrompt?: string) {
@@ -64,14 +73,16 @@ function fallbackDocumentDigest(displayName: string, memberSystemPrompt?: string
         8
       )
     : [];
-  const topics = normalizeKeywordList([...nameParts.slice(0, 4), ...personaHints.slice(0, 3)], 8);
-  const lexicalAnchors = normalizeKeywordList([...nameParts, ...personaHints], 12);
+  const queryHints = normalizeKeywordList([...nameParts, ...personaHints], 16);
   return {
-    topics: topics.length ? topics : ['general', 'reference', 'notes'],
-    entities: nameParts.slice(0, 6),
-    lexicalAnchors: lexicalAnchors.length ? lexicalAnchors : ['knowledge', 'document', 'reference'],
-    styleAnchors: normalizeKeywordList(personaHints.slice(0, 4), 8),
-    digestSummary: `Lightweight digest for ${displayName}.`,
+    documentCard: {
+      docType: 'other',
+      about: `Document titled ${displayName}.`,
+      bestFor: ['general reference'],
+      evidenceKinds: ['reference'],
+      notFor: [],
+    },
+    queryHints: queryHints.length ? queryHints : ['knowledge', 'document', 'reference'],
   };
 }
 
@@ -81,11 +92,14 @@ export async function runKBDigestGraph(input: {
   memberSystemPrompt?: string;
   model?: string;
 }): Promise<{
-  topics: string[];
-  entities: string[];
-  lexicalAnchors: string[];
-  styleAnchors: string[];
-  digestSummary: string;
+  documentCard: {
+    docType: string;
+    about: string;
+    bestFor: string[];
+    evidenceKinds: string[];
+    notFor: string[];
+  };
+  queryHints: string[];
   model: string;
 }> {
   const DIGEST_NODE = 'generateDigest';
@@ -99,10 +113,18 @@ export async function runKBDigestGraph(input: {
         : 'Document sample:\n(unavailable)';
 
       const prompt = [
-        'Generate a lightweight retrieval digest for one document.',
-        'Keep it short, practical, and retrieval-oriented.',
+        'Generate retrieval metadata for one document.',
+        'This metadata will be used as a bookshelf card and query-planning hint for document routing.',
+        'The input may be a book, transcript, report, essay, article, notes, or mixed material. Identify the kind of document and adapt accordingly.',
         'Output JSON only with keys:',
-        'topics (3-8), entities (3-12), lexicalAnchors (3-12), styleAnchors (3-8), digestSummary (<=240 chars).',
+        'documentCard and queryHints.',
+        'documentCard.docType: short label for the document kind.',
+        'documentCard.about: 1-3 sentence retrieval-oriented description of what the document is and what it covers.',
+        'documentCard.bestFor: 3-6 short prompts describing the kinds of user questions this document is best for.',
+        'documentCard.evidenceKinds: 1-4 short labels such as story, advice, framework, argument, reference, quotes, case_study, biographical.',
+        'documentCard.notFor: 0-4 short prompts describing what this document is not well-suited to answer.',
+        'queryHints: 8-20 short retrieval anchors including names, aliases, recurring phrases, uncommon terms, chapter/program names, and important concepts.',
+        'Keep everything retrieval-oriented rather than literary or descriptive.',
         '',
         `Document name: ${state.displayName}`,
         state.memberSystemPrompt ? `Member style prompt hint: ${state.memberSystemPrompt.slice(0, 500)}` : '',
@@ -113,13 +135,16 @@ export async function runKBDigestGraph(input: {
 
       try {
         const parsed = await invokeStructured(model, prompt, digestSchema);
-        const topics = normalizeKeywordList(parsed.topics ?? [], 8);
-        const entities = normalizeKeywordList(parsed.entities ?? [], 12);
-        const lexicalAnchors = normalizeKeywordList(parsed.lexicalAnchors ?? [], 12);
-        const styleAnchors = normalizeKeywordList(parsed.styleAnchors ?? [], 8);
-        const digestSummary = (parsed.digestSummary ?? '').trim().slice(0, 300);
+        const documentCard = {
+          docType: (parsed.documentCard.docType ?? '').trim().toLowerCase().slice(0, 40) || fallback.documentCard.docType,
+          about: (parsed.documentCard.about ?? '').trim().slice(0, 800) || fallback.documentCard.about,
+          bestFor: normalizeKeywordList(parsed.documentCard.bestFor ?? [], 6),
+          evidenceKinds: normalizeKeywordList(parsed.documentCard.evidenceKinds ?? [], 4),
+          notFor: normalizeKeywordList(parsed.documentCard.notFor ?? [], 4),
+        };
+        const queryHints = normalizeKeywordList(parsed.queryHints ?? [], 20);
 
-        if (!topics.length || !lexicalAnchors.length || !digestSummary) {
+        if (!documentCard.about || !queryHints.length) {
           return {
             digestResult: { ...fallback, model: target.model },
           };
@@ -127,11 +152,14 @@ export async function runKBDigestGraph(input: {
 
         return {
           digestResult: {
-            topics,
-            entities: entities.length ? entities : fallback.entities,
-            lexicalAnchors,
-            styleAnchors: styleAnchors.length ? styleAnchors : fallback.styleAnchors,
-            digestSummary,
+            documentCard: {
+              docType: documentCard.docType,
+              about: documentCard.about,
+              bestFor: documentCard.bestFor.length ? documentCard.bestFor : fallback.documentCard.bestFor,
+              evidenceKinds: documentCard.evidenceKinds.length ? documentCard.evidenceKinds : fallback.documentCard.evidenceKinds,
+              notFor: documentCard.notFor,
+            },
+            queryHints,
             model: target.model,
           },
         };

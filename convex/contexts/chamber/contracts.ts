@@ -34,8 +34,10 @@ export interface ChatWithMemberInput {
   contextMessages?: ContextMessageInput[];
   hallContext?: string;
   chatModel?: string;
-  chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
+  chatProfile?: 'instant' | 'short' | 'think' | 'brainstorm' | 'deep_dive';
   retrievalModel?: string;
+  retrievalStrategy?: 'instant' | 'brainstorm' | 'deep_dive';
+  // Deprecated compatibility alias for older callers and the current retrieval graph.
   retrievalProfile?: 'default' | 'deep_dive';
   turnDirective?: 'shorter' | 'elaborate';
   timeAwareReentry?: TimeAwareReentryDirective;

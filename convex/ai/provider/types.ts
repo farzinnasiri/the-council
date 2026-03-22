@@ -21,14 +21,19 @@ export interface CouncilRouteMemberCandidate {
   systemPrompt?: string;
 }
 
+export interface CouncilKBDocumentCard {
+  docType: string;
+  about: string;
+  bestFor: string[];
+  evidenceKinds: string[];
+  notFor: string[];
+}
+
 export interface CouncilKBDocumentDigestHint {
   displayName: string;
   kbDocumentName?: string;
-  topics: string[];
-  entities: string[];
-  lexicalAnchors: string[];
-  styleAnchors: string[];
-  digestSummary: string;
+  documentCard: CouncilKBDocumentCard;
+  queryHints: string[];
 }
 
 export interface CouncilPersonalArchiveAccess {
@@ -80,8 +85,8 @@ export interface CouncilKnowledgeRetriever {
   retrieve(input: {
     storeName: string;
     query: string;
+    documentNames?: string[];
     limit?: number;
-    metadataFilter?: string;
     traceId: string;
   }): Promise<{
     retrievalText: string;
@@ -100,6 +105,10 @@ export interface ProviderChatResponse {
   usedKnowledgeBase?: boolean;
   usedPersonalArchive?: boolean;
 }
+
+export type ChamberChatProfile = 'instant' | 'short' | 'think' | 'brainstorm' | 'deep_dive';
+export type RetrievalStrategy = 'instant' | 'brainstorm' | 'deep_dive';
+export type LegacyRetrievalProfile = 'default' | 'deep_dive';
 
 export interface CouncilAiProvider {
   routeMembers(input: {
@@ -163,10 +172,11 @@ export interface CouncilAiProvider {
     kbDigests?: CouncilKBDocumentDigestHint[];
     retrievalModel?: string;
     responseModel?: string;
-    chatProfile?: 'instant' | 'short' | 'think' | 'deep_dive';
-    retrievalProfile?: 'default' | 'deep_dive';
+    chatProfile?: ChamberChatProfile;
+    retrievalStrategy?: RetrievalStrategy;
+    // Deprecated compatibility alias for older callers and the current retrieval graph.
+    retrievalProfile?: LegacyRetrievalProfile;
     temperature?: number;
-    metadataFilter?: string;
     personaPrompt?: string;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
@@ -211,11 +221,8 @@ export interface CouncilAiProvider {
     memberSystemPrompt?: string;
     model?: string;
   }): Promise<{
-    topics: string[];
-    entities: string[];
-    lexicalAnchors: string[];
-    styleAnchors: string[];
-    digestSummary: string;
+    documentCard: CouncilKBDocumentCard;
+    queryHints: string[];
     model: string;
   }>;
 

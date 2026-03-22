@@ -56,23 +56,25 @@ export function createKnowledgeRetriever(ctx: ActionCtxLike, memberId: Id<'membe
     retrieve: async ({
       storeName: _storeName,
       query,
+      documentNames,
       limit,
-      metadataFilter: _metadataFilter,
       traceId: _traceId,
     }: {
       storeName: string;
       query: string;
+      documentNames?: string[];
       limit?: number;
-      metadataFilter?: string;
       traceId: string;
     }) => {
       setMainSpanAttributes({
         'knowledge.member_id': String(memberId),
         'knowledge.query.length': query.trim().length,
+        'knowledge.document_filter_count': documentNames?.length ?? 0,
       });
       return await searchMemberChunks(ctx, {
         memberId,
         query,
+        documentNames,
         limit,
       });
     },
@@ -116,10 +118,13 @@ export function toKBDigestHints(rows: KBDigestRow[]): CouncilKBDocumentDigestHin
   return rows.map((item) => ({
     displayName: item.displayName,
     kbDocumentName: item.kbDocumentName,
-    topics: item.topics ?? [],
-    entities: item.entities ?? [],
-    lexicalAnchors: item.lexicalAnchors ?? [],
-    styleAnchors: item.styleAnchors ?? [],
-    digestSummary: item.digestSummary ?? '',
+    documentCard: {
+      docType: item.documentCard?.docType ?? 'other',
+      about: item.documentCard?.about ?? '',
+      bestFor: item.documentCard?.bestFor ?? [],
+      evidenceKinds: item.documentCard?.evidenceKinds ?? [],
+      notFor: item.documentCard?.notFor ?? [],
+    },
+    queryHints: item.queryHints ?? [],
   }));
 }

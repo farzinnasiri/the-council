@@ -31,7 +31,8 @@ const CHAMBER_MODE_OPTIONS: Array<{
   { value: 'instant', label: 'Instant', description: 'Fast default reply', Icon: Zap },
   { value: 'short', label: 'Short', description: 'Concise default reply', Icon: AlignJustify },
   { value: 'think', label: 'Think', description: 'Reason more before replying', Icon: Brain },
-  { value: 'deep_dive', label: 'Deep Dive', description: 'Search broader across member knowledge', Icon: Search },
+  { value: 'brainstorm', label: 'Brainstorm', description: 'Wider, more surprising angles', Icon: Search },
+  { value: 'deep_dive', label: 'Deep Dive', description: 'Explore broadly, then dig into the best paths', Icon: Search },
 ];
 
 export function Composer({

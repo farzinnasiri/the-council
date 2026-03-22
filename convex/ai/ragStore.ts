@@ -150,6 +150,7 @@ export async function searchMemberChunks(
   input: {
     memberId: Id<'members'>;
     query: string;
+    documentNames?: string[];
     limit?: number;
   }
 ): Promise<RAGEvidenceResult> {
@@ -164,11 +165,27 @@ export async function searchMemberChunks(
   }
 
   const limit = Math.min(Math.max(input.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
+  const documentNames = Array.from(
+    new Set(
+      (input.documentNames ?? [])
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  );
+
   const queryEmbedding = await embedText(normalizedQuery);
   const vectorResults = await ctx.vectorSearch('kbDocumentChunks', 'by_embedding', {
     vector: queryEmbedding,
     limit,
-    filter: (q: any) => q.eq('memberId', input.memberId),
+    filter: (q: any) => {
+      if (documentNames.length === 0) {
+        return q.eq('memberId', input.memberId);
+      }
+      if (documentNames.length === 1) {
+        return q.eq('kbDocumentName', documentNames[0]);
+      }
+      return q.or(...documentNames.map((documentName) => q.eq('kbDocumentName', documentName)));
+    },
   });
 
   return (await ctx.runQuery('kbDocumentChunks:hydrateVectorResults', {

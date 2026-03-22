@@ -1,3 +1,11 @@
+export interface KBDocumentCard {
+  docType: string;
+  about: string;
+  bestFor: string[];
+  evidenceKinds: string[];
+  notFor: string[];
+}
+
 export interface Citation {
   title: string;
   uri?: string;
@@ -6,11 +14,8 @@ export interface Citation {
 export interface KBDocumentDigestHint {
   displayName: string;
   kbDocumentName?: string;
-  topics: string[];
-  entities: string[];
-  lexicalAnchors: string[];
-  styleAnchors: string[];
-  digestSummary: string;
+  documentCard: KBDocumentCard;
+  queryHints: string[];
 }
 
 export interface ContextMessage {
@@ -28,8 +33,8 @@ export interface KnowledgeRetriever {
   retrieve(input: {
     storeName: string;
     query: string;
+    documentNames?: string[];
     limit?: number;
-    metadataFilter?: string;
     traceId: string;
   }): Promise<{
     retrievalText: string;
@@ -37,14 +42,4 @@ export interface KnowledgeRetriever {
     snippets: GroundedSnippet[];
     grounded: boolean;
   }>;
-}
-
-export interface QueryPlanDebug {
-  originalQuery: string;
-  standaloneQuery: string;
-  queryAlternates: string[];
-  deepDiveQueries?: string[];
-  gateUsed: boolean;
-  gateReason: string;
-  matchedDigestSignals: string[];
 }

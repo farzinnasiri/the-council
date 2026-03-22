@@ -21,6 +21,7 @@ import type {
   PersonalArchiveCapturePreview,
   PersonalArchiveEntry,
   PersonalArchiveProfile,
+  RetrievalStrategy,
   ThemeMode,
   TimeAwareReentryGapBucket,
   User,
@@ -1167,7 +1168,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
     hallContext?: string;
     chatProfile?: ChamberResponseMode;
-    retrievalProfile?: 'default' | 'deep_dive';
+    retrievalStrategy?: RetrievalStrategy;
     turnDirective?: 'shorter' | 'elaborate';
     timeAwareReentry?: {
       gapBucket: TimeAwareReentryGapBucket;
@@ -1185,8 +1186,9 @@ class ConvexCouncilRepository implements CouncilRepository {
       previousSummary: input.previousSummary,
       contextMessages: input.contextMessages,
       hallContext: input.hallContext,
-      chatProfile: input.chatProfile,
-      retrievalProfile: input.retrievalProfile,
+      chatProfile: input.chatProfile === 'brainstorm' ? 'instant' : input.chatProfile,
+      retrievalStrategy: input.retrievalStrategy,
+      retrievalProfile: input.retrievalStrategy === 'deep_dive' ? 'deep_dive' : 'default',
       turnDirective: input.turnDirective,
       timeAwareReentry: input.timeAwareReentry,
       guidanceDirectives: input.guidanceDirectives,
@@ -1425,11 +1427,14 @@ class ConvexCouncilRepository implements CouncilRepository {
       memberId: row.memberId as string,
       kbDocumentName: row.kbDocumentName as string | undefined,
       displayName: row.displayName as string,
-      topics: (row.topics ?? []) as string[],
-      entities: (row.entities ?? []) as string[],
-      lexicalAnchors: (row.lexicalAnchors ?? []) as string[],
-      styleAnchors: (row.styleAnchors ?? []) as string[],
-      digestSummary: (row.digestSummary ?? '') as string,
+      documentCard: {
+        docType: (row.documentCard?.docType ?? 'other') as string,
+        about: (row.documentCard?.about ?? '') as string,
+        bestFor: (row.documentCard?.bestFor ?? []) as string[],
+        evidenceKinds: (row.documentCard?.evidenceKinds ?? []) as string[],
+        notFor: (row.documentCard?.notFor ?? []) as string[],
+      },
+      queryHints: (row.queryHints ?? []) as string[],
       updatedAt: row.updatedAt as number,
     }));
   }
@@ -1437,20 +1442,20 @@ class ConvexCouncilRepository implements CouncilRepository {
   async updateMemberDigestMetadata(input: {
     digestId: string;
     displayName: string;
-    topics: string[];
-    entities: string[];
-    lexicalAnchors: string[];
-    styleAnchors: string[];
-    digestSummary: string;
+    documentCard: {
+      docType: string;
+      about: string;
+      bestFor: string[];
+      evidenceKinds: string[];
+      notFor: string[];
+    };
+    queryHints: string[];
   }): Promise<{ ok: boolean }> {
     await this.client.mutation(api.kbDigests.updateDigestMetadata as any, {
       digestId: input.digestId as Id<'kbDocumentDigests'>,
       displayName: input.displayName,
-      topics: input.topics,
-      entities: input.entities,
-      lexicalAnchors: input.lexicalAnchors,
-      styleAnchors: input.styleAnchors,
-      digestSummary: input.digestSummary,
+      documentCard: input.documentCard,
+      queryHints: input.queryHints,
       updatedAt: Date.now(),
     });
     return { ok: true };
