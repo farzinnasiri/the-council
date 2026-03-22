@@ -63,9 +63,9 @@ export function NotebooksPage() {
   }
 
   return (
-    <div className="h-full overflow-hidden bg-background">
+    <div className="h-full min-w-0 overflow-hidden bg-background">
       <div className="grid h-full min-h-0 md:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="border-r border-border">
+        <aside className="min-w-0 border-r border-border">
           <div className="border-b border-border px-4 py-4">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <NotebookPen className="h-4 w-4 text-muted-foreground" />
@@ -76,7 +76,7 @@ export function NotebooksPage() {
             </p>
           </div>
 
-          <div className="h-[calc(100%-73px)] overflow-y-auto p-2">
+          <div className="h-[calc(100%-73px)] overflow-x-hidden overflow-y-auto p-2">
             {notebooks.length === 0 ? (
               <div className="px-2 py-4 text-sm text-muted-foreground">
                 No notebooks yet.
@@ -91,12 +91,12 @@ export function NotebooksPage() {
                       to={`/notebooks/${conversation.id}`}
                       className={({ isActive }) =>
                         cn(
-                          'rounded-md border border-transparent px-3 py-2 text-sm transition-colors hover:bg-muted',
+                          'block min-w-0 rounded-md border border-transparent px-3 py-2 text-sm transition-colors hover:bg-muted',
                           isActive && 'border-border bg-muted'
                         )
                       }
                     >
-                      <div className="truncate font-medium">{conversation.title}</div>
+                      <div className="whitespace-normal break-words font-medium leading-5">{conversation.title}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{meta.detail}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{formatSessionTime(notebook.updatedAt)}</div>
                     </NavLink>
@@ -107,7 +107,7 @@ export function NotebooksPage() {
           </div>
         </aside>
 
-        <section className="flex min-h-0 bg-background">
+        <section className="flex min-h-0 min-w-0 overflow-x-hidden bg-background">
           {conversationId && selectedConversation ? (
             <ConversationNotebookEditor
               conversationId={conversationId}
