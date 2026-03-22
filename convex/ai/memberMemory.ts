@@ -104,7 +104,7 @@ export const refreshMemberMemoryPair = internalAction({
         episodes.push({
           title: episode.title,
           body: episode.body,
-          embedding: await embedText(buildEpisodeEmbeddingInput(episode)),
+          embedding: await embedText(buildEpisodeEmbeddingInput(episode), { source: 'episode_index' }),
           lastProcessedMessageAt: evidence.latestMessageAt,
         });
       }
@@ -181,7 +181,7 @@ export const reindexEpisode = internalAction({
     }
     const nextTitle = args.patch.title !== undefined ? args.patch.title?.trim() : current.title;
     const nextBody = args.patch.body !== undefined ? args.patch.body.trim() : current.body;
-    const embedding = await embedText(buildEpisodeEmbeddingInput({ title: nextTitle, body: nextBody }));
+    const embedding = await embedText(buildEpisodeEmbeddingInput({ title: nextTitle, body: nextBody }), { source: 'episode_index' });
     await ctx.runMutation(internal.memberMemories.patchEpisodeInternal, {
       episodeId: args.episodeId,
       title: nextTitle,

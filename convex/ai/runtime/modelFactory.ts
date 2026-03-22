@@ -6,6 +6,10 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { ModelTarget } from '../modelConfig';
 import { wideEventError } from '../../observability/errors';
 
+function shouldForceResponsesApi(target: ModelTarget): boolean {
+  return target.provider === 'openai' && target.model.startsWith('gpt-5');
+}
+
 function resolveOpenAiKey(): string {
   const key = process.env.OPENAI_KEY ?? process.env.OPENAI_API_KEY;
   if (!key) {
@@ -31,11 +35,13 @@ export function createChatModel(
 ): BaseChatModel {
   const temperature = options?.temperature;
   if (target.provider === 'openai') {
+    const useResponsesApi = shouldForceResponsesApi(target);
     // GPT-5.2 chat models in this project deployment currently reject custom temperature values.
     // Let the provider use its model default instead of forcing a value.
     return new ChatOpenAI({
       apiKey: resolveOpenAiKey(),
       model: target.model,
+      useResponsesApi,
     });
   }
 

@@ -173,7 +173,7 @@ export async function searchMemberChunks(
     ),
   );
 
-  const queryEmbedding = await embedText(normalizedQuery);
+  const queryEmbedding = await embedText(normalizedQuery, { source: 'kb_query' });
   const vectorResults = await ctx.vectorSearch('kbDocumentChunks', 'by_embedding', {
     vector: queryEmbedding,
     limit,

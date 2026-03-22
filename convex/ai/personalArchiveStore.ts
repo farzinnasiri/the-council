@@ -105,7 +105,7 @@ export async function searchPersonalArchiveChunks(
     };
   }
 
-  const queryEmbedding = await embedText(input.query.trim());
+  const queryEmbedding = await embedText(input.query.trim(), { source: 'archive_query' });
   const vectorResults = await ctx.vectorSearch('personalArchiveChunks', 'by_embedding', {
     vector: queryEmbedding,
     limit: Math.max(input.limit ?? ARCHIVE_VECTOR_PROBE_LIMIT, ARCHIVE_VECTOR_PROBE_LIMIT),

@@ -10,6 +10,7 @@ import { defaultPersonalArchiveAccess } from '../../../personalArchiveShared';
 import { setMainSpanAttributes } from '../../../observability/wideEvents';
 import { wideEventError } from '../../../observability/errors';
 import { embedText } from '../../../ai/openaiEmbeddings';
+import { buildEpisodeRetrievalQuery } from '../../../ai/retrievalQueries';
 
 const COMPACTION_THRESHOLD_KEY = 'compaction-threshold';
 const COMPACTION_RECENT_RAW_TAIL_KEY = 'compaction-recent-raw-tail';
@@ -135,11 +136,12 @@ async function loadRelevantEpisodes(ctx: any, input: {
   query: string;
   contextMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
 }) {
-  const queryText = [input.query.trim(), ...input.contextMessages.slice(-4).map((message) => message.content.trim())]
-    .filter(Boolean)
-    .join('\n\n');
+  const queryText = buildEpisodeRetrievalQuery({
+    query: input.query,
+    contextMessages: input.contextMessages,
+  });
   if (!queryText.trim()) return [];
-  const vector = await embedText(queryText);
+  const vector = await embedText(queryText, { source: 'chamber_episode_query' });
   const vectorResults = await ctx.vectorSearch('memberUserEpisodes', 'by_embedding', {
     vector,
     limit: 6,

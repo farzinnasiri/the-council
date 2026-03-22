@@ -12,6 +12,12 @@ import { modelRegistry } from '../runtime/modelRegistry';
 import { createChatModel } from '../runtime/modelFactory';
 import { formatContextMessages } from '../runtime/messages';
 import { invokeStructured, invokeText } from '../runtime/structured';
+import {
+  MAX_RETRIEVAL_QUERY_CHARS,
+  MAX_RETRIEVAL_QUERY_WORDS,
+  normalizeRetrievalQuery,
+  sanitizeRetrievalQuery,
+} from '../retrievalQueries';
 import type { Citation, ContextMessage, GroundedSnippet, KBDocumentDigestHint, KnowledgeRetriever } from './types';
 import { getMainTraceId, setMainSpanAttributes } from '../../observability/wideEvents';
 
@@ -142,7 +148,7 @@ const retrievalTurnSchema = z.object({
         rationale: z.string().default(''),
       }),
     )
-    .max(5)
+    .max(12)
     .default([]),
 });
 
@@ -171,10 +177,6 @@ function bucketDescriptions(buckets: ArchiveBucket[]): string {
 
 function clipText(text: string | undefined, maxChars: number): string {
   return (text ?? '').trim().replace(/\s+/g, ' ').slice(0, maxChars).trim();
-}
-
-function normalizeQuery(query: string): string {
-  return query.trim().replace(/\s+/g, ' ');
 }
 
 function formatPlannerConversation(messages: ContextMessage[], limit = 8): string {
@@ -208,7 +210,7 @@ function dedupeQueries(queries: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const query of queries) {
-    const normalized = normalizeQuery(query);
+    const normalized = sanitizeRetrievalQuery(query);
     if (!normalized) continue;
     const key = normalized.toLowerCase();
     if (seen.has(key)) continue;
@@ -482,43 +484,20 @@ function selectQueryVariants(
 }
 
 function buildKnowledgeQueries(
-  input: MemberChatInput,
   plan: RetrievalTurnPlan,
-  route: KnowledgeRoutePlan,
   strategyConfig: ResolvedRetrievalStrategyConfig,
   strategy: RetrievalStrategy,
   budget: number,
 ): string[] {
   const selectedVariants = selectQueryVariants(plan, 'knowledge_base', strategyConfig, strategy, budget);
-  const topic = normalizeQuery(plan.activeTopic || input.query);
-  const hintText = route.hintTerms.slice(0, 8).join(', ');
-  const targetDocs = route.selectedDisplayNames.slice(0, 2).join(', ');
-  const plannedQueries = selectedVariants.map((variant) => variant.query);
-  const secondaryQuery = buildSecondaryKnowledgeQuery(plan.turnType, topic || normalizeQuery(input.query));
-  const candidates = [
-    route.mode === 'targeted' && hintText
-      ? `${buildContextualFallbackQuery(input)}\nRelevant document hints: ${hintText}`
-      : '',
-    ...plannedQueries,
-    route.mode === 'targeted' && hintText && topic
-      ? `${topic}; related concepts and names: ${hintText}`
-      : '',
-    route.mode === 'targeted' && hintText && secondaryQuery
-      ? `${secondaryQuery}; related concepts: ${hintText}`
-      : '',
-    route.mode === 'targeted' && targetDocs && topic
-      ? `material from ${targetDocs} about ${topic}`
-      : '',
-    buildContextualFallbackQuery(input),
-  ];
-  return dedupeQueries(candidates).slice(0, budget);
+  return dedupeQueries(selectedVariants.map((variant) => variant.query)).slice(0, budget);
 }
 
 function dedupeQueryVariants(variants: PlannedQueryVariant[]): PlannedQueryVariant[] {
   const seen = new Set<string>();
   const out: PlannedQueryVariant[] = [];
   for (const variant of variants) {
-    const query = normalizeQuery(variant.query);
+    const query = sanitizeRetrievalQuery(variant.query);
     if (!query) continue;
     const key = `${variant.source}::${variant.family}::${query.toLowerCase()}`;
     if (seen.has(key)) continue;
@@ -555,14 +534,6 @@ function looksLikeContinuationTurn(query: string): boolean {
   );
 }
 
-function hasPersonalArchiveSignal(query: string): boolean {
-  const normalized = query.toLowerCase();
-  return (
-    /\b(i|me|my|myself)\b/.test(normalized) ||
-    /\b(about me|my pattern|my patterns|my history|my background|hold me accountable|remind me)\b/.test(normalized)
-  );
-}
-
 function inferFallbackTurnType(query: string): RetrievalTurnType {
   const normalized = query.toLowerCase();
   if (looksLikeStyleOnlyTurn(normalized)) return 'style_only';
@@ -586,28 +557,8 @@ function findRecentTopic(messages: ContextMessage[], memoryHint?: string): strin
   return clipText(memoryHint, 180);
 }
 
-function buildContextualFallbackQuery(input: MemberChatInput): string {
-  const current = normalizeQuery(input.query);
-  if (!current) return '';
-  const recent = input.contextMessages ?? [];
-  const reversed = [...recent].reverse();
-  const previousAssistant = reversed.find((message) => message.role === 'assistant');
-  const previousUser = reversed.find((message) => message.role === 'user');
-  const queryLooksVague = current.split(/\s+/).length <= 8 || /^(so|and|then|now|what|how|has|have|can|should)\b/i.test(current);
-  if (!queryLooksVague) {
-    return current;
-  }
-  const parts = [
-    previousUser ? `User context: ${clipText(previousUser.content, 220)}` : '',
-    previousAssistant ? `Assistant context: ${clipText(previousAssistant.content, 220)}` : '',
-    input.memoryHint && !previousUser && !previousAssistant ? `Thread memory: ${clipText(input.memoryHint, 220)}` : '',
-    `Current need: ${current}`,
-  ].filter(Boolean);
-  return parts.join('\n');
-}
-
 function buildSecondaryKnowledgeQuery(turnType: RetrievalTurnType, topic: string): string {
-  const normalizedTopic = normalizeQuery(topic);
+  const normalizedTopic = normalizeRetrievalQuery(topic);
   if (!normalizedTopic) return '';
   switch (turnType) {
     case 'autobiographical':
@@ -623,17 +574,7 @@ function buildSecondaryKnowledgeQuery(turnType: RetrievalTurnType, topic: string
   }
 }
 
-function buildFallbackArchiveQuery(topic: string, input: MemberChatInput): string {
-  const normalizedTopic = normalizeQuery(topic || input.query);
-  if (!normalizedTopic) return '';
-  return `user background, patterns, reflections, or accountability context about ${normalizedTopic}`;
-}
-
-function buildFallbackTurnPlan(input: MemberChatInput, context: {
-  docsCount: number;
-  availableArchiveBuckets: ArchiveBucket[];
-  knowledgeAvailable: boolean;
-}): RetrievalTurnPlan {
+function buildFallbackTurnPlan(input: MemberChatInput): RetrievalTurnPlan {
   if (input.turnDirective === 'shorter' || looksLikeStyleOnlyTurn(input.query)) {
     return {
       turnType: 'style_only',
@@ -657,41 +598,7 @@ function buildFallbackTurnPlan(input: MemberChatInput, context: {
   }
 
   const turnType = inferFallbackTurnType(input.query);
-  const activeTopic = findRecentTopic(input.contextMessages ?? [], input.memoryHint) || normalizeQuery(input.query);
-  const queryVariants: PlannedQueryVariant[] = [];
-
-  if (context.knowledgeAvailable) {
-    const primary = buildContextualFallbackQuery(input);
-    if (primary) {
-      queryVariants.push({
-        source: 'knowledge_base',
-        family: 'anchor',
-        query: primary,
-        rationale: 'contextual-primary',
-      });
-    }
-    const secondary = buildSecondaryKnowledgeQuery(turnType, activeTopic);
-    if (secondary) {
-      queryVariants.push({
-        source: 'knowledge_base',
-        family: turnType === 'autobiographical' ? 'autobiographical' : turnType === 'tactical' ? 'tactical' : 'thematic',
-        query: secondary,
-        rationale: 'fallback-secondary-angle',
-      });
-    }
-  }
-
-  if (context.availableArchiveBuckets.length > 0 && hasPersonalArchiveSignal(input.query)) {
-    const archiveQuery = buildFallbackArchiveQuery(activeTopic, input);
-    if (archiveQuery) {
-      queryVariants.push({
-        source: 'personal_archive',
-        family: 'archive_personal',
-        query: archiveQuery,
-        rationale: 'personal-context-fallback',
-      });
-    }
-  }
+  const activeTopic = findRecentTopic(input.contextMessages ?? [], input.memoryHint) || normalizeRetrievalQuery(input.query);
 
   return {
     turnType,
@@ -699,7 +606,7 @@ function buildFallbackTurnPlan(input: MemberChatInput, context: {
     responseDirective: 'normal',
     reason: 'fallback-turn-plan',
     skipRetrieval: false,
-    queryVariants: dedupeQueryVariants(queryVariants),
+    queryVariants: [],
   };
 }
 
@@ -849,11 +756,13 @@ function buildPlannerPrompt(
           'The user input is very long.',
           'Cover multiple parts of the message instead of collapsing everything into one narrow query.',
           'Use more distinct retrieval angles when they are justified by different parts of the message.',
+          `Produce ${strategyConfig.maxKnowledgeQueries} distinct concise knowledge_base queries if KB is available and KB is not disabled.`,
         ]
       : strategyConfig.lengthBucket === 'long'
         ? [
             'The user input is long.',
             'Cover more than one meaningful part of the message if the turn clearly contains multiple ideas.',
+            `Produce ${Math.max(3, strategyConfig.maxKnowledgeQueries - 1)} to ${strategyConfig.maxKnowledgeQueries} distinct concise knowledge_base queries if KB is available and KB is not disabled.`,
           ]
         : [];
 
@@ -866,6 +775,8 @@ function buildPlannerPrompt(
     'Return queryVariants with source, family, query, and rationale.',
     'Valid families are: anchor, tactical, autobiographical, thematic, contrast, adjacent, wildcard, archive_personal.',
     'Use archive_personal only for personal archive queries.',
+    `Each queryVariant.query must be a short retrieval query, not a pasted excerpt. Keep it under ${MAX_RETRIEVAL_QUERY_WORDS} words and under ${MAX_RETRIEVAL_QUERY_CHARS} characters.`,
+    'Never copy the full user message or large spans of user-provided text into a query.',
     'Each queryVariant must target a distinct angle rather than paraphrasing the same search.',
     ...variantGuidance,
     ...lengthGuidance,
@@ -900,11 +811,7 @@ async function planRetrievalTurn(input: MemberChatInput, context: {
   retrievalStrategy: RetrievalStrategy;
   strategyConfig: ResolvedRetrievalStrategyConfig;
 }): Promise<RetrievalTurnPlan> {
-  const fallback = buildFallbackTurnPlan(input, {
-    docsCount: context.docsCount,
-    availableArchiveBuckets: context.availableArchiveBuckets,
-    knowledgeAvailable: context.knowledgeAvailable,
-  });
+  const fallback = buildFallbackTurnPlan(input);
 
   if (fallback.skipRetrieval) {
     return fallback;
@@ -954,18 +861,6 @@ async function planRetrievalTurn(input: MemberChatInput, context: {
 
     if (plan.skipRetrieval) {
       return plan;
-    }
-
-    if (context.knowledgeAvailable && input.knowledgeMode !== 'off' && !plan.queryVariants.some((variant) => variant.source === 'knowledge_base')) {
-      plan.queryVariants = dedupeQueryVariants([
-        ...plan.queryVariants,
-        {
-          source: 'knowledge_base',
-          family: 'anchor',
-          query: buildContextualFallbackQuery(input),
-          rationale: 'fallback-kb-primary',
-        },
-      ]);
     }
 
     if (plan.queryVariants.length === 0) {
@@ -1114,7 +1009,7 @@ function buildSecondPassKnowledgeQueries(input: {
   if (input.budget <= 0) return [];
   const citations = input.knowledgePass.evidence.citations.slice(0, 3).map((citation) => citation.title);
   const snippets = input.knowledgePass.evidence.snippets.slice(0, 2).map((snippet) => clipText(snippet.text, 120));
-  const activeTopic = normalizeQuery(input.planner.activeTopic || input.input.query);
+  const activeTopic = normalizeRetrievalQuery(input.planner.activeTopic || input.input.query);
   const docHints = input.selectedDisplayNames.slice(0, 2).join(', ');
   const candidates = [
     [activeTopic, citations.join(', ')].filter(Boolean).join('; strongest evidence: '),
@@ -1168,7 +1063,8 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     strategyConfig,
   });
 
-  const runKnowledge = !planner.skipRetrieval && input.knowledgeMode !== 'off' && knowledgeAvailable;
+  const knowledgeRequested = planner.queryVariants.some((variant) => variant.source === 'knowledge_base');
+  const runKnowledge = !planner.skipRetrieval && input.knowledgeMode !== 'off' && knowledgeAvailable && knowledgeRequested;
   const knowledgeRoute = runKnowledge
     ? buildKnowledgeRoute(input, planner, strategyConfig, effectiveRetrievalStrategy)
     : {
@@ -1187,17 +1083,12 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
   let knowledgeQueries =
     runKnowledge && (knowledgeRoute.mode !== 'broad' || strategyConfig.allowBroadFallback)
       ? buildKnowledgeQueries(
-          input,
           planner,
-          knowledgeRoute,
           strategyConfig,
           effectiveRetrievalStrategy,
           strategyConfig.maxKnowledgeQueries,
         )
       : [];
-  if (runKnowledge && knowledgeQueries.length === 0) {
-    knowledgeQueries = [buildContextualFallbackQuery(input)].filter(Boolean);
-  }
 
   const archiveQueries = runArchive
     ? selectQueryVariants(
@@ -1242,7 +1133,7 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
           pass: undefined as RetrievePass | undefined,
           queries: [] as string[],
           passes: [] as RetrievePass[],
-        }),
+      }),
   ]);
 
   const knowledgePass = knowledgeResult.pass;

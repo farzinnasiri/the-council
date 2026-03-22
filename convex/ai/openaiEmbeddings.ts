@@ -22,14 +22,17 @@ const embeddings = new OpenAIEmbeddings({
   dimensions: OPENAI_EMBEDDING_DIMENSIONS,
 });
 
-export async function embedText(text: string): Promise<number[]> {
+export async function embedText(text: string, options?: { source?: string }): Promise<number[]> {
   const input = text.trim();
   if (!input) {
     throw wideEventError('embedding-input-empty', 'Cannot embed empty text');
   }
 
   incrementMainStat('stats.embedding.query.count', 1);
-  setMainSpanAttributes({ 'embedding.model': OPENAI_EMBEDDING_MODEL });
+  setMainSpanAttributes({
+    'embedding.model': OPENAI_EMBEDDING_MODEL,
+    'embedding.source': options?.source ?? 'unknown',
+  });
   const embedding = await measureMainStage('embedding.query', async () => await embeddings.embedQuery(input));
   if (!Array.isArray(embedding) || embedding.length === 0) {
     throw wideEventError('embedding-response-missing-vector', 'OpenAI embeddings response missing embedding vector');
