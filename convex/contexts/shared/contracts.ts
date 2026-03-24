@@ -14,6 +14,11 @@ export const stagedUploadInputValidator = v.object({
   sizeBytes: v.optional(v.number()),
 });
 
+export const kbChunkConfigValidator = v.object({
+  chunkSizeChars: v.number(),
+  chunkOverlapChars: v.number(),
+});
+
 export const roundTriggerValidator = v.union(v.literal('user_message'), v.literal('continue'));
 export const roundIntentValidator = v.union(
   v.literal('speak'),

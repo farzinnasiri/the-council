@@ -3,13 +3,14 @@
 import type { Id } from '../_generated/dataModel';
 import { embedText, embedTexts } from './openaiEmbeddings';
 import {
-  CHUNK_OVERLAP,
-  CHUNK_SIZE,
+  type KBChunkConfig,
   EMBEDDING_BATCH_SIZE,
   MAX_INDEXED_CHUNKS,
   SEARCH_LIMIT_DEFAULT,
   SEARCH_LIMIT_MAX,
   UPSERT_BATCH_SIZE,
+  resolveKbChunkConfig,
+  validateKbChunkConfig,
 } from './ragConfig';
 import { wideEventError } from '../observability/errors';
 
@@ -25,14 +26,25 @@ export interface RAGEvidenceResult {
   grounded: boolean;
 }
 
-export function splitIntoChunks(text: string): string[] {
+export function splitIntoChunks(
+  text: string,
+  chunkConfig?: Partial<KBChunkConfig> | null,
+): string[] {
+  const resolvedConfig = resolveKbChunkConfig(chunkConfig);
+  const validationError = validateKbChunkConfig(resolvedConfig);
+  if (validationError) {
+    throw wideEventError('knowledge-chunk-config-invalid', validationError, {
+      statusCode: 400,
+    });
+  }
+
   const out: string[] = [];
   let start = 0;
   while (start < text.length) {
-    const end = Math.min(start + CHUNK_SIZE, text.length);
+    const end = Math.min(start + resolvedConfig.chunkSizeChars, text.length);
     out.push(text.slice(start, end));
     if (end >= text.length) break;
-    start = end - CHUNK_OVERLAP;
+    start = end - resolvedConfig.chunkOverlapChars;
   }
   return out;
 }
@@ -45,6 +57,7 @@ export async function indexDocumentChunks(
     documentName: string;
     displayName: string;
     text: string;
+    chunkConfig?: Partial<KBChunkConfig> | null;
   }
 ): Promise<{ chunkCount: number }> {
   const cleaned = input.text.trim();
@@ -52,7 +65,7 @@ export async function indexDocumentChunks(
     throw wideEventError('knowledge-index-text-missing', `No text to index for "${input.displayName}"`);
   }
 
-  const splitChunks = splitIntoChunks(cleaned);
+  const splitChunks = splitIntoChunks(cleaned, input.chunkConfig);
   if (splitChunks.length > MAX_INDEXED_CHUNKS) {
     throw wideEventError(
       'knowledge-index-too-large',

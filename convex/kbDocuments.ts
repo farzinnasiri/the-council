@@ -1,6 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import { resolveKbChunkConfig } from './ai/ragConfig';
 
 const uploadStatusValidator = v.union(v.literal('uploaded'), v.literal('failed'));
 const stageStatusValidator = v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed'));
@@ -29,11 +30,18 @@ export const createRecord = mutation({
     sizeBytes: v.optional(v.number()),
     kbStoreName: v.string(),
     kbDocumentName: v.string(),
+    chunkSizeChars: v.optional(v.number()),
+    chunkOverlapChars: v.optional(v.number()),
     createdAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
     await assertOwnedMember(ctx, userId, args.memberId);
+
+    const chunkConfig = resolveKbChunkConfig({
+      chunkSizeChars: args.chunkSizeChars,
+      chunkOverlapChars: args.chunkOverlapChars,
+    });
 
     const existing = await ctx.db
       .query('kbDocuments')
@@ -48,6 +56,8 @@ export const createRecord = mutation({
         sizeBytes: args.sizeBytes,
         kbStoreName: args.kbStoreName,
         kbDocumentName: args.kbDocumentName,
+        chunkSizeChars: chunkConfig.chunkSizeChars,
+        chunkOverlapChars: chunkConfig.chunkOverlapChars,
         uploadStatus: 'uploaded',
         updatedAt: Date.now(),
       });
@@ -64,6 +74,8 @@ export const createRecord = mutation({
       sizeBytes: args.sizeBytes,
       kbStoreName: args.kbStoreName,
       kbDocumentName: args.kbDocumentName,
+      chunkSizeChars: chunkConfig.chunkSizeChars,
+      chunkOverlapChars: chunkConfig.chunkOverlapChars,
       uploadStatus: 'uploaded',
       chunkingStatus: 'pending',
       indexingStatus: 'pending',
@@ -82,6 +94,8 @@ export const patchRecord = mutation({
     chunkingStatus: v.optional(stageStatusValidator),
     indexingStatus: v.optional(stageStatusValidator),
     metadataStatus: v.optional(stageStatusValidator),
+    chunkSizeChars: v.optional(v.number()),
+    chunkOverlapChars: v.optional(v.number()),
     chunkCountTotal: v.optional(v.number()),
     chunkCountIndexed: v.optional(v.number()),
     ingestErrorChunking: v.optional(v.string()),
@@ -102,17 +116,19 @@ export const patchRecord = mutation({
     }
 
     await ctx.db.patch(args.kbDocumentId, {
-      uploadStatus: args.uploadStatus ?? row.uploadStatus,
-      chunkingStatus: args.chunkingStatus ?? row.chunkingStatus,
-      indexingStatus: args.indexingStatus ?? row.indexingStatus,
-      metadataStatus: args.metadataStatus ?? row.metadataStatus,
-      chunkCountTotal: args.chunkCountTotal ?? row.chunkCountTotal,
-      chunkCountIndexed: args.chunkCountIndexed ?? row.chunkCountIndexed,
-      ingestErrorChunking: args.ingestErrorChunking ?? row.ingestErrorChunking,
-      ingestErrorIndexing: args.ingestErrorIndexing ?? row.ingestErrorIndexing,
-      ingestErrorMetadata: args.ingestErrorMetadata ?? row.ingestErrorMetadata,
-      kbDocumentName: args.kbDocumentName ?? row.kbDocumentName,
-      updatedAt: args.updatedAt ?? Date.now(),
+      uploadStatus: 'uploadStatus' in args ? args.uploadStatus : row.uploadStatus,
+      chunkingStatus: 'chunkingStatus' in args ? args.chunkingStatus : row.chunkingStatus,
+      indexingStatus: 'indexingStatus' in args ? args.indexingStatus : row.indexingStatus,
+      metadataStatus: 'metadataStatus' in args ? args.metadataStatus : row.metadataStatus,
+      chunkSizeChars: 'chunkSizeChars' in args ? args.chunkSizeChars : row.chunkSizeChars,
+      chunkOverlapChars: 'chunkOverlapChars' in args ? args.chunkOverlapChars : row.chunkOverlapChars,
+      chunkCountTotal: 'chunkCountTotal' in args ? args.chunkCountTotal : row.chunkCountTotal,
+      chunkCountIndexed: 'chunkCountIndexed' in args ? args.chunkCountIndexed : row.chunkCountIndexed,
+      ingestErrorChunking: 'ingestErrorChunking' in args ? args.ingestErrorChunking : row.ingestErrorChunking,
+      ingestErrorIndexing: 'ingestErrorIndexing' in args ? args.ingestErrorIndexing : row.ingestErrorIndexing,
+      ingestErrorMetadata: 'ingestErrorMetadata' in args ? args.ingestErrorMetadata : row.ingestErrorMetadata,
+      kbDocumentName: 'kbDocumentName' in args ? args.kbDocumentName : row.kbDocumentName,
+      updatedAt: 'updatedAt' in args ? args.updatedAt : Date.now(),
     });
 
     return null;
@@ -242,6 +258,8 @@ export const patchRecordInternal = internalMutation({
     chunkingStatus: v.optional(stageStatusValidator),
     indexingStatus: v.optional(stageStatusValidator),
     metadataStatus: v.optional(stageStatusValidator),
+    chunkSizeChars: v.optional(v.number()),
+    chunkOverlapChars: v.optional(v.number()),
     chunkCountTotal: v.optional(v.number()),
     chunkCountIndexed: v.optional(v.number()),
     ingestErrorChunking: v.optional(v.string()),
@@ -258,19 +276,21 @@ export const patchRecordInternal = internalMutation({
     if (!row) return null;
 
     await ctx.db.patch(args.kbDocumentId, {
-      uploadStatus: args.uploadStatus ?? row.uploadStatus,
-      chunkingStatus: args.chunkingStatus ?? row.chunkingStatus,
-      indexingStatus: args.indexingStatus ?? row.indexingStatus,
-      metadataStatus: args.metadataStatus ?? row.metadataStatus,
-      chunkCountTotal: args.chunkCountTotal ?? row.chunkCountTotal,
-      chunkCountIndexed: args.chunkCountIndexed ?? row.chunkCountIndexed,
-      ingestErrorChunking: args.ingestErrorChunking ?? row.ingestErrorChunking,
-      ingestErrorIndexing: args.ingestErrorIndexing ?? row.ingestErrorIndexing,
-      ingestErrorMetadata: args.ingestErrorMetadata ?? row.ingestErrorMetadata,
-      kbDocumentName: args.kbDocumentName ?? row.kbDocumentName,
-      status: args.status ?? row.status,
-      deletedAt: args.deletedAt ?? row.deletedAt,
-      updatedAt: args.updatedAt ?? Date.now(),
+      uploadStatus: 'uploadStatus' in args ? args.uploadStatus : row.uploadStatus,
+      chunkingStatus: 'chunkingStatus' in args ? args.chunkingStatus : row.chunkingStatus,
+      indexingStatus: 'indexingStatus' in args ? args.indexingStatus : row.indexingStatus,
+      metadataStatus: 'metadataStatus' in args ? args.metadataStatus : row.metadataStatus,
+      chunkSizeChars: 'chunkSizeChars' in args ? args.chunkSizeChars : row.chunkSizeChars,
+      chunkOverlapChars: 'chunkOverlapChars' in args ? args.chunkOverlapChars : row.chunkOverlapChars,
+      chunkCountTotal: 'chunkCountTotal' in args ? args.chunkCountTotal : row.chunkCountTotal,
+      chunkCountIndexed: 'chunkCountIndexed' in args ? args.chunkCountIndexed : row.chunkCountIndexed,
+      ingestErrorChunking: 'ingestErrorChunking' in args ? args.ingestErrorChunking : row.ingestErrorChunking,
+      ingestErrorIndexing: 'ingestErrorIndexing' in args ? args.ingestErrorIndexing : row.ingestErrorIndexing,
+      ingestErrorMetadata: 'ingestErrorMetadata' in args ? args.ingestErrorMetadata : row.ingestErrorMetadata,
+      kbDocumentName: 'kbDocumentName' in args ? args.kbDocumentName : row.kbDocumentName,
+      status: 'status' in args ? args.status : row.status,
+      deletedAt: 'deletedAt' in args ? args.deletedAt : row.deletedAt,
+      updatedAt: 'updatedAt' in args ? args.updatedAt : Date.now(),
     });
     return null;
   },

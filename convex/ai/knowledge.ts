@@ -5,7 +5,7 @@ import { api } from '../_generated/api';
 import { v } from 'convex/values';
 import type { Doc, Id } from '../_generated/dataModel';
 import type { ActionCtx } from '../_generated/server';
-import { stagedUploadInputValidator } from '../contexts/shared/contracts';
+import { kbChunkConfigValidator, stagedUploadInputValidator } from '../contexts/shared/contracts';
 import { ensureMemberKnowledgeStoreUseCase } from '../contexts/knowledge/application/ensureMemberKnowledgeStore';
 import { uploadMemberDocumentsUseCase } from '../contexts/knowledge/application/uploadMemberDocuments';
 import { listMemberKnowledgeDocumentsUseCase } from '../contexts/knowledge/application/listMemberKnowledgeDocuments';
@@ -18,6 +18,7 @@ import { createKnowledgeAiProvider } from '../contexts/knowledge/infrastructure/
 import { KB_RETENTION_MS, ensureMemberStore } from './kbIngest';
 import { extractTextFromStorage } from './ragExtraction';
 import { deleteDocumentChunks, indexDocumentChunks, splitIntoChunks } from './ragStore';
+import { resolveKbChunkConfig, validateKbChunkConfig } from './ragConfig';
 import { sanitizeLabel } from './graphs/utils';
 import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
 import { wideEventError } from '../observability/errors';
@@ -70,6 +71,19 @@ function buildDocumentName(storeName: string, file: { displayName: string; stora
   return `${storeName}/documents/${display}-${suffix || 'file'}`;
 }
 
+function requireValidKbChunkConfig(
+  input?: { chunkSizeChars?: number; chunkOverlapChars?: number } | null,
+) {
+  const chunkConfig = resolveKbChunkConfig(input);
+  const validationError = validateKbChunkConfig(chunkConfig);
+  if (validationError) {
+    throw wideEventError('knowledge-chunk-config-invalid', validationError, {
+      statusCode: 400,
+    });
+  }
+  return chunkConfig;
+}
+
 async function processKbDocumentLifecycle(
   ctx: ActionCtx,
   kbDocumentId: Id<'kbDocuments'>,
@@ -88,6 +102,10 @@ async function processKbDocumentLifecycle(
   }
 
   await requireOwnedMember(ctx, row.memberId);
+  const chunkConfig = requireValidKbChunkConfig({
+    chunkSizeChars: row.chunkSizeChars,
+    chunkOverlapChars: row.chunkOverlapChars,
+  });
 
   const runIndex = mode !== 'metadata-only';
   const runMetadata = mode !== 'index-only';
@@ -137,10 +155,11 @@ async function processKbDocumentLifecycle(
         });
 
         try {
-          const chunkCountTotal = splitIntoChunks(extractedText).length;
+          const chunkCountTotal = splitIntoChunks(extractedText, chunkConfig).length;
           await ctx.runMutation(api.kbDocuments.patchRecord as any, {
             kbDocumentId,
             chunkCountTotal,
+            chunkCountIndexed: undefined,
             chunkingStatus: 'completed',
             indexingStatus: 'running',
           });
@@ -151,6 +170,7 @@ async function processKbDocumentLifecycle(
             documentName: row.kbDocumentName,
             displayName: row.displayName,
             text: extractedText,
+            chunkConfig,
           });
 
           await ctx.runMutation(api.kbDocuments.patchRecord as any, {
@@ -347,6 +367,7 @@ export const createKbDocumentRecord = action({
   args: {
     memberId: v.id('members'),
     stagedFile: stagedUploadInputValidator,
+    chunkConfig: v.optional(kbChunkConfigValidator),
   },
   handler: observeAction('ai.knowledge.createKbDocumentRecord', async (
     ctx,
@@ -358,6 +379,7 @@ export const createKbDocumentRecord = action({
     });
     const ensured = await ensureMemberStore(ctx, args.memberId);
     const storeName = ensured.storeName;
+    const chunkConfig = requireValidKbChunkConfig(args.chunkConfig);
     const documentName = buildDocumentName(storeName, {
       displayName: args.stagedFile.displayName,
       storageId: args.stagedFile.storageId,
@@ -371,6 +393,8 @@ export const createKbDocumentRecord = action({
       sizeBytes: args.stagedFile.sizeBytes,
       kbStoreName: storeName,
       kbDocumentName: documentName,
+      chunkSizeChars: chunkConfig.chunkSizeChars,
+      chunkOverlapChars: chunkConfig.chunkOverlapChars,
       createdAt: Date.now(),
     })) as Id<'kbDocuments'>;
 
@@ -426,6 +450,54 @@ export const retryKbDocumentMetadata = action({
     ok: true,
     document: await processKbDocumentLifecycle(ctx, args.kbDocumentId, 'metadata-only'),
   })),
+});
+
+export const reprocessKbDocument = action({
+  args: {
+    kbDocumentId: v.id('kbDocuments'),
+    chunkConfig: v.optional(kbChunkConfigValidator),
+  },
+  handler: observeAction('ai.knowledge.reprocessKbDocument', async (
+    ctx,
+    args,
+  ): Promise<{ ok: true; document: KbDocumentRow | null }> => {
+    const row = (await ctx.runQuery(api.kbDocuments.getById as any, {
+      kbDocumentId: args.kbDocumentId,
+      includeDeleted: false,
+    })) as KbDocumentRow | null;
+    if (!row) {
+      throw wideEventError('knowledge-document-not-found', 'KB document not found', {
+        statusCode: 404,
+      });
+    }
+
+    await requireOwnedMember(ctx, row.memberId);
+    const chunkConfig = requireValidKbChunkConfig(
+      args.chunkConfig ?? {
+        chunkSizeChars: row.chunkSizeChars,
+        chunkOverlapChars: row.chunkOverlapChars,
+      },
+    );
+
+    await ctx.runMutation(api.kbDocuments.patchRecord as any, {
+      kbDocumentId: args.kbDocumentId,
+      chunkSizeChars: chunkConfig.chunkSizeChars,
+      chunkOverlapChars: chunkConfig.chunkOverlapChars,
+      chunkingStatus: 'pending',
+      indexingStatus: 'pending',
+      metadataStatus: 'pending',
+      ingestErrorChunking: '',
+      ingestErrorIndexing: '',
+      ingestErrorMetadata: '',
+      chunkCountTotal: undefined,
+      chunkCountIndexed: undefined,
+    });
+
+    return {
+      ok: true,
+      document: await processKbDocumentLifecycle(ctx, args.kbDocumentId, 'all'),
+    };
+  }),
 });
 
 export const listKbDocumentsByMember = action({

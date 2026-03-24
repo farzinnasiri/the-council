@@ -7,8 +7,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../com
 import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
-import type { ChatResponseModelSlotOption, KBDigestMetadata } from '../repository/CouncilRepository';
+import type { ChatResponseModelSlotOption, KbChunkConfig, KBDigestMetadata } from '../repository/CouncilRepository';
 import { DEFAULT_MEMBER_VOICE, describeMemberVoice, MEMBER_VOICE_OPTIONS } from '../constants/memberVoice';
+import {
+  DEFAULT_KB_CHUNK_CONFIG,
+  detectKbChunkPreset,
+  getKbChunkPresetConfig,
+  validateKbChunkConfig,
+} from '../constants/kbChunking';
 import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, MemberVoiceName, PersonalArchiveAccess } from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
 
@@ -79,6 +85,8 @@ export function MembersPage() {
   const kbDeletingDocumentIds = useAppStore((state) => state.kbDeletingDocumentIds);
   const kbRetryingIndexDocumentIds = useAppStore((state) => state.kbRetryingIndexDocumentIds);
   const kbRetryingMetadataDocumentIds = useAppStore((state) => state.kbRetryingMetadataDocumentIds);
+  const kbReprocessingDocumentIds = useAppStore((state) => state.kbReprocessingDocumentIds);
+  const reprocessKbDocumentForMember = useAppStore((state) => state.reprocessKbDocumentForMember);
 
   const [isCreating, setIsCreating] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
@@ -104,6 +112,8 @@ export function MembersPage() {
   const [isSavingDigest, setIsSavingDigest] = useState(false);
   const [isRetryingDigestFromEditor, setIsRetryingDigestFromEditor] = useState(false);
   const [downloadingKbDocumentId, setDownloadingKbDocumentId] = useState<string | null>(null);
+  const [uploadChunkConfig, setUploadChunkConfig] = useState<KbChunkConfig>(DEFAULT_KB_CHUNK_CONFIG);
+  const [docChunkConfigDrafts, setDocChunkConfigDrafts] = useState<Record<string, KbChunkConfig>>({});
   const [memberMemoryBundle, setMemberMemoryBundle] = useState<MemberMemoryBundleState | null>(null);
   const [isMemberMemoryLoading, setIsMemberMemoryLoading] = useState(false);
   const [memberMemoryError, setMemberMemoryError] = useState<string | null>(null);
@@ -138,6 +148,7 @@ export function MembersPage() {
       setKbDigests([]);
       setDigestLoadError(null);
       setKbPanelError(null);
+      setDocChunkConfigDrafts({});
       setMemberMemoryBundle(null);
       setMemberMemoryError(null);
       setIsMemberMemoryDialogOpen(false);
@@ -204,6 +215,8 @@ export function MembersPage() {
     setForm(emptyForm);
     setIsCreating(true);
     setPendingAvatarBlob(null);
+    setUploadChunkConfig(DEFAULT_KB_CHUNK_CONFIG);
+    setDocChunkConfigDrafts({});
     setKbDigests([]);
     setDigestLoadError(null);
     setDigestEditor(null);
@@ -231,6 +244,8 @@ export function MembersPage() {
     });
     setIsCreating(false);
     setPendingAvatarBlob(null);
+    setUploadChunkConfig(DEFAULT_KB_CHUNK_CONFIG);
+    setDocChunkConfigDrafts({});
     setDigestLoadError(null);
     setDigestEditor(null);
     setIsDigestEditorOpen(false);
@@ -253,6 +268,8 @@ export function MembersPage() {
     setKbDigests([]);
     setDigestLoadError(null);
     setKbPanelError(null);
+    setUploadChunkConfig(DEFAULT_KB_CHUNK_CONFIG);
+    setDocChunkConfigDrafts({});
     setDigestEditor(null);
     setIsDigestEditorOpen(false);
     setMemberMemoryBundle(null);
@@ -328,9 +345,15 @@ export function MembersPage() {
       return;
     }
 
+    const configError = validateKbChunkConfig(uploadChunkConfig);
+    if (configError) {
+      setKbPanelError(configError);
+      return;
+    }
+
     setBusyMemberId(editingMemberId);
     try {
-      await uploadDocsForMember(editingMemberId, Array.from(files));
+      await uploadDocsForMember(editingMemberId, Array.from(files), uploadChunkConfig);
       await fetchDocsForMember(editingMemberId);
       const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
       setKbDigests(rows);
@@ -376,6 +399,35 @@ export function MembersPage() {
       setKbPanelError(result.error ?? 'Retry metadata failed');
       return;
     }
+    setKbPanelError(null);
+  };
+
+  const reprocessDocument = async (kbDocumentId: string) => {
+    if (!editingMemberId) return;
+    const lifecycleDoc = editingDocs.find((item) => item.id === kbDocumentId);
+    if (!lifecycleDoc) return;
+
+    const nextConfig = docChunkConfigDrafts[kbDocumentId] ?? lifecycleDoc.chunkConfig;
+    const configError = validateKbChunkConfig(nextConfig);
+    if (configError) {
+      setKbPanelError(configError);
+      return;
+    }
+
+    const result = await reprocessKbDocumentForMember(editingMemberId, kbDocumentId, nextConfig);
+    if (!result.ok) {
+      setKbPanelError(result.error ?? 'Reprocess failed');
+      return;
+    }
+
+    setDocChunkConfigDrafts((current) => {
+      const next = { ...current };
+      delete next[kbDocumentId];
+      return next;
+    });
+    const rows = await convexRepository.listMemberDigestMetadata({ memberId: editingMemberId });
+    setKbDigests(rows);
+    setDigestLoadError(null);
     setKbPanelError(null);
   };
 
@@ -719,6 +771,23 @@ export function MembersPage() {
     if (status === 'running') return 'border-border bg-muted/40 text-sky-400';
     if (status === 'failed') return 'border-border bg-muted/40 text-destructive';
     return 'border-border bg-muted/40 text-muted-foreground';
+  };
+
+  const getDocChunkConfig = (kbDocumentId: string, fallback: KbChunkConfig): KbChunkConfig =>
+    docChunkConfigDrafts[kbDocumentId] ?? fallback;
+
+  const updateDocChunkConfig = (
+    kbDocumentId: string,
+    patch: Partial<KbChunkConfig>,
+    fallback: KbChunkConfig,
+  ) => {
+    setDocChunkConfigDrafts((current) => ({
+      ...current,
+      [kbDocumentId]: {
+        ...getDocChunkConfig(kbDocumentId, fallback),
+        ...patch,
+      },
+    }));
   };
 
   const toggleArchiveAccess = (key: keyof PersonalArchiveAccess) => {
@@ -1120,6 +1189,63 @@ export function MembersPage() {
                     </label>
                   </div>
 
+                  {editingMemberId ? (
+                    <div className="mb-4 rounded-md border border-border/70 bg-muted/20 p-3">
+                      <p className="font-mono text-[11px] font-semibold">Upload chunking defaults</p>
+                      <div className="mt-2 grid gap-2 md:grid-cols-3">
+                        <label className="grid gap-1 text-[11px]">
+                          Preset
+                          <select
+                            className="h-9 rounded-md border border-border bg-background px-2"
+                            value={detectKbChunkPreset(uploadChunkConfig)}
+                            onChange={(event) => {
+                              const preset = event.target.value;
+                              if (preset === 'custom') return;
+                              setUploadChunkConfig(getKbChunkPresetConfig(preset as 'small' | 'default' | 'large'));
+                            }}
+                          >
+                            <option value="small">Small</option>
+                            <option value="default">Default</option>
+                            <option value="large">Large</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                        </label>
+                        <label className="grid gap-1 text-[11px]">
+                          Chunk size
+                          <input
+                            type="number"
+                            min={200}
+                            max={12000}
+                            className="h-9 rounded-md border border-border bg-background px-3"
+                            value={uploadChunkConfig.chunkSizeChars}
+                            onChange={(event) =>
+                              setUploadChunkConfig((current) => ({
+                                ...current,
+                                chunkSizeChars: Number(event.target.value) || 0,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="grid gap-1 text-[11px]">
+                          Overlap
+                          <input
+                            type="number"
+                            min={0}
+                            max={4000}
+                            className="h-9 rounded-md border border-border bg-background px-3"
+                            value={uploadChunkConfig.chunkOverlapChars}
+                            onChange={(event) =>
+                              setUploadChunkConfig((current) => ({
+                                ...current,
+                                chunkOverlapChars: Number(event.target.value) || 0,
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {!editingMemberId ? (
                     <p className="mb-2 text-xs text-muted-foreground">
                       Save this member first, then upload and manage KB documents.
@@ -1159,7 +1285,16 @@ export function MembersPage() {
                         const isDeleting = Boolean(kbDeletingDocumentIds[doc.id]);
                         const isRetryingIndex = Boolean(kbRetryingIndexDocumentIds[doc.id]);
                         const isRetryingMetadata = Boolean(kbRetryingMetadataDocumentIds[doc.id]);
+                        const isReprocessing = Boolean(kbReprocessingDocumentIds[doc.id]);
                         const isDownloading = downloadingKbDocumentId === doc.id;
+                        const isProcessing =
+                          doc.chunkingStatus === 'pending' ||
+                          doc.chunkingStatus === 'running' ||
+                          doc.indexingStatus === 'pending' ||
+                          doc.indexingStatus === 'running' ||
+                          doc.metadataStatus === 'pending' ||
+                          doc.metadataStatus === 'running';
+                        const docChunkConfig = getDocChunkConfig(doc.id, doc.chunkConfig);
                         return (
                           <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
                             <div className="flex items-center justify-between gap-2">
@@ -1200,6 +1335,19 @@ export function MembersPage() {
                                   >
                                     {isRetryingMetadata ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCcw className="mr-1 h-3 w-3" />}
                                     Retry metadata
+                                  </Button>
+                                ) : null}
+                                {doc.id && doc.storageId ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 rounded-md px-2 text-[10px]"
+                                    disabled={isDeleting || isDownloading || isProcessing || isReprocessing}
+                                    onClick={() => void reprocessDocument(doc.id)}
+                                  >
+                                    {isReprocessing ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCcw className="mr-1 h-3 w-3" />}
+                                    {isReprocessing ? 'Reprocessing…' : 'Reprocess'}
                                   </Button>
                                 ) : null}
                                 {doc.id && doc.storageId ? (
@@ -1246,6 +1394,73 @@ export function MembersPage() {
                               ) : null}
                               {doc.ingestErrorMetadata ? (
                                 <p className="mt-1 text-[11px] text-destructive">Metadata error: {doc.ingestErrorMetadata}</p>
+                              ) : null}
+                              {doc.id && doc.storageId ? (
+                                <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-2">
+                                  <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    Chunking config
+                                  </p>
+                                  <div className="mt-2 grid gap-2 md:grid-cols-[120px_1fr_1fr]">
+                                    <label className="grid gap-1 text-[11px]">
+                                      Preset
+                                      <select
+                                        className="h-8 rounded-md border border-border bg-background px-2"
+                                        value={detectKbChunkPreset(docChunkConfig)}
+                                        onChange={(event) => {
+                                          const preset = event.target.value;
+                                          if (preset === 'custom') return;
+                                          updateDocChunkConfig(
+                                            doc.id,
+                                            getKbChunkPresetConfig(preset as 'small' | 'default' | 'large'),
+                                            doc.chunkConfig,
+                                          );
+                                        }}
+                                        disabled={isDeleting || isDownloading || isProcessing || isReprocessing}
+                                      >
+                                        <option value="small">Small</option>
+                                        <option value="default">Default</option>
+                                        <option value="large">Large</option>
+                                        <option value="custom">Custom</option>
+                                      </select>
+                                    </label>
+                                    <label className="grid gap-1 text-[11px]">
+                                      Chunk size
+                                      <input
+                                        type="number"
+                                        min={200}
+                                        max={12000}
+                                        className="h-8 rounded-md border border-border bg-background px-2"
+                                        value={docChunkConfig.chunkSizeChars}
+                                        onChange={(event) =>
+                                          updateDocChunkConfig(
+                                            doc.id,
+                                            { chunkSizeChars: Number(event.target.value) || 0 },
+                                            doc.chunkConfig,
+                                          )
+                                        }
+                                        disabled={isDeleting || isDownloading || isProcessing || isReprocessing}
+                                      />
+                                    </label>
+                                    <label className="grid gap-1 text-[11px]">
+                                      Overlap
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={4000}
+                                        className="h-8 rounded-md border border-border bg-background px-2"
+                                        value={docChunkConfig.chunkOverlapChars}
+                                        onChange={(event) =>
+                                          updateDocChunkConfig(
+                                            doc.id,
+                                            { chunkOverlapChars: Number(event.target.value) || 0 },
+                                            doc.chunkConfig,
+                                          )
+                                        }
+                                        disabled={isDeleting || isDownloading || isProcessing || isReprocessing}
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
                               ) : null}
                               {digest ? (
                                 <>

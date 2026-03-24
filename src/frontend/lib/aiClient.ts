@@ -1,5 +1,9 @@
 import { convexRepository } from '../repository/ConvexCouncilRepository';
-import type { KbDocumentLifecycle, MessageSpeechResult } from '../repository/CouncilRepository';
+import type {
+  KbChunkConfig,
+  KbDocumentLifecycle,
+  MessageSpeechResult,
+} from '../repository/CouncilRepository';
 import type {
   ChamberResponseMode,
   RetrievalStrategy,
@@ -205,6 +209,7 @@ export async function createKbDocumentRecord(input: {
     mimeType?: string;
     sizeBytes?: number;
   };
+  chunkConfig?: KbChunkConfig;
 }): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }> {
   return await convexRepository.createKbDocumentRecord(input);
 }
@@ -219,6 +224,13 @@ export async function retryKbDocumentIndexing(input: { kbDocumentId: string }): 
 
 export async function retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
   return await convexRepository.retryKbDocumentMetadata(input);
+}
+
+export async function reprocessKbDocument(input: {
+  kbDocumentId: string;
+  chunkConfig?: KbChunkConfig;
+}): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+  return await convexRepository.reprocessKbDocument(input);
 }
 
 export async function listKbDocuments(memberId: string): Promise<KbDocumentLifecycle[]> {
