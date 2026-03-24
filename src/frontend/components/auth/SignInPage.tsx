@@ -1,15 +1,53 @@
-import { useAuthActions } from '@convex-dev/auth/react';
+import { useState } from 'react';
+import { ConvexHttpClient } from 'convex/browser';
+import { api } from '../../../../convex/_generated/api';
+
+const VERIFIER_STORAGE_KEY = '__convexAuthOAuthVerifier';
+
+function authVerifierStorageKey(namespace: string) {
+    const escapedNamespace = namespace.replace(/[^a-zA-Z0-9]/g, '');
+    return `${VERIFIER_STORAGE_KEY}_${escapedNamespace}`;
+}
 
 /**
  * SignInPage — shown when the user is not authenticated.
  * Clean, minimal card that mirrors the app's existing dark/light design tokens.
  */
 export function SignInPage() {
-    const { signIn } = useAuthActions();
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const handleGoogleSignIn = () => {
+    const handleGoogleSignIn = async () => {
+        if (typeof window === 'undefined' || isSubmitting) return;
+
+        setIsSubmitting(true);
+        setError(null);
         const redirectTo = typeof window !== 'undefined' ? window.location.href : undefined;
-        void signIn('google', redirectTo ? { redirectTo } : undefined);
+        const deploymentUrl = (import.meta.env.VITE_CONVEX_URL as string).trim();
+        const verifierKey = authVerifierStorageKey(deploymentUrl);
+
+        try {
+            const client = new ConvexHttpClient(deploymentUrl);
+            const verifier = window.localStorage.getItem(verifierKey) ?? undefined;
+            window.localStorage.removeItem(verifierKey);
+
+            const result = await client.action(api.auth.signIn, {
+                provider: 'google',
+                params: redirectTo ? { redirectTo } : {},
+                verifier,
+            });
+
+            if (!result.redirect || !result.verifier) {
+                throw new Error('Google sign-in did not return a redirect URL.');
+            }
+
+            window.localStorage.setItem(verifierKey, result.verifier);
+            window.location.href = result.redirect;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Could not start Google sign-in.';
+            setError(message);
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -33,6 +71,7 @@ export function SignInPage() {
                         id="signin-google-btn"
                         type="button"
                         onClick={handleGoogleSignIn}
+                        disabled={isSubmitting}
                         className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium text-foreground transition hover:bg-muted active:scale-[0.98]"
                     >
                         {/* Google logo SVG */}
@@ -54,8 +93,14 @@ export function SignInPage() {
                                 fill="#EA4335"
                             />
                         </svg>
-                        Continue with Google
+                        {isSubmitting ? 'Redirecting…' : 'Continue with Google'}
                     </button>
+
+                    {error ? (
+                        <p className="mt-4 text-center text-xs text-destructive">
+                            {error}
+                        </p>
+                    ) : null}
 
                     <p className="mt-5 text-center text-xs text-muted-foreground">
                         By signing in you agree to our terms of service.
