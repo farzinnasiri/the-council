@@ -42,8 +42,8 @@ make check          # build + convex typecheck dry-run
 make env-doctor     # validate merged env (TARGET=dev by default)
 make env-sync       # sync required env to dev deployment
 make env-sync-prod  # sync required env to prod deployment
-make deploy         # validate + deploy to dev (convex dev --once)
-make deploy-prod    # validate + deploy to prod (convex deploy)
+make deploy         # validate + sync env + deploy to dev (convex dev --once)
+make deploy-prod    # validate + sync env + deploy to prod (convex deploy)
 make logs           # dev logs
 make logs-prod      # prod logs
 make vercel-init-check    # validate Vercel CLI + routing config
@@ -94,6 +94,8 @@ Sync examples:
 make env-sync
 make env-sync-prod
 ```
+
+Deploy targets also run the matching env sync automatically before pushing Convex code, so auth/runtime settings do not drift from the checked local configuration.
 
 ## Vercel Deployment
 

@@ -53,11 +53,13 @@ env-sync-prod: ## Sync required Convex env keys to prod (upsert-only)
 
 deploy: ## Validate and deploy Convex functions to dev
 	@$(MAKE) env-doctor TARGET=dev
+	@$(MAKE) env-sync
 	@$(MAKE) check
 	@npx convex dev --once
 
 deploy-prod: ## Validate and deploy Convex functions to prod
 	@$(MAKE) env-doctor TARGET=prod
+	@$(MAKE) env-sync-prod
 	@$(MAKE) check
 	@npx convex deploy -y
 
