@@ -215,9 +215,16 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
         userTurnCount: currentUserTurnCount,
       })
     : [];
+  const orderedStoredGuidance = storedGuidance
+    .slice()
+    .sort((a: any, b: any) => {
+      const aCustom = a.feedbackKind === 'custom' ? 1 : 0;
+      const bCustom = b.feedbackKind === 'custom' ? 1 : 0;
+      return aCustom - bCustom;
+    });
   const guidanceNotes = [
     ...(args.guidanceDirectives ?? []).map((directive) => directive.note.trim()),
-    ...storedGuidance.map((directive: any) => directive.note.trim()),
+    ...orderedStoredGuidance.map((directive: any) => directive.note.trim()),
   ].filter(Boolean);
   const guidanceBlock = guidanceNotes.length > 0
     ? [

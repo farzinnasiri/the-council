@@ -5,6 +5,8 @@ import type {
   ConversationMemoryLog,
   ConversationNotebook,
   ConversationType,
+  CustomGuidanceChipKey,
+  MessageCustomGuidance,
   Member,
   MemberVoiceName,
   Message,
@@ -34,6 +36,7 @@ import {
   markRoundtableCompleted,
   markRoundtableInProgress,
   prepareRoundtableRound,
+  reprocessKbDocument,
   retryKbDocumentIndexing,
   retryKbDocumentMetadata,
   routeHallMembers,
@@ -43,7 +46,8 @@ import {
   uploadFileToConvexStorage,
 } from '../lib/aiClient';
 import { routeToMembers } from '../lib/mockRouting';
-import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
+import type { KbChunkConfig, KbDocumentLifecycle } from '../repository/CouncilRepository';
+import { DEFAULT_KB_CHUNK_CONFIG } from '../constants/kbChunking';
 
 interface CreateMemberPayload {
   name: string;
@@ -85,12 +89,14 @@ interface AppState {
   kbDeletingDocumentIds: Record<string, boolean>;
   kbRetryingIndexDocumentIds: Record<string, boolean>;
   kbRetryingMetadataDocumentIds: Record<string, boolean>;
+  kbReprocessingDocumentIds: Record<string, boolean>;
   chamberMemoryByConversation: Record<string, string>;
   hallParticipantsByConversation: Record<string, string[]>;
   roundtableStateByConversation: Record<string, RoundtableState | null>;
   roundtablePreparingByConversation: Record<string, boolean>;
   hallSummaryFailureCountByConversation: Record<string, number>;
   messageFeedbackByMessageId: Record<string, MessageFeedbackKey[]>;
+  customGuidanceByMessageId: Record<string, MessageCustomGuidance>;
   conversationNotebooksByConversation: Record<string, ConversationNotebook>;
   notebookDraftByConversation: Record<string, string>;
   notebookSaveStateByConversation: Record<string, NotebookSaveState>;
@@ -185,15 +191,22 @@ interface AppState {
   generateMemberGuidanceProfile: (memberId: string, force?: boolean) => Promise<{ guidanceProfilePrompt: string; model: string }>;
   generateMemberVoicePersona: (memberId: string, force?: boolean) => Promise<{ ttsPersonaPrompt: string; model: string }>;
   setMessageFeedback: (messageId: string, key: MessageFeedbackKey, active: boolean) => Promise<void>;
+  saveCustomGuidanceForMessage: (messageId: string, chips: CustomGuidanceChipKey[], text?: string) => Promise<void>;
+  clearCustomGuidanceForMessage: (messageId: string) => Promise<void>;
   setMessagePinned: (messageId: string, active: boolean) => Promise<void>;
   retryFailedMessage: (messageId: string) => Promise<void>;
   archiveMember: (memberId: string) => Promise<void>;
-  uploadDocsForMember: (memberId: string, files: File[]) => Promise<void>;
+  uploadDocsForMember: (memberId: string, files: File[], chunkConfig?: KbChunkConfig) => Promise<void>;
   fetchDocsForMember: (memberId: string) => Promise<void>;
   hydrateMemberDocuments: () => Promise<void>;
   deleteDocForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
   retryKbDocumentIndexForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
   retryKbDocumentMetadataForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
+  reprocessKbDocumentForMember: (
+    memberId: string,
+    kbDocumentId: string,
+    chunkConfig?: KbChunkConfig,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
@@ -322,6 +335,46 @@ function mapFeedbackRows(rows: Array<{ messageId: string; key: MessageFeedbackKe
     grouped[row.messageId] = [...(grouped[row.messageId] ?? []), row.key];
   }
   return grouped;
+}
+
+function mapCustomGuidanceRows(
+  rows: Array<{
+    id: string;
+    triggerMessageId?: string;
+    source: 'background_reflection' | 'feedback' | 'system_rule';
+    feedbackKind?: 'quick' | 'custom';
+    feedbackChips?: CustomGuidanceChipKey[];
+    feedbackText?: string;
+    note: string;
+  }>
+) {
+  const grouped: Record<string, MessageCustomGuidance> = {};
+  for (const row of rows) {
+    if (row.source !== 'feedback' || row.feedbackKind !== 'custom' || !row.triggerMessageId) continue;
+    if (grouped[row.triggerMessageId]) continue;
+    grouped[row.triggerMessageId] = {
+      directiveId: row.id,
+      chips: row.feedbackChips ?? [],
+      text: row.feedbackText,
+      note: row.note,
+    };
+  }
+  return grouped;
+}
+
+function replaceMessageScopedRecord<T>(
+  current: Record<string, T>,
+  messageIds: string[],
+  nextEntries: Record<string, T>
+) {
+  const scopedIds = new Set(messageIds);
+  const retained = Object.fromEntries(
+    Object.entries(current).filter(([messageId]) => !scopedIds.has(messageId))
+  ) as Record<string, T>;
+  return {
+    ...retained,
+    ...nextEntries,
+  };
 }
 
 function findRetrySourceUserMessage(messages: Message[], failedMessage: Message): Message | undefined {
@@ -736,12 +789,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   kbDeletingDocumentIds: {},
   kbRetryingIndexDocumentIds: {},
   kbRetryingMetadataDocumentIds: {},
+  kbReprocessingDocumentIds: {},
   chamberMemoryByConversation: {},
   hallParticipantsByConversation: {},
   roundtableStateByConversation: {},
   roundtablePreparingByConversation: {},
   hallSummaryFailureCountByConversation: {},
   messageFeedbackByMessageId: {},
+  customGuidanceByMessageId: {},
   conversationNotebooksByConversation: {},
   notebookDraftByConversation: {},
   notebookSaveStateByConversation: {},
@@ -1007,11 +1062,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   loadMessages: async (conversationId) => {
-    const [page, feedbackRows] = await Promise.all([
+    const [page, feedbackRows, guidanceRows] = await Promise.all([
       councilRepository.listMessagesPage(conversationId, { limit: 40 }),
       councilRepository.listMessageFeedback(conversationId),
+      councilRepository.listConversationGuidanceDirectives(conversationId),
     ]);
     const msgs = page.messages;
+    const messageIds = msgs.map((message) => message.id);
     set((state) => ({
       messages: [
         ...state.messages.filter((m) => m.conversationId !== conversationId),
@@ -1025,10 +1082,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           isLoadingOlder: false,
         },
       },
-      messageFeedbackByMessageId: {
-        ...state.messageFeedbackByMessageId,
-        ...mapFeedbackRows(feedbackRows),
-      },
+      messageFeedbackByMessageId: replaceMessageScopedRecord(
+        state.messageFeedbackByMessageId,
+        messageIds,
+        mapFeedbackRows(feedbackRows.filter((row) => messageIds.includes(row.messageId)))
+      ),
+      customGuidanceByMessageId: replaceMessageScopedRecord(
+        state.customGuidanceByMessageId,
+        messageIds,
+        mapCustomGuidanceRows(guidanceRows.filter((row) => row.triggerMessageId && messageIds.includes(row.triggerMessageId)))
+      ),
     }));
     void get().evaluateChamberCompactionOnLoad(conversationId);
     void get().refreshRoundtableState(conversationId);
@@ -1051,12 +1114,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const [page, feedbackRows] = await Promise.all([
+      const [page, feedbackRows, guidanceRows] = await Promise.all([
         councilRepository.listMessagesPage(conversationId, {
           cursor: pagination.continueCursor,
           limit: 30,
         }),
         councilRepository.listMessageFeedback(conversationId),
+        councilRepository.listConversationGuidanceDirectives(conversationId),
       ]);
 
       set((state) => {
@@ -1064,6 +1128,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const keepOther = state.messages.filter((m) => m.conversationId !== conversationId);
         const combined = [...page.messages, ...existing].sort((a, b) => a.createdAt - b.createdAt);
         const deduped = combined.filter((message, index, list) => list.findIndex((m) => m.id === message.id) === index);
+        const dedupedMessageIds = deduped.map((message) => message.id);
         return {
           messages: [...keepOther, ...deduped],
           messagePaginationByConversation: {
@@ -1074,10 +1139,18 @@ export const useAppStore = create<AppState>((set, get) => ({
               isLoadingOlder: false,
             },
           },
-          messageFeedbackByMessageId: {
-            ...state.messageFeedbackByMessageId,
-            ...mapFeedbackRows(feedbackRows),
-          },
+          messageFeedbackByMessageId: replaceMessageScopedRecord(
+            state.messageFeedbackByMessageId,
+            dedupedMessageIds,
+            mapFeedbackRows(feedbackRows.filter((row) => dedupedMessageIds.includes(row.messageId)))
+          ),
+          customGuidanceByMessageId: replaceMessageScopedRecord(
+            state.customGuidanceByMessageId,
+            dedupedMessageIds,
+            mapCustomGuidanceRows(
+              guidanceRows.filter((row) => row.triggerMessageId && dedupedMessageIds.includes(row.triggerMessageId))
+            )
+          ),
         };
       });
     } catch {
@@ -1515,6 +1588,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const nextFeedback = Object.fromEntries(
         Object.entries(state.messageFeedbackByMessageId).filter(([messageId]) => !conversationMessageIds.has(messageId))
       );
+      const nextCustomGuidance = Object.fromEntries(
+        Object.entries(state.customGuidanceByMessageId).filter(([messageId]) => !conversationMessageIds.has(messageId))
+      );
       return {
         conversations: nextConversations,
         hallParticipantsByConversation: nextParticipants,
@@ -1526,6 +1602,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         notebookErrorByConversation: removeKey(state.notebookErrorByConversation, conversationId),
         notebookLoadedByConversation: removeKey(state.notebookLoadedByConversation, conversationId),
         messageFeedbackByMessageId: nextFeedback,
+        customGuidanceByMessageId: nextCustomGuidance,
         selectedConversationId:
           state.selectedConversationId === conversationId
             ? (nextConversations[0]?.id ?? '')
@@ -2532,6 +2609,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         messageFeedbackByMessageId: Object.fromEntries(
           Object.entries(state.messageFeedbackByMessageId).filter(([messageId]) => !targetMessageIds.has(messageId))
         ),
+        customGuidanceByMessageId: Object.fromEntries(
+          Object.entries(state.customGuidanceByMessageId).filter(([messageId]) => !targetMessageIds.has(messageId))
+        ),
         selectedConversationId: targetSet.has(state.selectedConversationId)
           ? (nextConversations[0]?.id ?? '')
           : state.selectedConversationId,
@@ -2836,15 +2916,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     const message = get().messages.find((item) => item.id === messageId);
     if (!message) return;
     const feedbackRows = await councilRepository.setMessageFeedback({ messageId, key, active });
-    const feedbackByMessage = mapFeedbackRows(feedbackRows);
+    const feedbackByMessage = mapFeedbackRows(
+      feedbackRows.filter((row) => row.messageId === messageId)
+    );
     set((state) => ({
-      messageFeedbackByMessageId: {
-        ...state.messageFeedbackByMessageId,
-        ...feedbackByMessage,
-      },
+      messageFeedbackByMessageId: replaceMessageScopedRecord(
+        state.messageFeedbackByMessageId,
+        [messageId],
+        feedbackByMessage
+      ),
     }));
     await councilRepository.syncFeedbackGuidanceDirectives({ messageId });
     get().showToast(feedbackToastMessage(key, active));
+  },
+
+  saveCustomGuidanceForMessage: async (messageId, chips, text) => {
+    const saved = await councilRepository.upsertCustomFeedbackGuidance({ messageId, chips, text });
+    set((state) => ({
+      customGuidanceByMessageId: {
+        ...state.customGuidanceByMessageId,
+        [messageId]: saved,
+      },
+    }));
+    get().showToast('Custom guidance saved.');
+  },
+
+  clearCustomGuidanceForMessage: async (messageId) => {
+    await councilRepository.clearCustomFeedbackGuidance(messageId);
+    set((state) => ({
+      customGuidanceByMessageId: removeKey(state.customGuidanceByMessageId, messageId),
+    }));
+    get().showToast('Custom guidance cleared.');
   },
 
   setMessagePinned: async (messageId, active) => {
@@ -3061,7 +3163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
-  uploadDocsForMember: async (memberId, files) => {
+  uploadDocsForMember: async (memberId, files, chunkConfig = DEFAULT_KB_CHUNK_CONFIG) => {
     const member = get().members.find((item) => item.id === memberId);
     if (!member || files.length === 0) return;
 
@@ -3099,6 +3201,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const created = await createKbDocumentRecord({
           memberId,
           stagedFile: staged,
+          chunkConfig,
         });
 
         set((state) => {
@@ -3140,6 +3243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           chunkingStatus: 'failed',
           indexingStatus: 'failed',
           metadataStatus: 'failed',
+          chunkConfig,
           ingestErrorChunking: message,
           ingestErrorIndexing: message,
           ingestErrorMetadata: message,
@@ -3301,6 +3405,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => ({
         kbRetryingMetadataDocumentIds: {
           ...state.kbRetryingMetadataDocumentIds,
+          [kbDocumentId]: false,
+        },
+      }));
+    }
+  },
+
+  reprocessKbDocumentForMember: async (memberId, kbDocumentId, chunkConfig) => {
+    set((state) => ({
+      kbReprocessingDocumentIds: {
+        ...state.kbReprocessingDocumentIds,
+        [kbDocumentId]: true,
+      },
+    }));
+
+    try {
+      await reprocessKbDocument({ kbDocumentId, chunkConfig });
+      await get().fetchDocsForMember(memberId);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Reprocess failed' };
+    } finally {
+      set((state) => ({
+        kbReprocessingDocumentIds: {
+          ...state.kbReprocessingDocumentIds,
           [kbDocumentId]: false,
         },
       }));

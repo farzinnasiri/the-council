@@ -162,6 +162,68 @@ export function Composer({
         ) : null}
 
         <div className="flex items-center gap-2 rounded-lg border border-border bg-transparent p-2">
+          {chamberResponseMode && onChamberResponseModeChange ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground"
+                  disabled={isLocked}
+                  aria-label={`Response mode: ${activeMode?.label ?? 'Instant'}`}
+                >
+                  <ActiveModeIcon className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{activeMode?.label ?? 'Instant'}</span>
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                <DropdownMenuLabel>Response Mode</DropdownMenuLabel>
+                {CHAMBER_MODE_OPTIONS.map(({ value, label, description, Icon }) => (
+                  <DropdownMenuItem
+                    key={value}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      void onChamberResponseModeChange(value);
+                    }}
+                    className={cn(
+                      'gap-2',
+                      chamberResponseMode === value && 'bg-muted text-foreground'
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm">{label}</p>
+                      <p className="text-[11px] text-muted-foreground">{description}</p>
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+                {typeof timeAwareReentryEnabled === 'boolean' && onTimeAwareReentryEnabledChange ? (
+                  <>
+                    <DropdownMenuLabel>Thread Behavior</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        void onTimeAwareReentryEnabledChange(!timeAwareReentryEnabled);
+                      }}
+                      className="gap-2"
+                    >
+                      <div className="flex h-3.5 w-3.5 items-center justify-center">
+                        {timeAwareReentryEnabled ? <Check className="h-3.5 w-3.5" /> : null}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm">Time-Aware Re-entry</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Ease stale momentum after long pauses
+                        </p>
+                      </div>
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+
           <div className="flex min-w-0 flex-1 items-center">
             {isRecording ? (
               <div className="w-full px-2">
@@ -203,67 +265,6 @@ export function Composer({
           </div>
 
           <div className="flex items-center gap-1">
-            {chamberResponseMode && onChamberResponseModeChange ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground"
-                    disabled={isLocked}
-                    aria-label={`Response mode: ${activeMode?.label ?? 'Instant'}`}
-                  >
-                    <ActiveModeIcon className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">{activeMode?.label ?? 'Instant'}</span>
-                    <ChevronDown className="h-3 w-3 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuLabel>Response Mode</DropdownMenuLabel>
-                  {CHAMBER_MODE_OPTIONS.map(({ value, label, description, Icon }) => (
-                    <DropdownMenuItem
-                      key={value}
-                      onSelect={(event) => {
-                        event.preventDefault();
-                        void onChamberResponseModeChange(value);
-                      }}
-                      className={cn(
-                        'gap-2',
-                        chamberResponseMode === value && 'bg-muted text-foreground'
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      <div className="min-w-0">
-                        <p className="text-sm">{label}</p>
-                        <p className="text-[11px] text-muted-foreground">{description}</p>
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
-                  {typeof timeAwareReentryEnabled === 'boolean' && onTimeAwareReentryEnabledChange ? (
-                    <>
-                      <DropdownMenuLabel>Thread Behavior</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        onSelect={(event) => {
-                          event.preventDefault();
-                          void onTimeAwareReentryEnabledChange(!timeAwareReentryEnabled);
-                        }}
-                        className="gap-2"
-                      >
-                        <div className="flex h-3.5 w-3.5 items-center justify-center">
-                          {timeAwareReentryEnabled ? <Check className="h-3.5 w-3.5" /> : null}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm">Time-Aware Re-entry</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Ease stale momentum after long pauses
-                          </p>
-                        </div>
-                      </DropdownMenuItem>
-                    </>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
             <Button
               variant="ghost"
               size="icon"

@@ -4,9 +4,11 @@ import type {
   ConversationMemoryLog,
   ConversationNotebook,
   ConversationParticipant,
+  CustomGuidanceChipKey,
   HallMode,
   Member,
   Message,
+  MessageCustomGuidance,
   MessageFeedback,
   MessageFeedbackKey,
   MemberMemoryDocument,
@@ -134,6 +136,11 @@ export interface KBDigestMetadata {
   updatedAt: number;
 }
 
+export interface KbChunkConfig {
+  chunkSizeChars: number;
+  chunkOverlapChars: number;
+}
+
 export interface KbDocumentLifecycle {
   id: string;
   memberId: string;
@@ -147,6 +154,7 @@ export interface KbDocumentLifecycle {
   chunkingStatus: 'pending' | 'running' | 'completed' | 'failed';
   indexingStatus: 'pending' | 'running' | 'completed' | 'failed';
   metadataStatus: 'pending' | 'running' | 'completed' | 'failed';
+  chunkConfig: KbChunkConfig;
   chunkCountTotal?: number;
   chunkCountIndexed?: number;
   ingestErrorChunking?: string;
@@ -237,6 +245,12 @@ export interface CouncilRepository {
     key: MessageFeedbackKey;
     active: boolean;
   }): Promise<MessageFeedback[]>;
+  upsertCustomFeedbackGuidance(input: {
+    messageId: string;
+    chips: CustomGuidanceChipKey[];
+    text?: string;
+  }): Promise<MessageCustomGuidance>;
+  clearCustomFeedbackGuidance(messageId: string): Promise<void>;
   setMessagePinned(input: {
     messageId: string;
     active: boolean;
@@ -449,10 +463,15 @@ export interface CouncilRepository {
       mimeType?: string;
       sizeBytes?: number;
     };
+    chunkConfig?: KbChunkConfig;
   }): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }>;
   startKbDocumentProcessing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
   retryKbDocumentIndexing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
   retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  reprocessKbDocument(input: {
+    kbDocumentId: string;
+    chunkConfig?: KbChunkConfig;
+  }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
   getKbDocumentDownloadUrl(input: { kbDocumentId: string }): Promise<string | null>;
   listKbDocuments(input: { memberId: string }): Promise<KbDocumentLifecycle[]>;
   deleteKbDocument(input: {

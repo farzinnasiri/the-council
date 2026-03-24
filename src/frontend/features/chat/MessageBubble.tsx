@@ -1,10 +1,11 @@
-import { AlignJustify, Brain, Check, Copy, Expand, LoaderCircle, MessageCircle, NotebookPen, Pin, Reply, Search, SlidersHorizontal, Square, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
+import { AlignJustify, Brain, Check, Copy, Expand, LoaderCircle, MessageCircle, MessageSquarePlus, NotebookPen, Pin, Reply, Search, SlidersHorizontal, Square, SquarePen, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
 import { useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
-import type { Message } from '../../types/domain';
+import type { CustomGuidanceChipKey, Message } from '../../types/domain';
 import { Button } from '../../components/ui/button';
+import { Textarea } from '../../components/ui/textarea';
 import { RoutePill } from './RoutePill';
 import { MarkdownMessage } from './MarkdownMessage';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
@@ -18,6 +19,15 @@ const FEEDBACK_OPTIONS = [
   { key: 'longer', label: 'Longer', activeLabel: 'Longer replies', Icon: Expand },
   { key: 'more_direct', label: 'More direct', activeLabel: 'More direct', Icon: Reply },
 ] as const;
+const CUSTOM_GUIDANCE_OPTIONS: Array<{ key: CustomGuidanceChipKey; label: string }> = [
+  { key: 'repetitive', label: 'Repetitive' },
+  { key: 'structure', label: 'Structure' },
+  { key: 'tone', label: 'Tone' },
+  { key: 'formatting', label: 'Formatting' },
+  { key: 'persona', label: 'Persona' },
+  { key: 'missed_my_point', label: 'Missed my point' },
+];
+const CUSTOM_GUIDANCE_TEXT_MAX = 160;
 
 /** Format epoch ms → "HH:MM" */
 function formatClock(epochMs: number): string {
@@ -46,6 +56,11 @@ export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
   const [startingFollowUp, setStartingFollowUp] = useState(false);
+  const [customGuidanceDialogOpen, setCustomGuidanceDialogOpen] = useState(false);
+  const [customGuidanceChips, setCustomGuidanceChips] = useState<CustomGuidanceChipKey[]>([]);
+  const [customGuidanceText, setCustomGuidanceText] = useState('');
+  const [savingCustomGuidance, setSavingCustomGuidance] = useState(false);
+  const [clearingCustomGuidance, setClearingCustomGuidance] = useState(false);
   const { toggleMessage, isLoading: isSpeechLoading, isQueued: isSpeechQueued, isPlaying: isSpeechPlaying } = useChatSpeech();
   const navigate = useNavigate();
   const members = useAppStore((state) => state.members);
@@ -54,8 +69,11 @@ export function MessageBubble({ message }: { message: Message }) {
   const appendMessageToNotebook = useAppStore((state) => state.appendMessageToNotebook);
   const refiningActionByMessageId = useAppStore((state) => state.refiningActionByMessageId);
   const messageFeedbackByMessageId = useAppStore((state) => state.messageFeedbackByMessageId);
+  const customGuidanceByMessageId = useAppStore((state) => state.customGuidanceByMessageId);
   const refineLatestChamberResponse = useAppStore((state) => state.refineLatestChamberResponse);
   const setMessageFeedback = useAppStore((state) => state.setMessageFeedback);
+  const saveCustomGuidanceForMessage = useAppStore((state) => state.saveCustomGuidanceForMessage);
+  const clearCustomGuidanceForMessage = useAppStore((state) => state.clearCustomGuidanceForMessage);
   const setMessagePinned = useAppStore((state) => state.setMessagePinned);
   const retryFailedMessage = useAppStore((state) => state.retryFailedMessage);
   const retryingMessageIds = useAppStore((state) => state.retryingMessageIds);
@@ -160,6 +178,7 @@ export function MessageBubble({ message }: { message: Message }) {
   );
   const activeFeedback = new Set(messageFeedbackByMessageId[message.id] ?? []);
   const activeFeedbackBadges = FEEDBACK_OPTIONS.filter(({ key }) => activeFeedback.has(key));
+  const existingCustomGuidance = customGuidanceByMessageId[message.id];
   const canPin =
     Boolean(
       isChamber &&
@@ -189,6 +208,50 @@ export function MessageBubble({ message }: { message: Message }) {
   const speechLoading = canSpeak && isSpeechLoading(message.id);
   const speechQueued = canSpeak && isSpeechQueued(message.id);
   const speechPlaying = canSpeak && isSpeechPlaying(message.id);
+  const canSaveCustomGuidance = customGuidanceChips.length > 0 && !savingCustomGuidance;
+  const customGuidanceCharactersRemaining = CUSTOM_GUIDANCE_TEXT_MAX - customGuidanceText.length;
+
+  const openCustomGuidanceDialog = () => {
+    setCustomGuidanceChips(existingCustomGuidance?.chips ?? []);
+    setCustomGuidanceText(existingCustomGuidance?.text ?? '');
+    setCustomGuidanceDialogOpen(true);
+  };
+
+  const toggleCustomGuidanceChip = (chip: CustomGuidanceChipKey) => {
+    setCustomGuidanceChips((current) =>
+      current.includes(chip)
+        ? current.filter((value) => value !== chip)
+        : [...current, chip]
+    );
+  };
+
+  const handleSaveCustomGuidance = async () => {
+    if (!canSaveCustomGuidance) return;
+    setSavingCustomGuidance(true);
+    try {
+      await saveCustomGuidanceForMessage(
+        message.id,
+        customGuidanceChips,
+        customGuidanceText.trim() ? customGuidanceText.trim() : undefined
+      );
+      setCustomGuidanceDialogOpen(false);
+    } finally {
+      setSavingCustomGuidance(false);
+    }
+  };
+
+  const handleClearCustomGuidance = async () => {
+    if (!existingCustomGuidance) return;
+    setClearingCustomGuidance(true);
+    try {
+      await clearCustomGuidanceForMessage(message.id);
+      setCustomGuidanceChips([]);
+      setCustomGuidanceText('');
+      setCustomGuidanceDialogOpen(false);
+    } finally {
+      setClearingCustomGuidance(false);
+    }
+  };
 
   const renderSpeechButton = (tone: 'muted' | 'user' = 'muted') => {
     if (!canSpeak) return null;
@@ -307,12 +370,22 @@ export function MessageBubble({ message }: { message: Message }) {
         <div className={`max-w-[85%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
           {!isUser ? <p className="px-1 pb-1.5 text-xs font-semibold text-muted-foreground">{label}</p> : null}
           <div
-            className={`px-4 py-3 text-sm leading-relaxed ${isUser
+            className={cn(
+              'relative px-4 py-3 text-sm leading-relaxed',
+              isUser
               ? 'rounded-2xl bg-foreground text-background'
-              : 'rounded-lg border border-border/50 bg-muted/30 text-foreground'
-              } ${message.status === 'error' ? 'border-destructive/50 border' : ''}`}
+              : 'rounded-lg border border-border/50 bg-muted/30 text-foreground',
+              message.status === 'error' && 'border border-destructive/50'
+            )}
           >
-            <MarkdownMessage content={message.content} />
+            {canPin ? (
+              <div className="absolute right-2 top-2">
+                {renderPinButton(isUser ? 'user' : 'muted')}
+              </div>
+            ) : null}
+            <div className={cn(canPin && 'pr-8')}>
+              <MarkdownMessage content={message.content} />
+            </div>
             {message.status === 'error' && message.error ? (
               <div className="mt-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive/90">
                 {message.error}
@@ -335,9 +408,9 @@ export function MessageBubble({ message }: { message: Message }) {
 
             {!isUser ? (
               <>
-                <div className="mt-3 flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
+                <div className="mt-3 flex items-center gap-1.5 opacity-50 transition-opacity hover:opacity-100 sm:gap-2">
                   {isChamber ? (
-                    <div className="flex flex-wrap items-center gap-1">
+                    <div className="flex min-w-0 items-center gap-1">
                       {canRefine ? (
                         <>
                           <DropdownMenu>
@@ -345,11 +418,13 @@ export function MessageBubble({ message }: { message: Message }) {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                                className="h-6 rounded-md px-1.5 text-[11px] text-muted-foreground sm:px-2"
                                 disabled={Boolean(activeRefinement)}
+                                title="Refine reply"
+                                aria-label="Refine reply"
                               >
                                 <SlidersHorizontal className="h-3 w-3" />
-                                Refine
+                                <span className="hidden sm:inline">Refine</span>
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="start" className="w-44">
@@ -399,12 +474,14 @@ export function MessageBubble({ message }: { message: Message }) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                            className="h-6 rounded-md px-1.5 text-[11px] text-muted-foreground sm:px-2"
                             onClick={() => void refineLatestChamberResponse(message.conversationId, 'elaborate')}
                             disabled={Boolean(activeRefinement)}
+                            title="Elaborate"
+                            aria-label="Elaborate"
                           >
                             <Expand className="h-3 w-3" />
-                            Elaborate
+                            <span className="hidden sm:inline">Elaborate</span>
                           </Button>
                         </>
                       ) : null}
@@ -413,9 +490,12 @@ export function MessageBubble({ message }: { message: Message }) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 rounded-md px-2 text-[11px] text-muted-foreground"
+                            className="h-6 rounded-md px-1.5 text-[11px] text-muted-foreground sm:px-2"
+                            title="Feedback"
+                            aria-label="Feedback"
                           >
-                            Feedback
+                            <MessageSquarePlus className="h-3 w-3" />
+                            <span className="hidden sm:inline">Feedback</span>
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-48">
@@ -436,19 +516,28 @@ export function MessageBubble({ message }: { message: Message }) {
                               </DropdownMenuItem>
                             );
                           })}
+                          <DropdownMenuItem
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              openCustomGuidanceDialog();
+                            }}
+                            className="mt-1 gap-2 border-t border-border pt-2"
+                          >
+                            <SquarePen className="h-3.5 w-3.5" />
+                            <span>Custom guidance</span>
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                         <NotebookPen className="h-3 w-3" />
                       </Button>
-                      {renderPinButton()}
                       {renderSpeechButton()}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                       </Button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-1">
+                    <div className="flex min-w-0 items-center gap-1">
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground"><Reply className="h-3 w-3" /></Button>
                       <Button
                         variant="ghost"
@@ -470,7 +559,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       </Button>
                     </div>
                   )}
-                  <span className={cn('text-[10px] text-muted-foreground', isChamber && canRefine ? 'ml-auto' : '')}>{timeLabel}</span>
+                  <span className={cn('ml-auto shrink-0 whitespace-nowrap text-[10px] leading-none text-muted-foreground')}>{timeLabel}</span>
                 </div>
                 {isChamber && activeFeedbackBadges.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -486,16 +575,15 @@ export function MessageBubble({ message }: { message: Message }) {
                 ) : null}
               </>
             ) : (
-              <div className="mt-2 flex items-center justify-end gap-2 opacity-50 hover:opacity-100 transition-opacity">
-                <span className="text-[10px] text-background/70">{timeLabel}</span>
+              <div className="mt-2 flex items-center justify-end gap-2 opacity-50 transition-opacity hover:opacity-100">
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                   <NotebookPen className="h-3 w-3" />
                 </Button>
-                {renderPinButton('user')}
                 {renderSpeechButton('user')}
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-background/70 hover:text-background hover:bg-background/20" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 </Button>
+                <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] leading-none text-background/70">{timeLabel}</span>
               </div>
             )}
           </div>
@@ -521,6 +609,77 @@ export function MessageBubble({ message }: { message: Message }) {
               <Button type="button" className="h-9 px-4" onClick={() => void launchHallFollowUp()} disabled={startingFollowUp}>
                 {startingFollowUp ? 'Starting...' : 'Open thread'}
               </Button>
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+
+      <DialogPrimitive.Root open={customGuidanceDialogOpen} onOpenChange={setCustomGuidanceDialogOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-[70] bg-background/80 backdrop-blur-sm" />
+          <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[71] w-[min(92vw,560px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-2xl focus:outline-none">
+            <DialogPrimitive.Title className="font-display text-lg">
+              Custom guidance
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Description className="mt-2 text-sm text-muted-foreground">
+              Add deterministic guidance for this thread. Select at least one issue and optionally add a short note.
+            </DialogPrimitive.Description>
+            <div className="mt-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Issues</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {CUSTOM_GUIDANCE_OPTIONS.map(({ key, label: optionLabel }) => {
+                  const selected = customGuidanceChips.includes(key);
+                  return (
+                    <Button
+                      key={key}
+                      type="button"
+                      variant={selected ? 'default' : 'outline'}
+                      size="sm"
+                      className={cn('h-8 rounded-full px-3', !selected && 'text-muted-foreground')}
+                      onClick={() => toggleCustomGuidanceChip(key)}
+                    >
+                      {optionLabel}
+                    </Button>
+                  );
+                })}
+              </div>
+              {customGuidanceChips.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">Select at least one issue.</p>
+              ) : null}
+            </div>
+            <div className="mt-5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Optional note</p>
+                <span className="text-[11px] text-muted-foreground">{customGuidanceCharactersRemaining}</span>
+              </div>
+              <Textarea
+                value={customGuidanceText}
+                onChange={(event) => setCustomGuidanceText(event.target.value.slice(0, CUSTOM_GUIDANCE_TEXT_MAX))}
+                maxLength={CUSTOM_GUIDANCE_TEXT_MAX}
+                placeholder="Add a short note about what should change."
+                className="mt-3 min-h-[110px] resize-none"
+              />
+            </div>
+            <div className="mt-5 flex justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 px-4"
+                onClick={() => void handleClearCustomGuidance()}
+                disabled={!existingCustomGuidance || clearingCustomGuidance || savingCustomGuidance}
+              >
+                {clearingCustomGuidance ? 'Clearing...' : 'Clear'}
+              </Button>
+              <div className="flex gap-2">
+                <DialogPrimitive.Close asChild>
+                  <Button type="button" variant="outline" className="h-9 px-4" disabled={savingCustomGuidance || clearingCustomGuidance}>
+                    Cancel
+                  </Button>
+                </DialogPrimitive.Close>
+                <Button type="button" className="h-9 px-4" onClick={() => void handleSaveCustomGuidance()} disabled={!canSaveCustomGuidance || clearingCustomGuidance}>
+                  {savingCustomGuidance ? 'Sending...' : 'Send'}
+                </Button>
+              </div>
             </div>
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>

@@ -8,6 +8,7 @@ import type {
   ConversationMemoryLog,
   ConversationNotebook,
   ConversationParticipant,
+  CustomGuidanceChipKey,
   RoundtableState,
   Member,
   MemberVoiceName,
@@ -15,6 +16,7 @@ import type {
   MemberMemoryEpisode,
   MemberMemoryRefreshState,
   Message,
+  MessageCustomGuidance,
   MessageFeedback,
   MessageFeedbackKey,
   PersonalArchiveAccess,
@@ -40,6 +42,7 @@ import type {
   CreateHallInput,
   CreateMemberInput,
   HallTitleResult,
+  KbChunkConfig,
   KBDigestMetadata,
   KbDocumentLifecycle,
   MessageSpeechResult,
@@ -51,6 +54,10 @@ import type {
 import { DEFAULT_MEMBER_VOICE } from '../constants/memberVoice';
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string;
+const DEFAULT_KB_CHUNK_CONFIG: KbChunkConfig = {
+  chunkSizeChars: 2000,
+  chunkOverlapChars: 500,
+};
 
 type ConvexMemberDoc = any;
 type ConvexConversationDoc = any;
@@ -271,6 +278,9 @@ function toConversationGuidanceDirective(doc: any): ConversationGuidanceDirectiv
     source: doc.source,
     triggerMessageId: doc.triggerMessageId,
     note: doc.note,
+    feedbackKind: doc.feedbackKind,
+    feedbackChips: doc.feedbackChips,
+    feedbackText: doc.feedbackText,
     createdAfterUserTurn: doc.createdAfterUserTurn,
     expiresAfterUserTurn: doc.expiresAfterUserTurn,
     createdAt: doc.createdAt ?? doc._creationTime,
@@ -306,6 +316,10 @@ function toKbDocumentLifecycle(doc: any): KbDocumentLifecycle {
     chunkingStatus: doc.chunkingStatus,
     indexingStatus: doc.indexingStatus,
     metadataStatus: doc.metadataStatus,
+    chunkConfig: {
+      chunkSizeChars: doc.chunkSizeChars ?? DEFAULT_KB_CHUNK_CONFIG.chunkSizeChars,
+      chunkOverlapChars: doc.chunkOverlapChars ?? DEFAULT_KB_CHUNK_CONFIG.chunkOverlapChars,
+    },
     chunkCountTotal: doc.chunkCountTotal,
     chunkCountIndexed: doc.chunkCountIndexed,
     ingestErrorChunking: doc.ingestErrorChunking,
@@ -827,6 +841,30 @@ class ConvexCouncilRepository implements CouncilRepository {
       active: input.active,
     });
     return rows.map(toMessageFeedback);
+  }
+
+  async upsertCustomFeedbackGuidance(input: {
+    messageId: string;
+    chips: CustomGuidanceChipKey[];
+    text?: string;
+  }): Promise<MessageCustomGuidance> {
+    const doc = await this.clientAny.mutation('guidance:upsertCustomFeedbackGuidance', {
+      messageId: input.messageId as Id<'messages'>,
+      chips: input.chips,
+      text: input.text,
+    });
+    return {
+      directiveId: doc._id,
+      chips: doc.feedbackChips ?? [],
+      text: doc.feedbackText,
+      note: doc.note,
+    };
+  }
+
+  async clearCustomFeedbackGuidance(messageId: string): Promise<void> {
+    await this.clientAny.mutation('guidance:clearCustomFeedbackGuidance', {
+      messageId: messageId as Id<'messages'>,
+    });
   }
 
   async setMessagePinned(input: {
@@ -1367,6 +1405,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       mimeType?: string;
       sizeBytes?: number;
     };
+    chunkConfig?: KbChunkConfig;
   }): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }> {
     const body = (await this.client.action(api.ai.knowledge.createKbDocumentRecord as any, {
       memberId: input.memberId as Id<'members'>,
@@ -1376,6 +1415,7 @@ class ConvexCouncilRepository implements CouncilRepository {
         mimeType: input.stagedFile.mimeType,
         sizeBytes: input.stagedFile.sizeBytes,
       },
+      chunkConfig: input.chunkConfig,
     })) as any;
 
     return {
@@ -1407,6 +1447,20 @@ class ConvexCouncilRepository implements CouncilRepository {
   async retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
     const body = (await this.client.action(api.ai.knowledge.retryKbDocumentMetadata as any, {
       kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+    })) as any;
+    return {
+      ok: Boolean(body.ok),
+      document: toKbDocumentLifecycle(body.document),
+    };
+  }
+
+  async reprocessKbDocument(input: {
+    kbDocumentId: string;
+    chunkConfig?: KbChunkConfig;
+  }): Promise<{ ok: boolean; document: KbDocumentLifecycle }> {
+    const body = (await this.client.action(api.ai.knowledge.reprocessKbDocument as any, {
+      kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+      chunkConfig: input.chunkConfig,
     })) as any;
     return {
       ok: Boolean(body.ok),

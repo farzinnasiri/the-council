@@ -36,6 +36,14 @@ export type MessageFeedbackKey =
   | 'more_direct'
   | 'softer'
   | 'harder';
+export type GuidanceFeedbackKind = 'quick' | 'custom';
+export type CustomGuidanceChipKey =
+  | 'repetitive'
+  | 'structure'
+  | 'tone'
+  | 'formatting'
+  | 'persona'
+  | 'missed_my_point';
 
 export interface PersonalArchiveAccess {
   reflection: boolean;
@@ -177,9 +185,19 @@ export interface ConversationGuidanceDirective {
   source: 'background_reflection' | 'feedback' | 'system_rule';
   triggerMessageId?: string;
   note: string;
+  feedbackKind?: GuidanceFeedbackKind;
+  feedbackChips?: CustomGuidanceChipKey[];
+  feedbackText?: string;
   createdAfterUserTurn: number;
   expiresAfterUserTurn: number;
   createdAt: number;
+}
+
+export interface MessageCustomGuidance {
+  directiveId: string;
+  chips: CustomGuidanceChipKey[];
+  text?: string;
+  note: string;
 }
 
 export interface MessageRouting {

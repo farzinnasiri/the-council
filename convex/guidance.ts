@@ -19,6 +19,15 @@ const feedbackKeyValidator = v.union(
   v.literal('softer'),
   v.literal('harder')
 );
+const feedbackKindValidator = v.union(v.literal('quick'), v.literal('custom'));
+const customFeedbackChipValidator = v.union(
+  v.literal('repetitive'),
+  v.literal('structure'),
+  v.literal('tone'),
+  v.literal('formatting'),
+  v.literal('persona'),
+  v.literal('missed_my_point')
+);
 
 const directiveDoc = v.object({
   _id: v.id('conversationGuidanceDirectives'),
@@ -29,6 +38,9 @@ const directiveDoc = v.object({
   source: directiveSourceValidator,
   triggerMessageId: v.optional(v.id('messages')),
   note: v.string(),
+  feedbackKind: v.optional(feedbackKindValidator),
+  feedbackChips: v.optional(v.array(customFeedbackChipValidator)),
+  feedbackText: v.optional(v.string()),
   createdAfterUserTurn: v.number(),
   expiresAfterUserTurn: v.number(),
   createdAt: v.number(),
@@ -80,6 +92,16 @@ const MUTUAL_EXCLUSION: Record<string, string[]> = {
 };
 
 const DETERMINISTIC_DIRECTIVE_TTL_TURNS = 3 as const;
+const CUSTOM_FEEDBACK_DIRECTIVE_TTL_TURNS = 5 as const;
+const CUSTOM_FEEDBACK_TEXT_MAX_CHARS = 160 as const;
+const CUSTOM_FEEDBACK_CHIP_ORDER = [
+  'repetitive',
+  'structure',
+  'tone',
+  'formatting',
+  'persona',
+  'missed_my_point',
+] as const;
 
 function buildFeedbackDirectiveNote(key: string): string | null {
   switch (key) {
@@ -96,6 +118,44 @@ function buildFeedbackDirectiveNote(key: string): string | null {
     default:
       return null;
   }
+}
+
+function buildCustomFeedbackDirectiveLine(
+  chip: (typeof CUSTOM_FEEDBACK_CHIP_ORDER)[number]
+): string {
+  switch (chip) {
+    case 'repetitive':
+      return 'I should vary openings, phrasing, and cadence instead of repeating the same signature beats.';
+    case 'structure':
+      return 'I should vary paragraph shape and response structure instead of reusing the same escalation pattern.';
+    case 'tone':
+      return 'I should keep the voice but dial down unnecessary intensity and perform less.';
+    case 'formatting':
+      return 'I should use cleaner formatting and avoid ellipsis-heavy pauses or theatrical separators.';
+    case 'persona':
+      return 'I should stay in character without collapsing into caricature, catchphrases, or imitation.';
+    case 'missed_my_point':
+      return "I should answer the user's actual claim before reframing, judging, or pushing back.";
+  }
+}
+
+function normalizeCustomFeedbackChips(
+  chips: Array<(typeof CUSTOM_FEEDBACK_CHIP_ORDER)[number]>
+): Array<(typeof CUSTOM_FEEDBACK_CHIP_ORDER)[number]> {
+  const selected = new Set(chips);
+  return CUSTOM_FEEDBACK_CHIP_ORDER.filter((chip) => selected.has(chip));
+}
+
+function buildCustomFeedbackDirectiveNote(input: {
+  chips: Array<(typeof CUSTOM_FEEDBACK_CHIP_ORDER)[number]>;
+  text?: string;
+}) {
+  const parts = input.chips.map((chip) => buildCustomFeedbackDirectiveLine(chip));
+  const trimmedText = input.text?.trim();
+  if (trimmedText) {
+    parts.push(`User note: ${trimmedText}`);
+  }
+  return parts.join(' ');
 }
 
 function buildReentryDirectiveNote(input: {
@@ -287,7 +347,12 @@ export const syncFeedbackGuidanceDirectives = mutation({
       .collect();
     await Promise.all(
       existingDirectives
-        .filter((row: any) => row.source === 'feedback' && row.triggerMessageId === args.messageId)
+        .filter(
+          (row: any) =>
+            row.source === 'feedback' &&
+            row.triggerMessageId === args.messageId &&
+            row.feedbackKind !== 'custom'
+        )
         .map((row: any) => ctx.db.delete(row._id))
     );
 
@@ -309,6 +374,7 @@ export const syncFeedbackGuidanceDirectives = mutation({
         source: 'feedback',
         triggerMessageId: args.messageId,
         note,
+        feedbackKind: 'quick',
         createdAfterUserTurn: userTurnCount,
         expiresAfterUserTurn: userTurnCount + DETERMINISTIC_DIRECTIVE_TTL_TURNS,
         createdAt: now,
@@ -319,6 +385,108 @@ export const syncFeedbackGuidanceDirectives = mutation({
       directivesCreated: Math.min(notes.length, 3),
       activeKeys,
     };
+  },
+});
+
+export const upsertCustomFeedbackGuidance = mutation({
+  args: {
+    messageId: v.id('messages'),
+    chips: v.array(customFeedbackChipValidator),
+    text: v.optional(v.string()),
+  },
+  returns: directiveDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const message = await getOwnedMessage(ctx, userId, args.messageId);
+    if (message.role !== 'member' || !message.authorMemberId) {
+      throw new Error('Custom guidance only applies to member messages');
+    }
+    const conversation = await getOwnedConversation(ctx, userId, message.conversationId);
+    if (conversation.kind !== 'chamber') {
+      throw new Error('Custom guidance only applies to chamber messages');
+    }
+
+    const chips = normalizeCustomFeedbackChips(args.chips as Array<(typeof CUSTOM_FEEDBACK_CHIP_ORDER)[number]>);
+    if (chips.length === 0) {
+      throw new Error('Select at least one chip');
+    }
+    const feedbackText = args.text?.trim() ? args.text.trim() : undefined;
+    if (feedbackText && feedbackText.length > CUSTOM_FEEDBACK_TEXT_MAX_CHARS) {
+      throw new Error(`Feedback text must be ${CUSTOM_FEEDBACK_TEXT_MAX_CHARS} characters or fewer`);
+    }
+
+    const existingDirectives = await ctx.db
+      .query('conversationGuidanceDirectives')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', message.conversationId))
+      .collect();
+    await Promise.all(
+      existingDirectives
+        .filter(
+          (row: any) =>
+            row.source === 'feedback' &&
+            row.feedbackKind === 'custom' &&
+            row.triggerMessageId === args.messageId
+        )
+        .map((row: any) => ctx.db.delete(row._id))
+    );
+
+    const userTurnCount = await countUserTurnsForConversation(ctx, message.conversationId);
+    const now = Date.now();
+    const directiveId = await ctx.db.insert('conversationGuidanceDirectives', {
+      userId,
+      conversationId: message.conversationId,
+      memberId: message.authorMemberId,
+      source: 'feedback',
+      triggerMessageId: args.messageId,
+      note: buildCustomFeedbackDirectiveNote({ chips, text: feedbackText }),
+      feedbackKind: 'custom',
+      feedbackChips: chips,
+      feedbackText,
+      createdAfterUserTurn: userTurnCount,
+      expiresAfterUserTurn: userTurnCount + CUSTOM_FEEDBACK_DIRECTIVE_TTL_TURNS,
+      createdAt: now,
+    });
+
+    const directive = await ctx.db.get(directiveId);
+    if (!directive) {
+      throw new Error('Failed to create custom guidance');
+    }
+    return directive;
+  },
+});
+
+export const clearCustomFeedbackGuidance = mutation({
+  args: {
+    messageId: v.id('messages'),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const message = await getOwnedMessage(ctx, userId, args.messageId);
+    if (message.role !== 'member' || !message.authorMemberId) {
+      throw new Error('Custom guidance only applies to member messages');
+    }
+    const conversation = await getOwnedConversation(ctx, userId, message.conversationId);
+    if (conversation.kind !== 'chamber') {
+      throw new Error('Custom guidance only applies to chamber messages');
+    }
+
+    const existingDirectives = await ctx.db
+      .query('conversationGuidanceDirectives')
+      .withIndex('by_conversation', (q) => q.eq('conversationId', message.conversationId))
+      .collect();
+    await Promise.all(
+      existingDirectives
+        .filter(
+          (row: any) =>
+            row.source === 'feedback' &&
+            row.feedbackKind === 'custom' &&
+            row.triggerMessageId === args.messageId
+        )
+        .map((row: any) => ctx.db.delete(row._id))
+    );
+
+    return null;
   },
 });
 
