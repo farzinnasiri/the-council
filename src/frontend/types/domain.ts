@@ -58,6 +58,7 @@ export interface Member {
   avatarUrl?: string | null;
   specialties: string[];
   systemPrompt: string;
+  chatResponseModelSlot?: number;
   guidanceProfilePrompt?: string;
   guidanceProfileGeneratedAt?: number;
   guidanceProfileUpdatedAt?: number;
@@ -139,6 +140,7 @@ export interface ConversationParticipant {
   id: string;
   conversationId: string;
   memberId: string;
+  chatResponseModelSlot?: number;
   status: 'active' | 'removed';
   joinedAt: number;
   leftAt?: number;
@@ -199,7 +201,7 @@ export interface Message {
   supersededAt?: number;
   supersededByMessageId?: string;
   supersedesMessageId?: string;
-  revisionKind?: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate';
+  revisionKind?: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate';
   generationProfile?: ChamberResponseMode;
   routing?: MessageRouting;
   inReplyToMessageId?: string;

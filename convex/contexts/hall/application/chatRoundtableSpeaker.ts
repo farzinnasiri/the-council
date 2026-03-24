@@ -1,19 +1,18 @@
 'use node';
 
-import { resolveModel } from '../../../ai/modelConfig';
+import { api } from '../../../_generated/api';
+import { resolveChatResponseSlot, resolveModel } from '../../../ai/modelConfig';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
-import { chatWithMemberUseCase } from '../../chamber/application/chatWithMember';
 import { assertHallConversationOpen, requireOwnedConversation, requireOwnedMember } from '../../shared/auth';
 import { normalizeHallMode } from '../domain/hallMode';
 import { moveTypeToRoundIntent } from '../domain/roundtableAllocator';
 import type { ChatRoundtableSpeakerInput, RoundtableSingleSpeakerResponse } from '../contracts';
-import { buildContextMessages, buildHallContextAddendum } from '../domain/hallPrompt';
 import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
 import { loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages, listAllMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
 import { getRoundtableState } from '../infrastructure/roundtableRepo';
-import { buildRoundtableHallContext } from './chatRoundtableSpeakers';
+import { buildRoundtableHallContext, runRoundtableSpeakerContribution } from './chatRoundtableSpeakers';
 import { setMainSpanAttributes } from '../../../observability/wideEvents';
 import { wideEventError } from '../../../observability/errors';
 
@@ -39,6 +38,10 @@ export async function chatRoundtableSpeakerUseCase(
   if (normalizeHallMode(conversation) !== 'roundtable') {
     throw wideEventError('roundtable-mode-invalid', 'Conversation is not in roundtable mode', { statusCode: 400 });
   }
+
+  await ctx.runMutation(api.conversations.ensureHallParticipantResponseSlots, {
+    conversationId: args.conversationId,
+  });
 
   const state = await getRoundtableState(ctx, args.conversationId);
 
@@ -85,6 +88,9 @@ export async function chatRoundtableSpeakerUseCase(
   const activeMembers = participants
     .map((row) => membersById.get(row.memberId as string))
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const participantSlotsByMemberId = new Map(
+    participants.map((row) => [String(row.memberId), row.chatResponseModelSlot ?? 1])
+  );
 
   const latestUserMessage = [...allMessages]
     .reverse()
@@ -106,52 +112,43 @@ export async function chatRoundtableSpeakerUseCase(
     'hall.intent': effectiveIntent,
     'hall.force': Boolean(args.force),
   });
-  const targetName = candidateRow.targetMemberId
-    ? (membersById.get(candidateRow.targetMemberId as string)?.name ?? 'another member')
-    : undefined;
-
-  const hallContext = [
-    buildHallContextAddendum({
-      member,
-      participants: activeMembers,
-      hallMode: 'roundtable',
-      roundSummaries,
-      rawMessages: rawContextMessages,
-      conversationId: args.conversationId,
-    }),
-    '',
-    '[Roundtable Turn]',
-    `Round #${args.roundNumber}.`,
-    `Your move type in this round: ${candidateRow.moveType}.`,
-    targetName ? `Address or react to: ${targetName}.` : '',
-    'Give one concise contribution for this turn.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  const single = await chatWithMemberUseCase(ctx, {
+  const single = await runRoundtableSpeakerContribution({
+    ctx,
     conversationId: args.conversationId,
+    roundNumber: args.roundNumber,
     memberId: args.memberId,
-    message: latestUserMessage?.content ?? 'Continue deliberation.',
-    contextMessages: buildContextMessages({
-      messages: rawContextMessages,
-      membersById,
-      selfMemberId: args.memberId,
-      omitLatestUserMessage: true,
-    }),
-    hallContext,
+    candidateRow,
+    membersById,
+    rawContextMessages,
+    roundSummaries,
+    latestUserMessage,
+    activeMembers,
+    chatResponseModelSlot: participantSlotsByMemberId.get(String(args.memberId)) ?? 1,
     retrievalModel: args.retrievalModel,
     chatModel: args.chatModel,
   });
 
+  if (single.status !== 'sent') {
+    throw wideEventError(
+      'roundtable-speaker-generation-failed',
+      single.error || 'Roundtable speaker generation failed',
+      { statusCode: 500 }
+    );
+  }
+
   return {
     answer: single.answer,
-    grounded: single.grounded,
-    citations: single.citations,
-    model: single.model ?? resolveModel('chatResponse', args.chatModel),
+    grounded: Boolean(single.grounded),
+    citations: single.citations ?? [],
+    model: single.model ?? resolveChatResponseSlot(participantSlotsByMemberId.get(String(args.memberId)) ?? 1).spec,
     retrievalModel: single.retrievalModel ?? resolveModel('retrieval', args.retrievalModel),
     usedKnowledgeBase: typeof single.usedKnowledgeBase === 'boolean' ? single.usedKnowledgeBase : true,
     intent: effectiveIntent,
     targetMemberId: candidateRow.targetMemberId,
+    attemptedResponseModelSlot: single.attemptedResponseModelSlot,
+    attemptedResponseModelSpec: single.attemptedResponseModelSpec,
+    finalResponseModelSlot: single.finalResponseModelSlot,
+    finalResponseModelSpec: single.finalResponseModelSpec,
+    fallbackUsed: single.fallbackUsed,
   };
 }

@@ -101,22 +101,10 @@ export function MessageList({
     };
   }, [typingMembers]);
 
-  const latestTranscriptMemberId = useMemo(() => {
-    const latestTranscriptMessage = [...messages]
-      .reverse()
-      .find((message) => message.role !== 'system' && message.status !== 'error');
-
-    return latestTranscriptMessage?.role === 'member'
-      ? latestTranscriptMessage.authorMemberId
-      : undefined;
-  }, [messages]);
-
   const visibleTypingMembers = useMemo(() => {
     const visible = new Set(visibleTypingMemberIds);
-    return typingMembers.filter(
-      (member) => visible.has(member.id) && member.id !== latestTranscriptMemberId
-    );
-  }, [typingMembers, visibleTypingMemberIds, latestTranscriptMemberId]);
+    return typingMembers.filter((member) => visible.has(member.id));
+  }, [typingMembers, visibleTypingMemberIds]);
 
   useEffect(() => {
     if (isRouting || visibleTypingMembers.length > 0) {

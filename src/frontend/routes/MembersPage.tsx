@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, CircleHelp, Expand, Loader2, MessageSquarePlus, Pencil, Plus, RefreshCcw, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
+import { Archive, CircleHelp, Download, Expand, Loader2, MessageSquarePlus, Pencil, Plus, RefreshCcw, Save, Sparkles, Trash2, Upload, UserCircle2 } from 'lucide-react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../com
 import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
-import type { KBDigestMetadata } from '../repository/CouncilRepository';
+import type { ChatResponseModelSlotOption, KBDigestMetadata } from '../repository/CouncilRepository';
 import { DEFAULT_MEMBER_VOICE, describeMemberVoice, MEMBER_VOICE_OPTIONS } from '../constants/memberVoice';
 import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, MemberVoiceName, PersonalArchiveAccess } from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
@@ -16,6 +16,7 @@ interface MemberFormState {
   name: string;
   specialties: string;
   systemPrompt: string;
+  chatResponseModelSlot: number;
   guidanceProfilePrompt: string;
   ttsVoiceName: MemberVoiceName;
   ttsPersonaPrompt: string;
@@ -47,6 +48,7 @@ const emptyForm: MemberFormState = {
   name: '',
   specialties: '',
   systemPrompt: '',
+  chatResponseModelSlot: 1,
   guidanceProfilePrompt: '',
   ttsVoiceName: DEFAULT_MEMBER_VOICE,
   ttsPersonaPrompt: '',
@@ -82,6 +84,7 @@ export function MembersPage() {
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [form, setForm] = useState<MemberFormState>(emptyForm);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const [chatResponseModelSlots, setChatResponseModelSlots] = useState<ChatResponseModelSlotOption[]>([]);
   const [kbPanelError, setKbPanelError] = useState<string | null>(null);
   const [isSuggestingSpecialties, setIsSuggestingSpecialties] = useState(false);
   const [pendingAvatarBlob, setPendingAvatarBlob] = useState<Blob | null>(null);
@@ -100,6 +103,7 @@ export function MembersPage() {
   const [isDigestEditorOpen, setIsDigestEditorOpen] = useState(false);
   const [isSavingDigest, setIsSavingDigest] = useState(false);
   const [isRetryingDigestFromEditor, setIsRetryingDigestFromEditor] = useState(false);
+  const [downloadingKbDocumentId, setDownloadingKbDocumentId] = useState<string | null>(null);
   const [memberMemoryBundle, setMemberMemoryBundle] = useState<MemberMemoryBundleState | null>(null);
   const [isMemberMemoryLoading, setIsMemberMemoryLoading] = useState(false);
   const [memberMemoryError, setMemberMemoryError] = useState<string | null>(null);
@@ -121,6 +125,13 @@ export function MembersPage() {
   useEffect(() => {
     void hydrateMemberDocuments();
   }, [hydrateMemberDocuments]);
+
+  useEffect(() => {
+    void convexRepository
+      .listChatResponseModelSlots()
+      .then((slots) => setChatResponseModelSlots(slots))
+      .catch(() => setChatResponseModelSlots([]));
+  }, []);
 
   useEffect(() => {
     if (!editingMemberId) {
@@ -212,6 +223,7 @@ export function MembersPage() {
       name: member.name,
       specialties: member.specialties.join(', '),
       systemPrompt: member.systemPrompt,
+      chatResponseModelSlot: member.chatResponseModelSlot ?? 1,
       guidanceProfilePrompt: member.guidanceProfilePrompt ?? '',
       ttsVoiceName: member.ttsVoiceName,
       ttsPersonaPrompt: member.ttsPersonaPrompt ?? '',
@@ -275,6 +287,7 @@ export function MembersPage() {
     const payload = {
       name,
       systemPrompt: prompt,
+      chatResponseModelSlot: form.chatResponseModelSlot,
       guidanceProfilePrompt: form.guidanceProfilePrompt.trim() || undefined,
       ttsVoiceName: form.ttsVoiceName,
       ttsPersonaPrompt: form.ttsPersonaPrompt.trim() || undefined,
@@ -299,6 +312,7 @@ export function MembersPage() {
         name: created.name,
         specialties: created.specialties.join(', '),
         systemPrompt: created.systemPrompt,
+        chatResponseModelSlot: created.chatResponseModelSlot ?? 1,
         guidanceProfilePrompt: created.guidanceProfilePrompt ?? '',
         ttsVoiceName: created.ttsVoiceName,
         ttsPersonaPrompt: created.ttsPersonaPrompt ?? '',
@@ -363,6 +377,36 @@ export function MembersPage() {
       return;
     }
     setKbPanelError(null);
+  };
+
+  const downloadDocument = async (kbDocumentId: string, displayName: string) => {
+    setDownloadingKbDocumentId(kbDocumentId);
+    try {
+      const url = await convexRepository.getKbDocumentDownloadUrl({ kbDocumentId });
+      if (!url) {
+        throw new Error('Download unavailable for this document');
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Download failed');
+      }
+
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = displayName || 'document';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+      setKbPanelError(null);
+    } catch (error) {
+      setKbPanelError(error instanceof Error ? error.message : 'Download failed');
+    } finally {
+      setDownloadingKbDocumentId(null);
+    }
   };
 
   const generateSpecialties = async () => {
@@ -845,6 +889,32 @@ export function MembersPage() {
               </label>
 
               <label className="grid gap-1.5 font-mono text-xs">
+                <span>Chamber response model</span>
+                <select
+                  className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                  value={String(form.chatResponseModelSlot)}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      chatResponseModelSlot: Number.parseInt(event.target.value, 10) || 1,
+                    }))
+                  }
+                >
+                  {(chatResponseModelSlots.length > 0
+                    ? chatResponseModelSlots
+                    : [{ slot: 1, envKey: 'AI_MODEL_CHAT_RESPONSE', modelSpec: 'openai:gpt-5.3-chat-latest', isDefault: true }]
+                  ).map((slot) => (
+                    <option key={slot.slot} value={slot.slot}>
+                      {`Slot ${slot.slot}${slot.isDefault ? ' (default / fallback)' : ''} - ${slot.modelSpec}`}
+                    </option>
+                  ))}
+                </select>
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  This preference applies to chamber replies. Halls assign response models per participant automatically.
+                </p>
+              </label>
+
+              <label className="grid gap-1.5 font-mono text-xs">
                 <span>Speech voice</span>
                 <select
                   className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
@@ -1089,6 +1159,7 @@ export function MembersPage() {
                         const isDeleting = Boolean(kbDeletingDocumentIds[doc.id]);
                         const isRetryingIndex = Boolean(kbRetryingIndexDocumentIds[doc.id]);
                         const isRetryingMetadata = Boolean(kbRetryingMetadataDocumentIds[doc.id]);
+                        const isDownloading = downloadingKbDocumentId === doc.id;
                         return (
                           <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
                             <div className="flex items-center justify-between gap-2">
@@ -1136,7 +1207,19 @@ export function MembersPage() {
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7"
-                                    disabled={isDeleting}
+                                    disabled={isDeleting || isDownloading}
+                                    onClick={() => void downloadDocument(doc.id, doc.displayName)}
+                                    title="Download document"
+                                  >
+                                    {isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                                  </Button>
+                                ) : null}
+                                {doc.id && doc.storageId ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    disabled={isDeleting || isDownloading}
                                     onClick={() => void deleteDocument(doc.id)}
                                     title="Delete document"
                                   >

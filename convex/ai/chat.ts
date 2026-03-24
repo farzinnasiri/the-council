@@ -59,15 +59,33 @@ export const chatWithMember = action({
     timeAwareReentry: v.optional(timeAwareReentryDirectiveValidator),
     guidanceDirectives: v.optional(v.array(activeGuidanceDirectiveValidator)),
   },
+  returns: v.object({
+    answer: v.string(),
+    grounded: v.boolean(),
+    citations: v.array(v.object({ title: v.string(), uri: v.optional(v.string()) })),
+    model: v.string(),
+    retrievalModel: v.string(),
+    usedKnowledgeBase: v.boolean(),
+    usedPersonalArchive: v.optional(v.boolean()),
+    attemptedResponseModelSlot: v.optional(v.number()),
+    attemptedResponseModelSpec: v.optional(v.string()),
+    finalResponseModelSlot: v.optional(v.number()),
+    finalResponseModelSpec: v.optional(v.string()),
+    fallbackUsed: v.optional(v.boolean()),
+  }),
   handler: observeAction('ai.chat.chatWithMember', async (ctx, args) => {
     setMainSpanAttributes({
       'conversation.id': String(args.conversationId),
       'member.id': String(args.memberId),
     });
-    return await chatWithMemberUseCase(ctx, {
+    const result = await chatWithMemberUseCase(ctx, {
       ...args,
       retrievalProfile: resolveLegacyRetrievalProfile(args.retrievalStrategy, args.retrievalProfile),
     });
+    return {
+      ...result,
+      usedKnowledgeBase: Boolean(result.usedKnowledgeBase),
+    };
   }),
 });
 

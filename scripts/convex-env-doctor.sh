@@ -135,6 +135,25 @@ resolve_value() {
   fi
 }
 
+uses_openrouter_spec() {
+  local value
+  value="$(trim "$1")"
+  [[ -z "$value" ]] && return 1
+  [[ "$value" == openai:* ]] && return 1
+  [[ "$value" == google:* ]] && return 1
+  [[ "$value" == *:* ]]
+}
+
+array_includes() {
+  local needle="$1"
+  shift || true
+  local item
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
 merge_file "$DEFAULTS_FILE"
 merge_file "$LOCAL_FILE"
 
@@ -148,6 +167,7 @@ fi
 
 missing=()
 resolved_lines=()
+conditional_keys=()
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="$(trim "$line")"
   [[ -z "$line" ]] && continue
@@ -161,6 +181,67 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     resolved_lines+=("$key=$value")
   fi
 done < "$REQUIRED_FILE"
+
+extra_chat_response_keys=()
+while IFS='=' read -r raw_key _raw_value || [[ -n "${raw_key:-}" ]]; do
+  key="$(trim "${raw_key:-}")"
+  [[ -z "$key" ]] && continue
+  [[ "$key" =~ ^AI_MODEL_CHAT_RESPONSE_[2-9][0-9]*(__(DEV|PROD))?$ ]] || continue
+  base_key="${key%%__*}"
+  if ! array_includes "$base_key" "${extra_chat_response_keys[@]:-}"; then
+    extra_chat_response_keys+=("$base_key")
+  fi
+done < "$MERGED_FILE"
+
+if (( ${#extra_chat_response_keys[@]} > 0 )); then
+  for key in "${extra_chat_response_keys[@]}"; do
+    value="$(resolve_value "$key")"
+    if [[ -n "$value" ]]; then
+      resolved_lines+=("$key=$value")
+      if uses_openrouter_spec "$value"; then
+        conditional_keys+=("OPENROUTER_API_KEY")
+      fi
+    fi
+  done
+fi
+
+primary_chat_response_value="$(resolve_value "AI_MODEL_CHAT_RESPONSE")"
+if [[ -n "$primary_chat_response_value" ]] && uses_openrouter_spec "$primary_chat_response_value"; then
+  conditional_keys+=("OPENROUTER_API_KEY")
+fi
+
+if (( ${#conditional_keys[@]} > 0 )); then
+  unique_conditional_keys=()
+  for key in "${conditional_keys[@]}"; do
+    if ! array_includes "$key" "${unique_conditional_keys[@]:-}"; then
+      unique_conditional_keys+=("$key")
+    fi
+  done
+
+  for key in "${unique_conditional_keys[@]}"; do
+    value="$(resolve_value "$key")"
+    if [[ -z "$value" ]]; then
+      missing+=("$key")
+    else
+      resolved_lines+=("$key=$value")
+    fi
+  done
+fi
+
+if (( ${#resolved_lines[@]} > 0 )); then
+  unique_resolved_lines=()
+  for entry in "${resolved_lines[@]}"; do
+    key="${entry%%=*}"
+    existing_keys=()
+    for existing_entry in "${unique_resolved_lines[@]:-}"; do
+      existing_keys+=("${existing_entry%%=*}")
+    done
+    if ! array_includes "$key" "${existing_keys[@]:-}"; then
+      unique_resolved_lines+=("$entry")
+    fi
+  done
+  resolved_lines=("${unique_resolved_lines[@]}")
+fi
 
 if (( ${#missing[@]} > 0 )); then
   echo "Missing required Convex env keys for target '$TARGET':" >&2

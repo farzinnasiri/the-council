@@ -1,6 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
+import { listConfiguredChatResponseSlots } from './ai/modelConfig';
 
 /**
  * User-scoped get — reads a config value for the authenticated user.
@@ -54,6 +55,28 @@ export const get = query({
             .withIndex('by_key', (q) => q.eq('key', args.key))
             .unique();
         return row?.value ?? null;
+    },
+});
+
+export const listChatResponseModelSlots = query({
+    args: {},
+    returns: v.array(
+        v.object({
+            slot: v.number(),
+            envKey: v.string(),
+            modelSpec: v.string(),
+            isDefault: v.boolean(),
+        })
+    ),
+    handler: async (ctx) => {
+        const userId = await getAuthUserId(ctx);
+        if (!userId) return [];
+        return listConfiguredChatResponseSlots().map((slot) => ({
+            slot: slot.slot,
+            envKey: slot.envKey,
+            modelSpec: slot.spec,
+            isDefault: slot.isDefault,
+        }));
     },
 });
 

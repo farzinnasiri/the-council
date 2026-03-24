@@ -11,6 +11,7 @@ export interface OwnedMember {
   name: string;
   specialties: string[];
   systemPrompt: string;
+  chatResponseModelSlot?: number;
   guidanceProfilePrompt?: string;
   guidanceProfileGeneratedAt?: number;
   guidanceProfileUpdatedAt?: number;

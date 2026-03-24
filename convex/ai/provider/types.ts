@@ -104,6 +104,11 @@ export interface ProviderChatResponse {
   grounded: boolean;
   usedKnowledgeBase?: boolean;
   usedPersonalArchive?: boolean;
+  attemptedResponseModelSlot?: number;
+  attemptedResponseModelSpec?: string;
+  finalResponseModelSlot?: number;
+  finalResponseModelSpec?: string;
+  fallbackUsed?: boolean;
 }
 
 export type ChamberChatProfile = 'instant' | 'short' | 'think' | 'brainstorm' | 'deep_dive';

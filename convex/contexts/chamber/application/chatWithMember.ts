@@ -11,6 +11,7 @@ import { setMainSpanAttributes } from '../../../observability/wideEvents';
 import { wideEventError } from '../../../observability/errors';
 import { embedText } from '../../../ai/openaiEmbeddings';
 import { buildEpisodeRetrievalQuery } from '../../../ai/retrievalQueries';
+import { runWithChatResponseFallback } from '../../shared/chatResponseFallback';
 
 const COMPACTION_THRESHOLD_KEY = 'compaction-threshold';
 const COMPACTION_RECENT_RAW_TAIL_KEY = 'compaction-recent-raw-tail';
@@ -189,6 +190,11 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     errorCode: 'hall-chat-conversation-closed',
     message: 'This table is closed.',
   });
+  if (conversation.kind === 'hall') {
+    await ctx.runMutation(api.conversations.ensureHallParticipantResponseSlots, {
+      conversationId: args.conversationId,
+    });
+  }
   setMainSpanAttributes({
     'conversation.id': String(args.conversationId),
     'conversation.kind': conversation.kind,
@@ -306,6 +312,19 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
   });
 
   const kbDigests = member.deletedAt ? [] : await listMemberDigests(ctx, args.memberId);
+  const participantRows = conversation.kind === 'hall'
+    ? await ctx.runQuery(api.conversations.listParticipants, {
+        conversationId: args.conversationId,
+        includeRemoved: false,
+      })
+    : [];
+  const participant = conversation.kind === 'hall'
+    ? participantRows.find((row: any) => row.memberId === args.memberId)
+    : null;
+  const preferredResponseModelSlot =
+    conversation.kind === 'hall'
+      ? (participant?.chatResponseModelSlot ?? 1)
+      : (member.chatResponseModelSlot ?? 1);
 
   const provider = createAiProvider();
   const providerInput = {
@@ -319,7 +338,6 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     identityContext: undefined,
     memoryHint: chamberRuntimeContext.previousSummary,
     kbDigests: toKBDigestHints(kbDigests),
-    responseModel: args.chatModel,
     chatProfile: args.chatProfile,
     retrievalModel: args.retrievalModel,
     retrievalStrategy: args.retrievalStrategy,
@@ -331,31 +349,45 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     turnDirective: args.turnDirective,
   };
 
-  try {
-    return await provider.chatMember({
-      ...providerInput,
-      personaPrompt: effectiveSystemPrompt,
-    });
-  } catch (error) {
-    const hasGuidance = guidanceNotes.length > 0;
-    if (!hasGuidance) {
-      throw error;
-    }
-    setMainSpanAttributes({ 'guidance.retry_without_guidance': true });
+  const invokeProvider = async (responseModel: string) => {
+    try {
+      return await provider.chatMember({
+        ...providerInput,
+        responseModel,
+        personaPrompt: effectiveSystemPrompt,
+      });
+    } catch (error) {
+      const hasGuidance = guidanceNotes.length > 0;
+      if (!hasGuidance) {
+        throw error;
+      }
+      setMainSpanAttributes({ 'guidance.retry_without_guidance': true });
 
-    return await provider.chatMember({
-      ...providerInput,
-      personaPrompt: buildEffectiveSystemPrompt({
-        systemPrompt: member.systemPrompt,
-        interactionPolicyBlock,
-        mentalModelBlock,
-        episodesBlock,
-        pinnedMessagesBlock,
-        identityBlock,
-        hallBlock,
-        summaryBlock,
-        includeGuidance: false,
-      }),
-    });
-  }
+      return await provider.chatMember({
+        ...providerInput,
+        responseModel,
+        personaPrompt: buildEffectiveSystemPrompt({
+          systemPrompt: member.systemPrompt,
+          interactionPolicyBlock,
+          mentalModelBlock,
+          episodesBlock,
+          pinnedMessagesBlock,
+          identityBlock,
+          hallBlock,
+          summaryBlock,
+          includeGuidance: false,
+        }),
+      });
+    }
+  };
+
+  const { result, metadata } = await runWithChatResponseFallback({
+    preferredSlot: preferredResponseModelSlot,
+    responseModelOverride: args.chatModel,
+    invoke: invokeProvider,
+  });
+  return {
+    ...result,
+    ...metadata,
+  };
 }

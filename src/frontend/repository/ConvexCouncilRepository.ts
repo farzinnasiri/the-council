@@ -34,6 +34,7 @@ import {
 } from '../constants/compactionPolicy';
 import type {
   AppendMessagesInput,
+  ChatResponseModelSlotOption,
   CouncilRepository,
   CouncilSnapshot,
   CreateHallInput,
@@ -69,6 +70,7 @@ function toMember(doc: ConvexMemberDoc): Member {
     avatarUrl: (doc as any).avatarUrl ?? null,
     specialties: doc.specialties,
     systemPrompt: doc.systemPrompt,
+    chatResponseModelSlot: doc.chatResponseModelSlot,
     guidanceProfilePrompt: doc.guidanceProfilePrompt,
     guidanceProfileGeneratedAt: doc.guidanceProfileGeneratedAt,
     guidanceProfileUpdatedAt: doc.guidanceProfileUpdatedAt,
@@ -117,6 +119,7 @@ function toParticipant(doc: ConvexParticipantDoc): ConversationParticipant {
     id: doc._id,
     conversationId: doc.conversationId,
     memberId: doc.memberId,
+    chatResponseModelSlot: doc.chatResponseModelSlot,
     status: doc.status,
     joinedAt: doc.joinedAt,
     leftAt: doc.leftAt,
@@ -397,6 +400,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     const doc = await this.client.mutation(api.members.create, {
       name: input.name,
       systemPrompt: input.systemPrompt,
+      chatResponseModelSlot: input.chatResponseModelSlot,
       guidanceProfilePrompt: input.guidanceProfilePrompt,
       ttsVoiceName: input.ttsVoiceName,
       ttsPersonaPrompt: input.ttsPersonaPrompt,
@@ -413,6 +417,10 @@ class ConvexCouncilRepository implements CouncilRepository {
       kbStoreName: patch.kbStoreName ?? undefined,
     });
     return toMember(doc as any);
+  }
+
+  async listChatResponseModelSlots(): Promise<ChatResponseModelSlotOption[]> {
+    return await this.client.query(api.settings.listChatResponseModelSlots, {});
   }
 
   async archiveMember(memberId: string): Promise<void> {
@@ -874,6 +882,12 @@ class ConvexCouncilRepository implements CouncilRepository {
     return docs.map(toParticipant);
   }
 
+  async ensureHallParticipantResponseSlots(conversationId: string): Promise<{ updatedCount: number }> {
+    return await this.clientAny.mutation('conversations:ensureHallParticipantResponseSlots', {
+      conversationId: conversationId as Id<'conversations'>,
+    });
+  }
+
   async addHallParticipant(conversationId: string, memberId: string): Promise<void> {
     await this.clientAny.mutation('conversations:addHallParticipant', {
       conversationId: conversationId as Id<'conversations'>,
@@ -1268,6 +1282,41 @@ class ConvexCouncilRepository implements CouncilRepository {
     })) as MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string };
   }
 
+  async chatRoundtableSpeakers(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<Array<{
+    memberId: string;
+    status: 'sent' | 'error';
+    answer: string;
+    intent: 'speak' | 'challenge' | 'support';
+    targetMemberId?: string;
+    error?: string;
+    attemptedResponseModelSlot?: number;
+    attemptedResponseModelSpec?: string;
+    finalResponseModelSlot?: number;
+    finalResponseModelSpec?: string;
+    fallbackUsed?: boolean;
+  }>> {
+    const result = await this.client.action(api.ai.roundtable.chatRoundtableSpeakers as any, {
+      conversationId: input.conversationId as Id<'conversations'>,
+      roundNumber: input.roundNumber,
+    });
+    return result.results as Array<{
+      memberId: string;
+      status: 'sent' | 'error';
+      answer: string;
+      intent: 'speak' | 'challenge' | 'support';
+      targetMemberId?: string;
+      error?: string;
+      attemptedResponseModelSlot?: number;
+      attemptedResponseModelSpec?: string;
+      finalResponseModelSlot?: number;
+      finalResponseModelSpec?: string;
+      fallbackUsed?: boolean;
+    }>;
+  }
+
   async compactConversation(input: {
     conversationId: string;
     previousSummary?: string;
@@ -1363,6 +1412,12 @@ class ConvexCouncilRepository implements CouncilRepository {
       ok: Boolean(body.ok),
       document: toKbDocumentLifecycle(body.document),
     };
+  }
+
+  async getKbDocumentDownloadUrl(input: { kbDocumentId: string }): Promise<string | null> {
+    return (await this.client.query(api.kbDocuments.getDownloadUrl as any, {
+      kbDocumentId: input.kbDocumentId as Id<'kbDocuments'>,
+    })) as string | null;
   }
 
   async listKbDocuments(input: { memberId: string }): Promise<KbDocumentLifecycle[]> {

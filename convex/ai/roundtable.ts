@@ -12,6 +12,7 @@ import {
 } from '../contexts/shared/contracts';
 import { prepareRoundtableRoundUseCase } from '../contexts/hall/application/prepareRoundtableRound';
 import { refreshRoundtableRoundUseCase } from '../contexts/hall/application/refreshRoundtableRound';
+import { chatRoundtableSpeakersUseCase } from '../contexts/hall/application/chatRoundtableSpeakers';
 import { chatRoundtableSpeakerUseCase } from '../contexts/hall/application/chatRoundtableSpeaker';
 import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
 
@@ -142,6 +143,11 @@ export const chatRoundtableSpeaker = action({
     usedKnowledgeBase: v.boolean(),
     intent: v.union(v.literal('speak'), v.literal('challenge'), v.literal('support')),
     targetMemberId: v.optional(v.id('members')),
+    attemptedResponseModelSlot: v.optional(v.number()),
+    attemptedResponseModelSpec: v.optional(v.string()),
+    finalResponseModelSlot: v.optional(v.number()),
+    finalResponseModelSpec: v.optional(v.string()),
+    fallbackUsed: v.optional(v.boolean()),
   }),
   handler: observeAction('ai.roundtable.chatRoundtableSpeaker', async (ctx, args) => {
     setMainSpanAttributes({
@@ -151,5 +157,38 @@ export const chatRoundtableSpeaker = action({
       'hall.force': Boolean(args.force),
     });
     return await chatRoundtableSpeakerUseCase(ctx, args);
+  }),
+});
+
+export const chatRoundtableSpeakers = action({
+  args: {
+    conversationId: v.id('conversations'),
+    roundNumber: v.number(),
+    retrievalModel: v.optional(v.string()),
+    chatModel: v.optional(v.string()),
+  },
+  returns: v.object({
+    results: v.array(
+      v.object({
+        memberId: v.id('members'),
+        status: v.union(v.literal('sent'), v.literal('error')),
+        answer: v.string(),
+        intent: roundtableSpeakIntentValidator,
+        targetMemberId: v.optional(v.id('members')),
+        error: v.optional(v.string()),
+        attemptedResponseModelSlot: v.optional(v.number()),
+        attemptedResponseModelSpec: v.optional(v.string()),
+        finalResponseModelSlot: v.optional(v.number()),
+        finalResponseModelSpec: v.optional(v.string()),
+        fallbackUsed: v.optional(v.boolean()),
+      })
+    ),
+  }),
+  handler: observeAction('ai.roundtable.chatRoundtableSpeakers', async (ctx, args) => {
+    setMainSpanAttributes({
+      'conversation.id': String(args.conversationId),
+      'hall.round_number': args.roundNumber,
+    });
+    return await chatRoundtableSpeakersUseCase(ctx, args);
   }),
 });

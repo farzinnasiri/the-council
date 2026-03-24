@@ -159,11 +159,13 @@ Status: Completed (March 12, 2026)
 ## 3) Platform / Architecture Changes
 
 ### 3.2 Improve KB Metadata Extraction
+(Completed 22 March)
 - Redesign extraction prompt(s) and extraction schema.
 - Revisit what metadata is extracted and how it is normalized.
 - Evaluate retrieval quality improvements from richer metadata.
 
 ### 3.3 Advanced KB Search (Parallel Querying)
+(Completed 22 March)
 - Implement advanced KB retrieval using multiple parallel queries per user request.
 - Add query decomposition/rewrite strategies (facets, synonyms, intent slices).
 - Merge/rank parallel retrieval results before final response generation.
@@ -174,6 +176,7 @@ Status: Completed (March 12, 2026)
 - Define storage, moderation, and UI presentation rules.
 
 ### 3.7 Implement Wide Events
+(Completed 20 March)
 - Implement request-scoped wide events across backend pipelines.
 - Standardize event shape for query-first debugging (request/user/conversation/member/model/retrieval context).
 - Ensure critical AI paths emit one rich main event per unit of work with error and latency dimensions.

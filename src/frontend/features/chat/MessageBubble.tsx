@@ -377,6 +377,16 @@ export function MessageBubble({ message }: { message: Message }) {
                               <DropdownMenuItem
                                 onSelect={(event) => {
                                   event.preventDefault();
+                                  void refineLatestChamberResponse(message.conversationId, 'brainstorm');
+                                }}
+                                className="gap-2"
+                              >
+                                <Search className="h-3.5 w-3.5" />
+                                Brainstorm
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
                                   void refineLatestChamberResponse(message.conversationId, 'shorter');
                                 }}
                                 className="gap-2"

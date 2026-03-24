@@ -24,6 +24,7 @@ import { DEFAULT_MEMBER_VOICE } from '../constants/memberVoice';
 import { convexRepository as councilRepository } from '../repository/ConvexCouncilRepository';
 import {
   chatWithMember,
+  chatRoundtableSpeakers,
   chatRoundtableSpeaker,
   createKbDocumentRecord,
   deleteKbDocument,
@@ -47,6 +48,7 @@ import type { KbDocumentLifecycle } from '../repository/CouncilRepository';
 interface CreateMemberPayload {
   name: string;
   systemPrompt: string;
+  chatResponseModelSlot?: number;
   guidanceProfilePrompt?: string;
   ttsVoiceName?: MemberVoiceName;
   ttsPersonaPrompt?: string;
@@ -108,7 +110,7 @@ interface AppState {
     }
   >;
   compactionPolicy: CompactionPolicy;
-  refiningActionByMessageId: Record<string, 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate' | undefined>;
+  refiningActionByMessageId: Record<string, 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate' | undefined>;
   retryingMessageIds: Record<string, boolean>;
 
   initializeApp: () => Promise<void>;
@@ -164,7 +166,7 @@ interface AppState {
   clearChamberByMember: (memberId: string) => Promise<void>;
   refineLatestChamberResponse: (
     conversationId: string,
-    action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate'
+    action: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate'
   ) => Promise<void>;
   setNotebookOpen: (open: boolean) => void;
   toggleNotebookOpen: () => void;
@@ -237,9 +239,12 @@ function getBaseGenerationProfile(mode: ChamberResponseMode | undefined): {
   }
 }
 
-function resolveRefinementProfiles(action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate') {
+function resolveRefinementProfiles(action: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate') {
   if (action === 'think_harder') {
     return { chatProfile: 'think' as const, retrievalStrategy: 'instant' as const, turnDirective: undefined };
+  }
+  if (action === 'brainstorm') {
+    return { chatProfile: 'instant' as const, retrievalStrategy: 'brainstorm' as const, turnDirective: undefined };
   }
   if (action === 'deep_dive') {
     return { chatProfile: 'think' as const, retrievalStrategy: 'deep_dive' as const, turnDirective: undefined };
@@ -251,11 +256,13 @@ function resolveRefinementProfiles(action: 'think_harder' | 'deep_dive' | 'short
 }
 
 function getRefinementGenerationProfile(
-  action: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate'
+  action: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate'
 ): ChamberResponseMode {
   switch (action) {
     case 'think_harder':
       return 'think';
+    case 'brainstorm':
+      return 'brainstorm';
     case 'deep_dive':
       return 'deep_dive';
     case 'shorter':
@@ -563,6 +570,24 @@ function stripLeadingSpeakerLabel(text: string, memberName: string): string {
     return rest || text;
   }
   return text;
+}
+
+function formatResponseModelFallbackToast(memberName: string, attemptedSpec?: string): string {
+  const modelLabel = attemptedSpec?.trim() || 'the assigned response model';
+  return `Model fallback: ${memberName} used the default response model after ${modelLabel} failed.`;
+}
+
+function formatHallResponseModelFallbackToast(
+  events: Array<{ memberName: string; attemptedSpec?: string }>
+): string {
+  const names = Array.from(new Set(events.map((event) => event.memberName))).join(', ');
+  const attemptedSpecs = Array.from(
+    new Set(events.map((event) => event.attemptedSpec?.trim()).filter((value): value is string => Boolean(value)))
+  );
+  if (attemptedSpecs.length === 0) {
+    return `Model fallback: ${names} used the default response model after their assigned models failed.`;
+  }
+  return `Model fallback: ${names} used the default response model after assigned models failed (${attemptedSpecs.join(', ')}).`;
 }
 
 function selectOpeningRoundMembers(candidates: RoundtableState['candidates']): string[] {
@@ -1220,6 +1245,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           memberId,
           force,
         });
+        if (result.fallbackUsed) {
+          get().showToast(formatResponseModelFallbackToast(memberName, result.attemptedResponseModelSpec));
+        }
         reply = buildMessage({
           conversationId,
           role: 'member',
@@ -1314,6 +1342,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   refreshHallParticipants: async (conversationId) => {
+    await councilRepository.ensureHallParticipantResponseSlots(conversationId);
     const participants = await councilRepository.listParticipants(conversationId);
     set((state) => ({
       hallParticipantsByConversation: {
@@ -1922,87 +1951,65 @@ export const useAppStore = create<AppState>((set, get) => ({
                 isVisibleMessage(message) &&
                 message.status !== 'error'
             );
-            const openingParticipants = activeParticipantIds
-              .map((id) => membersById.get(id))
-              .filter((member): member is Member => Boolean(member && !member.deletedAt));
             try {
-              await Promise.all(
-                openingSpeakerIds.map(async (memberId) => {
-                  const member = membersById.get(memberId);
-                  const memberName = member?.name ?? 'Member';
-                  const openingSourceUserMessage = [...openingMessages]
-                    .reverse()
-                    .find((message) => message.role === 'user' && message.status !== 'error' && isVisibleMessage(message));
-                  let reply: Message;
-
-                  try {
-                    const result = await chatWithMember({
-                      message: text,
-                      memberId,
-                      conversationId,
-                      contextMessages: buildMemberContextWindow(
-                        openingMessages,
-                        conversationId,
-                        memberId,
-                        'hall',
-                        membersById
-                      ),
-                      hallContext: member
-                        ? buildHallSystemContext(
-                            member,
-                            openingParticipants,
-                            openingMessages,
-                            [],
-                            'roundtable',
-                            conversationId,
-                          )
-                        : undefined,
-                    });
-                    reply = buildMessage({
-                      conversationId,
-                      role: 'member',
-                      authorMemberId: memberId,
-                      content: stripLeadingSpeakerLabel(result.answer, memberName),
-                      status: 'sent',
-                      roundNumber: nextRound.round.roundNumber,
-                      inReplyToMessageId: openingSourceUserMessage?.id,
-                    });
-                  } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Request failed';
-                    reply = buildMessage({
-                      conversationId,
-                      role: 'member',
-                      authorMemberId: memberId,
-                      content: `${memberName} could not speak in this round.`,
-                      status: 'error',
-                      roundNumber: nextRound.round.roundNumber,
-                      error: errorMessage,
-                      inReplyToMessageId: openingSourceUserMessage?.id,
-                    });
-                  }
-
-                  set((current) => ({
-                    messages: [...current.messages, reply],
-                    ...updateConversationStamp(current, conversationId, true),
-                    pendingReplyCount: {
-                      ...current.pendingReplyCount,
-                      [conversationId]: Math.max(0, (current.pendingReplyCount[conversationId] ?? 1) - 1),
-                    },
-                    pendingReplyMemberIds: {
-                      ...current.pendingReplyMemberIds,
-                      [conversationId]: (current.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId),
-                    },
-                  }));
-
-                  const persistedReplies = await councilRepository.appendMessages({
+              const openingSourceUserMessage = [...openingMessages]
+                .reverse()
+                .find((message) => message.role === 'user' && message.status !== 'error' && isVisibleMessage(message));
+              const openingResults = await chatRoundtableSpeakers({
+                conversationId,
+                roundNumber: nextRound.round.roundNumber,
+              });
+              const openingFallbackEvents = openingResults
+                .filter((result) => result.fallbackUsed)
+                .map((result) => ({
+                  memberName: membersById.get(result.memberId)?.name ?? 'Member',
+                  attemptedSpec: result.attemptedResponseModelSpec,
+                }));
+              if (openingFallbackEvents.length > 0) {
+                get().showToast(formatHallResponseModelFallbackToast(openingFallbackEvents));
+              }
+              const resultsByMemberId = new Map(openingResults.map((result) => [result.memberId, result]));
+              const openingReplies = openingSpeakerIds.map((memberId) => {
+                const memberName = membersById.get(memberId)?.name ?? 'Member';
+                const result = resultsByMemberId.get(memberId);
+                if (!result || result.status === 'error') {
+                  return buildMessage({
                     conversationId,
-                    messages: [reply],
+                    role: 'member',
+                    authorMemberId: memberId,
+                    content: `${memberName} could not speak in this round.`,
+                    status: 'error',
+                    roundNumber: nextRound.round.roundNumber,
+                    error: result?.error ?? 'Request failed',
+                    inReplyToMessageId: openingSourceUserMessage?.id,
                   });
-                  set((current) => ({
-                    messages: replaceOptimisticMessages(current.messages, [reply], persistedReplies),
-                  }));
-                })
-              );
+                }
+
+                return buildMessage({
+                  conversationId,
+                  role: 'member',
+                  authorMemberId: memberId,
+                  content: stripLeadingSpeakerLabel(result.answer, memberName),
+                  status: 'sent',
+                  roundNumber: nextRound.round.roundNumber,
+                  roundIntent: result.intent,
+                  roundTargetMemberId: result.targetMemberId,
+                  inReplyToMessageId: openingSourceUserMessage?.id,
+                });
+              });
+
+              set((current) => ({
+                messages: [...current.messages, ...openingReplies],
+                ...updateConversationStamp(current, conversationId, true),
+              }));
+
+              const persistedReplies = await councilRepository.appendMessages({
+                conversationId,
+                messages: openingReplies,
+              });
+              set((current) => ({
+                messages: replaceOptimisticMessages(current.messages, openingReplies, persistedReplies),
+              }));
 
               const completed = await markRoundtableCompleted({
                 conversationId,
@@ -2262,6 +2269,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       conversation.kind === 'chamber'
         ? getBaseGenerationProfile(conversation.chamberResponseMode)
         : { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const };
+    const hallFallbackEvents: Array<{ memberName: string; attemptedSpec?: string }> = [];
     const replyTasks = memberIds.map(async (memberId) => {
       const member = membersMap.get(memberId);
       const sourceUserMessage = [...get().messages]
@@ -2311,6 +2319,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
             retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
           });
+          if (result.fallbackUsed) {
+            if (conversation.kind === 'hall') {
+              hallFallbackEvents.push({
+                memberName: member.name,
+                attemptedSpec: result.attemptedResponseModelSpec,
+              });
+            } else {
+              get().showToast(formatResponseModelFallbackToast(member.name, result.attemptedResponseModelSpec));
+            }
+          }
 
           reply = buildMessage({
             conversationId,
@@ -2390,6 +2408,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     await Promise.all(replyTasks);
+    if (conversation.kind === 'hall' && hallFallbackEvents.length > 0) {
+      get().showToast(formatHallResponseModelFallbackToast(hallFallbackEvents));
+    }
     if (conversation.kind === 'chamber') {
       void councilRepository.reflectChamberGuidance({
         conversationId,
@@ -2880,6 +2901,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             memberId: failedMessage.authorMemberId,
             force: true,
           });
+          if (result.fallbackUsed) {
+            get().showToast(formatResponseModelFallbackToast(memberName, result.attemptedResponseModelSpec));
+          }
           retriedReply = buildMessage({
             conversationId: failedMessage.conversationId,
             role: 'member',
@@ -2967,6 +2991,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
             retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
           });
+          if (result.fallbackUsed) {
+            if (conversation.kind === 'hall') {
+              get().showToast(
+                formatHallResponseModelFallbackToast([
+                  { memberName: member.name, attemptedSpec: result.attemptedResponseModelSpec },
+                ])
+              );
+            } else {
+              get().showToast(formatResponseModelFallbackToast(member.name, result.attemptedResponseModelSpec));
+            }
+          }
 
           retriedReply = buildMessage({
             conversationId: conversation.id,

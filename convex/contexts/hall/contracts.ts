@@ -70,6 +70,11 @@ export type RoundtableSingleSpeakerResponse = {
   usedKnowledgeBase: boolean;
   intent: 'speak' | 'challenge' | 'support';
   targetMemberId?: Id<'members'>;
+  attemptedResponseModelSlot?: number;
+  attemptedResponseModelSpec?: string;
+  finalResponseModelSlot?: number;
+  finalResponseModelSpec?: string;
+  fallbackUsed?: boolean;
 };
 
 export interface HallApplicationService {
@@ -78,5 +83,6 @@ export interface HallApplicationService {
   suggestMemberSpecialties(input: SuggestMemberSpecialtiesInput): Promise<{ specialties: string[]; model: string }>;
   prepareRoundtableRound(input: PrepareRoundtableRoundInput): Promise<RoundtableState>;
   refreshRoundtableRound(input: RefreshRoundtableRoundInput): Promise<RoundtableState>;
+  chatRoundtableSpeakers(input: ChatRoundtableSpeakersInput): Promise<{ results: RoundtableSpeakerResult[] }>;
   chatRoundtableSpeaker(input: ChatRoundtableSpeakerInput): Promise<RoundtableSingleSpeakerResponse>;
 }

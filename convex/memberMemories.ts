@@ -452,6 +452,7 @@ export const collectRefreshEvidenceInternal = internalQuery({
       content: v.string(),
       revisionKind: v.optional(v.union(
         v.literal('think_harder'),
+        v.literal('brainstorm'),
         v.literal('deep_dive'),
         v.literal('shorter'),
         v.literal('elaborate'),
@@ -496,7 +497,7 @@ export const collectRefreshEvidenceInternal = internalQuery({
       createdAt: number;
       role: 'user' | 'assistant';
       content: string;
-      revisionKind?: 'think_harder' | 'deep_dive' | 'shorter' | 'elaborate';
+      revisionKind?: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate';
       generationProfile?: 'instant' | 'short' | 'think' | 'brainstorm' | 'deep_dive';
     }> = [];
     const feedbackKeys: string[] = [];

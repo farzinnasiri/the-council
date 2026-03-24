@@ -2,6 +2,7 @@
 
 import { ChatGoogle } from '@langchain/google';
 import { ChatOpenAI } from '@langchain/openai';
+import { ChatOpenRouter } from '@langchain/openrouter';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ModelTarget } from '../modelConfig';
 import { wideEventError } from '../../observability/errors';
@@ -29,6 +30,25 @@ function resolveGeminiKey(): string {
   return key;
 }
 
+function resolveOpenRouterKey(): string {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) {
+    throw wideEventError(
+      'runtime-openrouter-key-missing',
+      'OPENROUTER_API_KEY is not set in Convex runtime env'
+    );
+  }
+  return key;
+}
+
+function normalizeOpenRouterModel(model: string): string {
+  const [provider, ...rest] = model.split(':');
+  if (!provider || rest.length === 0) {
+    return model;
+  }
+  return `${provider}/${rest.join(':')}`;
+}
+
 export function createChatModel(
   target: ModelTarget,
   options?: { temperature?: number; thinkingBudget?: number }
@@ -42,6 +62,14 @@ export function createChatModel(
       apiKey: resolveOpenAiKey(),
       model: target.model,
       useResponsesApi,
+    });
+  }
+
+  if (target.provider === 'openrouter') {
+    return new ChatOpenRouter({
+      apiKey: resolveOpenRouterKey(),
+      model: normalizeOpenRouterModel(target.model),
+      temperature,
     });
   }
 

@@ -7,6 +7,11 @@ import { useAuthActions } from '@convex-dev/auth/react';
 export function SignInPage() {
     const { signIn } = useAuthActions();
 
+    const handleGoogleSignIn = () => {
+        const redirectTo = typeof window !== 'undefined' ? window.location.href : undefined;
+        void signIn('google', redirectTo ? { redirectTo } : undefined);
+    };
+
     return (
         <div className="grid h-svh place-items-center bg-background px-4">
             <div className="w-full max-w-sm">
@@ -27,7 +32,7 @@ export function SignInPage() {
                     <button
                         id="signin-google-btn"
                         type="button"
-                        onClick={() => void signIn('google')}
+                        onClick={handleGoogleSignIn}
                         className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium text-foreground transition hover:bg-muted active:scale-[0.98]"
                     >
                         {/* Google logo SVG */}

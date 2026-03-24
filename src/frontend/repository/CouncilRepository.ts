@@ -28,6 +28,7 @@ import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/co
 export interface CreateMemberInput {
   name: string;
   systemPrompt: string;
+  chatResponseModelSlot?: number;
   guidanceProfilePrompt?: string;
   ttsVoiceName?: MemberVoiceName;
   ttsPersonaPrompt?: string;
@@ -38,6 +39,7 @@ export interface CreateMemberInput {
 export interface UpdateMemberPatch {
   name?: string;
   systemPrompt?: string;
+  chatResponseModelSlot?: number;
   guidanceProfilePrompt?: string;
   guidanceProfileGeneratedAt?: number;
   ttsVoiceName?: MemberVoiceName;
@@ -90,6 +92,18 @@ export interface MemberChatResult {
   retrievalModel: string;
   usedKnowledgeBase: boolean;
   usedPersonalArchive?: boolean;
+  attemptedResponseModelSlot?: number;
+  attemptedResponseModelSpec?: string;
+  finalResponseModelSlot?: number;
+  finalResponseModelSpec?: string;
+  fallbackUsed?: boolean;
+}
+
+export interface ChatResponseModelSlotOption {
+  slot: number;
+  envKey: string;
+  modelSpec: string;
+  isDefault: boolean;
 }
 
 export interface MessageSpeechResult {
@@ -152,6 +166,7 @@ export interface CouncilRepository {
   listMembers(includeArchived?: boolean): Promise<Member[]>;
   createMember(input: CreateMemberInput): Promise<Member>;
   updateMember(memberId: string, patch: UpdateMemberPatch): Promise<Member>;
+  listChatResponseModelSlots(): Promise<ChatResponseModelSlotOption[]>;
   archiveMember(memberId: string): Promise<void>;
   setMemberStoreName(memberId: string, storeName: string): Promise<void>;
   generateMemberGuidanceProfile(input: {
@@ -242,6 +257,7 @@ export interface CouncilRepository {
   }): Promise<{ directivesCreated: number; model?: string; skippedReason?: string }>;
 
   listParticipants(conversationId: string, includeRemoved?: boolean): Promise<ConversationParticipant[]>;
+  ensureHallParticipantResponseSlots(conversationId: string): Promise<{ updatedCount: number }>;
   addHallParticipant(conversationId: string, memberId: string): Promise<void>;
   removeHallParticipant(conversationId: string, memberId: string): Promise<void>;
 
@@ -390,6 +406,22 @@ export interface CouncilRepository {
     memberId: string;
     force?: boolean;
   }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }>;
+  chatRoundtableSpeakers(input: {
+    conversationId: string;
+    roundNumber: number;
+  }): Promise<Array<{
+    memberId: string;
+    status: 'sent' | 'error';
+    answer: string;
+    intent: 'speak' | 'challenge' | 'support';
+    targetMemberId?: string;
+    error?: string;
+    attemptedResponseModelSlot?: number;
+    attemptedResponseModelSpec?: string;
+    finalResponseModelSlot?: number;
+    finalResponseModelSpec?: string;
+    fallbackUsed?: boolean;
+  }>>;
   compactConversation(input: {
     conversationId: string;
     previousSummary?: string;
@@ -421,6 +453,7 @@ export interface CouncilRepository {
   startKbDocumentProcessing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
   retryKbDocumentIndexing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
   retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  getKbDocumentDownloadUrl(input: { kbDocumentId: string }): Promise<string | null>;
   listKbDocuments(input: { memberId: string }): Promise<KbDocumentLifecycle[]>;
   deleteKbDocument(input: {
     kbDocumentId: string;

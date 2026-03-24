@@ -1,5 +1,6 @@
 'use node';
 
+import { api } from '../../../_generated/api';
 import type { Id } from '../../../_generated/dataModel';
 import { ensureMemberStore } from '../../../ai/kbIngest';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
@@ -10,6 +11,7 @@ import { normalizeHallMode } from '../domain/hallMode';
 import { moveTypeToRoundIntent } from '../domain/roundtableAllocator';
 import { buildContextMessages, buildHallSystemPrompt } from '../domain/hallPrompt';
 import type { ChatRoundtableSpeakersInput } from '../contracts';
+import { runWithChatResponseFallback } from '../../shared/chatResponseFallback';
 import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
 import { listMemberKBDigests, loadActiveMembersMap } from '../infrastructure/membersRepo';
 import { listActiveMessages, listAllMessages } from '../infrastructure/messagesRepo';
@@ -27,6 +29,7 @@ interface RunRoundtableSpeakerOptions {
   roundSummaries: string[];
   latestUserMessage?: MessageRow;
   activeMembers: MemberListRow[];
+  chatResponseModelSlot: number;
   retrievalModel?: string;
   chatModel?: string;
 }
@@ -35,6 +38,8 @@ export interface RoundtableSpeakerContribution extends RoundtableSpeakerResult {
   model?: string;
   retrievalModel?: string;
   usedKnowledgeBase?: boolean;
+  grounded?: boolean;
+  citations?: Array<{ title: string; uri?: string }>;
 }
 
 const ROUND_SPEAKER_TIMEOUT_MS = 45_000;
@@ -137,38 +142,44 @@ export async function runRoundtableSpeakerContribution(
 
   try {
     const provider = createAiProvider();
-    const result = await withTimeout(
-      provider.chatMember({
-        query: roundPrompt,
-        storeName: effectiveStoreName,
-        knowledgeRetriever: createKnowledgeRetriever(options.ctx, options.memberId),
-        personalArchiveRetriever: undefined,
-        personalArchiveAccess: undefined,
-        identityContext: undefined,
-        memoryHint: undefined,
-        kbDigests: toKBDigestHints(kbDigests),
-        responseModel: options.chatModel,
-        retrievalModel: options.retrievalModel,
-        temperature: 0.35,
-        personaPrompt: buildHallSystemPrompt({
-          member,
-          participants: options.activeMembers,
-          hallMode: 'roundtable',
-          roundSummaries: options.roundSummaries,
-          rawMessages: options.rawContextMessages,
-          conversationId: options.conversationId,
+    const invokeProvider = async (responseModel: string) =>
+      await withTimeout(
+        provider.chatMember({
+          query: roundPrompt,
+          storeName: effectiveStoreName,
+          knowledgeRetriever: createKnowledgeRetriever(options.ctx, options.memberId),
+          personalArchiveRetriever: undefined,
+          personalArchiveAccess: undefined,
+          identityContext: undefined,
+          memoryHint: undefined,
+          kbDigests: toKBDigestHints(kbDigests),
+          responseModel,
+          retrievalModel: options.retrievalModel,
+          temperature: 0.35,
+          personaPrompt: buildHallSystemPrompt({
+            member,
+            participants: options.activeMembers,
+            hallMode: 'roundtable',
+            roundSummaries: options.roundSummaries,
+            rawMessages: options.rawContextMessages,
+            conversationId: options.conversationId,
+          }),
+          contextMessages: buildContextMessages({
+            messages: options.rawContextMessages,
+            membersById: options.membersById,
+            selfMemberId: options.memberId,
+            omitLatestUserMessage: true,
+          }),
+          includeConversationContext: false,
+          knowledgeMode: 'force',
         }),
-        contextMessages: buildContextMessages({
-          messages: options.rawContextMessages,
-          membersById: options.membersById,
-          selfMemberId: options.memberId,
-          omitLatestUserMessage: true,
-        }),
-        includeConversationContext: false,
-        knowledgeMode: 'force',
-      }),
-      ROUND_SPEAKER_TIMEOUT_MS,
-    );
+        ROUND_SPEAKER_TIMEOUT_MS,
+      );
+    const { result, metadata } = await runWithChatResponseFallback({
+      preferredSlot: options.chatResponseModelSlot,
+      responseModelOverride: options.chatModel,
+      invoke: invokeProvider,
+    });
 
     return {
       memberId: options.memberId,
@@ -179,6 +190,13 @@ export async function runRoundtableSpeakerContribution(
       model: result.model,
       retrievalModel: result.retrievalModel,
       usedKnowledgeBase: result.usedKnowledgeBase,
+      grounded: result.grounded,
+      citations: result.citations,
+      attemptedResponseModelSlot: metadata.attemptedResponseModelSlot,
+      attemptedResponseModelSpec: metadata.attemptedResponseModelSpec,
+      finalResponseModelSlot: metadata.finalResponseModelSlot,
+      finalResponseModelSpec: metadata.finalResponseModelSpec,
+      fallbackUsed: metadata.fallbackUsed,
       error: undefined,
     };
   } catch (error) {
@@ -214,6 +232,10 @@ export async function chatRoundtableSpeakersUseCase(
     throw new Error('Conversation is not in roundtable mode');
   }
 
+  await ctx.runMutation(api.conversations.ensureHallParticipantResponseSlots, {
+    conversationId: args.conversationId,
+  });
+
   const state = await getRoundtableState(ctx, args.conversationId);
 
   if (!state || state.round.roundNumber !== args.roundNumber) {
@@ -242,6 +264,9 @@ export async function chatRoundtableSpeakersUseCase(
   const activeMembers = participants
     .map((row) => membersById.get(row.memberId as string))
     .filter((item): item is MemberListRow => Boolean(item));
+  const participantSlotsByMemberId = new Map(
+    participants.map((row) => [String(row.memberId), row.chatResponseModelSlot ?? 1])
+  );
 
   const latestUserMessage = [...allMessages]
     .reverse()
@@ -266,6 +291,7 @@ export async function chatRoundtableSpeakersUseCase(
         roundSummaries,
         latestUserMessage,
         activeMembers,
+        chatResponseModelSlot: participantSlotsByMemberId.get(String(candidateRow.memberId)) ?? 1,
         retrievalModel: args.retrievalModel,
         chatModel: args.chatModel,
       })
@@ -280,6 +306,11 @@ export async function chatRoundtableSpeakersUseCase(
       intent: result.intent,
       targetMemberId: result.targetMemberId,
       error: result.error,
+      attemptedResponseModelSlot: result.attemptedResponseModelSlot,
+      attemptedResponseModelSpec: result.attemptedResponseModelSpec,
+      finalResponseModelSlot: result.finalResponseModelSlot,
+      finalResponseModelSpec: result.finalResponseModelSpec,
+      fallbackUsed: result.fallbackUsed,
     })),
   };
 }

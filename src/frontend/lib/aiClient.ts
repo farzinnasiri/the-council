@@ -37,6 +37,11 @@ interface MemberChatResult {
   retrievalModel: string;
   usedKnowledgeBase: boolean;
   usedPersonalArchive?: boolean;
+  attemptedResponseModelSlot?: number;
+  attemptedResponseModelSpec?: string;
+  finalResponseModelSlot?: number;
+  finalResponseModelSpec?: string;
+  fallbackUsed?: boolean;
 }
 
 export async function uploadFileToConvexStorage(
@@ -328,4 +333,23 @@ export async function chatRoundtableSpeaker(input: {
   force?: boolean;
 }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
   return await convexRepository.chatRoundtableSpeaker(input);
+}
+
+export async function chatRoundtableSpeakers(input: {
+  conversationId: string;
+  roundNumber: number;
+}): Promise<Array<{
+  memberId: string;
+  status: 'sent' | 'error';
+  answer: string;
+  intent: 'speak' | 'challenge' | 'support';
+  targetMemberId?: string;
+  error?: string;
+  attemptedResponseModelSlot?: number;
+  attemptedResponseModelSpec?: string;
+  finalResponseModelSlot?: number;
+  finalResponseModelSpec?: string;
+  fallbackUsed?: boolean;
+}>> {
+  return await convexRepository.chatRoundtableSpeakers(input);
 }

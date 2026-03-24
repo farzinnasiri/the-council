@@ -86,6 +86,7 @@ import type * as contexts_knowledge_infrastructure_knowledgeIngestGateway from "
 import type * as contexts_knowledge_infrastructure_knowledgeRepo from "../contexts/knowledge/infrastructure/knowledgeRepo.js";
 import type * as contexts_personalArchive_infrastructure_archiveRepo from "../contexts/personalArchive/infrastructure/archiveRepo.js";
 import type * as contexts_shared_auth from "../contexts/shared/auth.js";
+import type * as contexts_shared_chatResponseFallback from "../contexts/shared/chatResponseFallback.js";
 import type * as contexts_shared_contracts from "../contexts/shared/contracts.js";
 import type * as contexts_shared_convexGateway from "../contexts/shared/convexGateway.js";
 import type * as contexts_shared_types from "../contexts/shared/types.js";
@@ -199,6 +200,7 @@ declare const fullApi: ApiFromModules<{
   "contexts/knowledge/infrastructure/knowledgeRepo": typeof contexts_knowledge_infrastructure_knowledgeRepo;
   "contexts/personalArchive/infrastructure/archiveRepo": typeof contexts_personalArchive_infrastructure_archiveRepo;
   "contexts/shared/auth": typeof contexts_shared_auth;
+  "contexts/shared/chatResponseFallback": typeof contexts_shared_chatResponseFallback;
   "contexts/shared/contracts": typeof contexts_shared_contracts;
   "contexts/shared/convexGateway": typeof contexts_shared_convexGateway;
   "contexts/shared/types": typeof contexts_shared_types;

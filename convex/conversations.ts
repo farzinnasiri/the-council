@@ -2,6 +2,7 @@ import { getAuthUserId } from '@convex-dev/auth/server';
 import { internalMutation, mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { archiveNotebookForConversation } from './notebooks';
+import { listConfiguredChatResponseSlots } from './ai/modelConfig';
 
 const conversationDoc = v.object({
   _id: v.id('conversations'),
@@ -51,6 +52,7 @@ const participantDoc = v.object({
   conversationId: v.id('conversations'),
   userId: v.id('users'),
   memberId: v.id('members'),
+  chatResponseModelSlot: v.optional(v.number()),
   status: v.union(v.literal('active'), v.literal('removed')),
   joinedAt: v.number(),
   leftAt: v.optional(v.number()),
@@ -74,6 +76,7 @@ const messageDoc = v.object({
   revisionKind: v.optional(
     v.union(
       v.literal('think_harder'),
+      v.literal('brainstorm'),
       v.literal('deep_dive'),
       v.literal('shorter'),
       v.literal('elaborate')
@@ -129,6 +132,110 @@ function assertHallConversationOpen(conversation: any) {
   if (conversation.kind === 'hall' && conversation.closedAt) {
     throw new Error('This table is closed.');
   }
+}
+
+function shuffleArray<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function configuredHallResponseSlots(): number[] {
+  const slots = listConfiguredChatResponseSlots().map((item) => item.slot);
+  return slots.length > 0 ? slots : [1];
+}
+
+function configuredHallResponseSlotSet(): Set<number> {
+  return new Set(configuredHallResponseSlots());
+}
+
+function pickRandomHallResponseSlot(): number {
+  const slots = configuredHallResponseSlots();
+  return slots[Math.floor(Math.random() * slots.length)] ?? 1;
+}
+
+function assignBalancedHallResponseSlots(memberIds: any[]): Map<string, number> {
+  const slots = configuredHallResponseSlots();
+  if (memberIds.length === 0) {
+    return new Map();
+  }
+
+  const baseCount = Math.floor(memberIds.length / slots.length);
+  const remainder = memberIds.length % slots.length;
+  const randomizedSlots = shuffleArray(slots);
+  const assignmentPool: number[] = [];
+
+  randomizedSlots.forEach((slot, index) => {
+    const count = baseCount + (index < remainder ? 1 : 0);
+    for (let slotIndex = 0; slotIndex < count; slotIndex += 1) {
+      assignmentPool.push(slot);
+    }
+  });
+
+  const shuffledMembers = shuffleArray(memberIds);
+  const shuffledAssignments = shuffleArray(assignmentPool);
+  return new Map(
+    shuffledMembers.map((memberId, index) => [String(memberId), shuffledAssignments[index] ?? 1])
+  );
+}
+
+function chooseLeastUsedHallResponseSlot(slotCounts: Map<number, number>): number {
+  const randomizedSlots = shuffleArray(configuredHallResponseSlots());
+  randomizedSlots.sort((left, right) => {
+    const leftCount = slotCounts.get(left) ?? 0;
+    const rightCount = slotCounts.get(right) ?? 0;
+    return leftCount - rightCount;
+  });
+  return randomizedSlots[0] ?? 1;
+}
+
+async function ensureHallParticipantResponseSlotsForConversation(
+  ctx: any,
+  conversationId: any,
+  userId: any
+): Promise<number> {
+  const conversation = await getOwnedConversation(ctx, userId, conversationId);
+  if (conversation.kind !== 'hall' || conversation.deletedAt) {
+    return 0;
+  }
+
+  const activeParticipants = await ctx.db
+    .query('conversationParticipants')
+    .withIndex('by_conversation_status', (q: any) =>
+      q.eq('conversationId', conversationId).eq('status', 'active')
+    )
+    .collect();
+
+  const configuredSlots = configuredHallResponseSlotSet();
+  const slotCounts = new Map<number, number>();
+  for (const slot of configuredSlots) {
+    slotCounts.set(slot, 0);
+  }
+
+  for (const participant of activeParticipants) {
+    if (participant.chatResponseModelSlot && configuredSlots.has(participant.chatResponseModelSlot)) {
+      slotCounts.set(
+        participant.chatResponseModelSlot,
+        (slotCounts.get(participant.chatResponseModelSlot) ?? 0) + 1
+      );
+    }
+  }
+
+  const rowsNeedingAssignment = activeParticipants.filter(
+    (participant: any) =>
+      !participant.chatResponseModelSlot || !configuredSlots.has(participant.chatResponseModelSlot)
+  );
+
+  for (const participant of rowsNeedingAssignment) {
+    const slot = chooseLeastUsedHallResponseSlot(slotCounts);
+    await ctx.db.patch(participant._id, { chatResponseModelSlot: slot });
+    slotCounts.set(slot, (slotCounts.get(slot) ?? 0) + 1);
+  }
+
+  return rowsNeedingAssignment.length;
 }
 
 async function createChamberThreadDoc(ctx: any, userId: any, memberId: any) {
@@ -288,6 +395,7 @@ export const createHall = mutation({
       title: args.title,
       updatedAt: now,
     });
+    const assignedSlots = assignBalancedHallResponseSlots(uniqueMemberIds);
 
     await Promise.all(
       uniqueMemberIds.map((memberId) =>
@@ -295,6 +403,7 @@ export const createHall = mutation({
           conversationId,
           userId,
           memberId,
+          chatResponseModelSlot: assignedSlots.get(String(memberId)) ?? 1,
           status: 'active',
           joinedAt: now,
         })
@@ -585,6 +694,7 @@ export const addHallParticipant = mutation({
     if (current) {
       await ctx.db.patch(current._id, {
         status: 'active',
+        chatResponseModelSlot: current.chatResponseModelSlot ?? pickRandomHallResponseSlot(),
         joinedAt: Date.now(),
         leftAt: undefined,
       });
@@ -593,6 +703,7 @@ export const addHallParticipant = mutation({
         conversationId: args.conversationId,
         userId,
         memberId: args.memberId,
+        chatResponseModelSlot: pickRandomHallResponseSlot(),
         status: 'active',
         joinedAt: Date.now(),
       });
@@ -600,6 +711,20 @@ export const addHallParticipant = mutation({
 
     await ctx.db.patch(args.conversationId, { updatedAt: Date.now() });
     return null;
+  },
+});
+
+export const ensureHallParticipantResponseSlots = mutation({
+  args: { conversationId: v.id('conversations') },
+  returns: v.object({ updatedCount: v.number() }),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const updatedCount = await ensureHallParticipantResponseSlotsForConversation(
+      ctx,
+      args.conversationId,
+      userId
+    );
+    return { updatedCount };
   },
 });
 

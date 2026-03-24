@@ -133,6 +133,22 @@ export const getById = query({
   },
 });
 
+export const getDownloadUrl = query({
+  args: {
+    kbDocumentId: v.id('kbDocuments'),
+  },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const row = await ctx.db.get(args.kbDocumentId);
+    if (!row || row.userId !== userId || row.deletedAt || row.status === 'deleted') {
+      return null;
+    }
+
+    return await ctx.storage.getUrl(row.storageId);
+  },
+});
+
 export const listByMember = query({
   args: {
     memberId: v.id('members'),

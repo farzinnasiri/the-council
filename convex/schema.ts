@@ -26,6 +26,7 @@ export default defineSchema({
     avatarId: v.optional(v.id('_storage')),
     specialties: v.array(v.string()),
     systemPrompt: v.string(),
+    chatResponseModelSlot: v.optional(v.number()),
     guidanceProfilePrompt: v.optional(v.string()),
     guidanceProfileGeneratedAt: v.optional(v.number()),
     guidanceProfileUpdatedAt: v.optional(v.number()),
@@ -99,6 +100,7 @@ export default defineSchema({
     conversationId: v.id('conversations'),
     userId: v.id('users'),
     memberId: v.id('members'),
+    chatResponseModelSlot: v.optional(v.number()),
     status: v.union(v.literal('active'), v.literal('removed')),
     joinedAt: v.number(),
     leftAt: v.optional(v.number()),
@@ -297,6 +299,7 @@ export default defineSchema({
     revisionKind: v.optional(
       v.union(
         v.literal('think_harder'),
+        v.literal('brainstorm'),
         v.literal('deep_dive'),
         v.literal('shorter'),
         v.literal('elaborate')

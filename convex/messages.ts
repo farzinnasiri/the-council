@@ -29,6 +29,7 @@ const messageDoc = v.object({
   revisionKind: v.optional(
     v.union(
       v.literal('think_harder'),
+      v.literal('brainstorm'),
       v.literal('deep_dive'),
       v.literal('shorter'),
       v.literal('elaborate'),
@@ -63,6 +64,7 @@ const messageInputValidator = v.object({
   revisionKind: v.optional(
     v.union(
       v.literal('think_harder'),
+      v.literal('brainstorm'),
       v.literal('deep_dive'),
       v.literal('shorter'),
       v.literal('elaborate'),

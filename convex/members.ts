@@ -2,6 +2,7 @@ import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
 import { defaultPersonalArchiveAccess, personalArchiveAccessValidator } from './personalArchiveShared';
+import { listConfiguredChatResponseSlots } from './ai/modelConfig';
 
 const ttsVoiceNameValidator = v.union(
   v.literal('Kore'),
@@ -15,6 +16,19 @@ async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error('Not authenticated');
   return userId;
+}
+
+function normalizeChatResponseModelSlot(slot?: number): number | undefined {
+  if (slot === undefined) return undefined;
+  if (!Number.isFinite(slot)) {
+    throw new Error('Response model slot must be a number');
+  }
+  const normalized = Math.max(1, Math.trunc(slot));
+  const available = new Set(listConfiguredChatResponseSlots().map((item) => item.slot));
+  if (!available.has(normalized)) {
+    throw new Error('Response model slot is not configured');
+  }
+  return normalized === 1 ? undefined : normalized;
 }
 
 export const list = query({
@@ -63,6 +77,7 @@ export const create = mutation({
     name: v.string(),
     specialties: v.optional(v.array(v.string())),
     systemPrompt: v.string(),
+    chatResponseModelSlot: v.optional(v.number()),
     guidanceProfilePrompt: v.optional(v.string()),
     ttsVoiceName: v.optional(ttsVoiceNameValidator),
     ttsPersonaPrompt: v.optional(v.string()),
@@ -75,6 +90,7 @@ export const create = mutation({
       name: args.name,
       specialties: args.specialties ?? [],
       systemPrompt: args.systemPrompt,
+      chatResponseModelSlot: normalizeChatResponseModelSlot(args.chatResponseModelSlot),
       guidanceProfilePrompt: args.guidanceProfilePrompt,
       guidanceProfileGeneratedAt: args.guidanceProfilePrompt ? Date.now() : undefined,
       guidanceProfileUpdatedAt: args.guidanceProfilePrompt ? Date.now() : undefined,
@@ -96,6 +112,7 @@ export const update = mutation({
     name: v.optional(v.string()),
     specialties: v.optional(v.array(v.string())),
     systemPrompt: v.optional(v.string()),
+    chatResponseModelSlot: v.optional(v.number()),
     guidanceProfilePrompt: v.optional(v.string()),
     guidanceProfileGeneratedAt: v.optional(v.number()),
     ttsVoiceName: v.optional(ttsVoiceNameValidator),
@@ -111,7 +128,14 @@ export const update = mutation({
     const current = await ctx.db.get(args.memberId);
     if (!current || current.userId !== userId) throw new Error('Member not found');
     const { memberId, ...patch } = args;
-    const filteredPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+    const filteredPatch = Object.fromEntries(
+      Object.entries({
+        ...patch,
+        ...(args.chatResponseModelSlot !== undefined
+          ? { chatResponseModelSlot: normalizeChatResponseModelSlot(args.chatResponseModelSlot) }
+          : {}),
+      }).filter(([, value]) => value !== undefined)
+    );
     await ctx.db.patch(memberId, {
       ...filteredPatch,
       ...(args.guidanceProfilePrompt !== undefined

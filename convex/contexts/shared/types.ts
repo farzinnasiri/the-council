@@ -26,6 +26,7 @@ export interface MemberListRow {
   name: string;
   specialties?: string[];
   systemPrompt: string;
+  chatResponseModelSlot?: number;
   ttsVoiceName?: 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
   ttsPersonaPrompt?: string;
   kbStoreName?: string;
@@ -45,6 +46,7 @@ export interface ParticipantRow {
   conversationId: Id<'conversations'>;
   userId: Id<'users'>;
   memberId: Id<'members'>;
+  chatResponseModelSlot?: number;
   status: 'active' | 'removed';
   joinedAt: number;
   leftAt?: number;
@@ -176,6 +178,11 @@ export interface RoundtableSpeakerResult {
   intent: RoundtableSpeakIntent;
   targetMemberId?: Id<'members'>;
   error?: string;
+  attemptedResponseModelSlot?: number;
+  attemptedResponseModelSpec?: string;
+  finalResponseModelSlot?: number;
+  finalResponseModelSpec?: string;
+  fallbackUsed?: boolean;
 }
 
 export interface ConversationRow {

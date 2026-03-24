@@ -21,12 +21,22 @@ export type ModelSlot =
   | 'guidanceProfile'
   | 'guidanceReflection';
 
-export type AiProvider = 'openai' | 'google';
+export type AiProvider = 'openai' | 'google' | 'openrouter';
 
 export interface ModelTarget {
   provider: AiProvider;
   model: string;
 }
+
+export interface ChatResponseSlotConfig {
+  slot: number;
+  envKey: string;
+  spec: string;
+  target: ModelTarget;
+  isDefault: boolean;
+}
+
+const MAX_CHAT_RESPONSE_SLOT_SCAN = 16;
 
 const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   chatResponse: 'AI_MODEL_CHAT_RESPONSE',
@@ -100,7 +110,14 @@ const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   guidanceReflection: { provider: 'google', model: 'gemini-3-flash-preview' },
 };
 
-function parseModelSpec(raw?: string | null): ModelTarget | null {
+function modelTargetToSpec(target: ModelTarget): string {
+  if (target.provider === 'openrouter') {
+    return target.model;
+  }
+  return `${target.provider}:${target.model}`;
+}
+
+function parseModelSpec(raw?: string | null, options?: { allowOpenRouter?: boolean }): ModelTarget | null {
   const trimmed = raw?.trim();
   if (!trimmed) return null;
 
@@ -111,9 +128,16 @@ function parseModelSpec(raw?: string | null): ModelTarget | null {
     if ((provider === 'openai' || provider === 'google') && model) {
       return { provider, model } as ModelTarget;
     }
+    if (options?.allowOpenRouter && provider && model) {
+      return { provider: 'openrouter', model: `${provider}:${model}` };
+    }
   }
 
   return null;
+}
+
+function allowOpenRouterForSlot(slot: ModelSlot) {
+  return slot === 'chatResponse';
 }
 
 function readLegacyGeminiModel(slot: ModelSlot): string | undefined {
@@ -126,10 +150,12 @@ function readLegacyGeminiModel(slot: ModelSlot): string | undefined {
 }
 
 export function resolveModelTarget(slot: ModelSlot, override?: string): ModelTarget {
-  const overrideTarget = parseModelSpec(override);
+  const overrideTarget = parseModelSpec(override, { allowOpenRouter: allowOpenRouterForSlot(slot) });
   if (overrideTarget) return overrideTarget;
 
-  const slotTarget = parseModelSpec(process.env[SLOT_ENV_KEYS[slot]]);
+  const slotTarget = parseModelSpec(process.env[SLOT_ENV_KEYS[slot]], {
+    allowOpenRouter: allowOpenRouterForSlot(slot),
+  });
   if (slotTarget) return slotTarget;
 
   const legacyGeminiModel = readLegacyGeminiModel(slot);
@@ -180,4 +206,51 @@ export function hallTitleModelCandidates(override?: string): string[] {
 
 export function getModelEnvKey(slot: ModelSlot): string {
   return SLOT_ENV_KEYS[slot];
+}
+
+function getChatResponseSlotEnvKey(slot: number): string {
+  return slot === 1 ? SLOT_ENV_KEYS.chatResponse : `${SLOT_ENV_KEYS.chatResponse}_${slot}`;
+}
+
+function parseChatResponseSlot(slot: number, raw?: string | null): ChatResponseSlotConfig | null {
+  const target = parseModelSpec(raw, { allowOpenRouter: true });
+  if (!target) return null;
+  return {
+    slot,
+    envKey: getChatResponseSlotEnvKey(slot),
+    spec: modelTargetToSpec(target),
+    target,
+    isDefault: slot === 1,
+  };
+}
+
+export function listConfiguredChatResponseSlots(): ChatResponseSlotConfig[] {
+  const slots = new Map<number, ChatResponseSlotConfig>();
+  const defaultTarget = resolveModelTarget('chatResponse');
+  slots.set(1, {
+    slot: 1,
+    envKey: SLOT_ENV_KEYS.chatResponse,
+    spec: modelTargetToSpec(defaultTarget),
+    target: defaultTarget,
+    isDefault: true,
+  });
+
+  for (let slot = 2; slot <= MAX_CHAT_RESPONSE_SLOT_SCAN; slot += 1) {
+    const parsed = parseChatResponseSlot(slot, process.env[getChatResponseSlotEnvKey(slot)]);
+    if (parsed) {
+      slots.set(slot, parsed);
+    }
+  }
+
+  return Array.from(slots.values()).sort((left, right) => left.slot - right.slot);
+}
+
+export function resolveChatResponseSlot(slot?: number): ChatResponseSlotConfig {
+  const configured = listConfiguredChatResponseSlots();
+  const targetSlot = typeof slot === 'number' && Number.isFinite(slot) ? Math.max(1, Math.trunc(slot)) : 1;
+  return configured.find((item) => item.slot === targetSlot) ?? configured[0];
+}
+
+export function hasOpenRouterChatResponseSlot(): boolean {
+  return listConfiguredChatResponseSlots().some((slot) => slot.target.provider === 'openrouter');
 }

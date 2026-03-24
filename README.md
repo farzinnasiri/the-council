@@ -70,6 +70,10 @@ Required keys are defined in `config/env/convex.required.keys`.
 Important:
 - `SITE_URL` must be set in `.env.convex.local` (do not rely on defaults).
 - `JWT_PRIVATE_KEY` and `JWKS` are managed by `npx @convex-dev/auth` and should not be manually set in `.env.convex.local`.
+- Response-model slots use `AI_MODEL_CHAT_RESPONSE` for slot 1, then `AI_MODEL_CHAT_RESPONSE_2`, `AI_MODEL_CHAT_RESPONSE_3`, and so on. There is no `AI_MODEL_CHAT_RESPONSE_1`.
+- `openai:*` and `google:*` response models use the native integrations already in the app.
+- Any other response-model shorthand in `<vendor>:<model>` form, such as `x-ai:grok-4.20-beta`, is routed through OpenRouter at runtime.
+- `OPENROUTER_API_KEY` is only required when at least one configured `AI_MODEL_CHAT_RESPONSE*` slot uses that OpenRouter shorthand.
 
 Bootstrap local secret file:
 
