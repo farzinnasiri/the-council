@@ -81,6 +81,7 @@ interface AppState {
   selectedConversationId: string;
   pendingReplyCount: Record<string, number>;
   pendingReplyMemberIds: Record<string, string[]>;
+  pendingReplyTicketByConversation: Record<string, string | undefined>;
   compactionCheckInFlightByConversation: Record<string, boolean>;
   memberDocuments: Record<string, Array<{ name?: string; displayName?: string }>>;
   kbDocumentsByMember: Record<string, KbDocumentLifecycle[]>;
@@ -212,6 +213,10 @@ interface AppState {
 type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
 type ConversationPatch = Partial<Conversation> | ((conversation: Conversation) => Conversation);
 type ConversationStateSlice = Pick<AppState, 'conversations'>;
+type PendingReplyStateSlice = Pick<
+  AppState,
+  'pendingReplyCount' | 'pendingReplyMemberIds' | 'pendingReplyTicketByConversation'
+>;
 
 function mapNotebooksByConversation(notebooks: ConversationNotebook[]) {
   return Object.fromEntries(notebooks.map((notebook) => [notebook.conversationId, notebook])) as Record<
@@ -224,6 +229,93 @@ function removeKey<T>(record: Record<string, T>, key: string) {
   const next = { ...record };
   delete next[key];
   return next;
+}
+
+// Reply generation can overlap with later async state work; tickets keep stale writers
+// from briefly reviving typing indicators after the UI has already moved on.
+function createPendingReplyTicket() {
+  return crypto.randomUUID();
+}
+
+function clearPendingReplies(
+  state: PendingReplyStateSlice,
+  conversationId: string
+): PendingReplyStateSlice {
+  return {
+    pendingReplyCount: {
+      ...state.pendingReplyCount,
+      [conversationId]: 0,
+    },
+    pendingReplyMemberIds: {
+      ...state.pendingReplyMemberIds,
+      [conversationId]: [],
+    },
+    pendingReplyTicketByConversation: removeKey(state.pendingReplyTicketByConversation, conversationId),
+  };
+}
+
+function beginPendingReplies(
+  state: PendingReplyStateSlice,
+  conversationId: string,
+  memberIds: string[],
+  ticket: string
+): PendingReplyStateSlice {
+  if (memberIds.length === 0) {
+    return clearPendingReplies(state, conversationId);
+  }
+
+  return {
+    pendingReplyCount: {
+      ...state.pendingReplyCount,
+      [conversationId]: memberIds.length,
+    },
+    pendingReplyMemberIds: {
+      ...state.pendingReplyMemberIds,
+      [conversationId]: memberIds,
+    },
+    pendingReplyTicketByConversation: {
+      ...state.pendingReplyTicketByConversation,
+      [conversationId]: ticket,
+    },
+  };
+}
+
+function clearPendingRepliesIfCurrent(
+  state: PendingReplyStateSlice,
+  conversationId: string,
+  ticket: string
+): Partial<PendingReplyStateSlice> {
+  if (state.pendingReplyTicketByConversation[conversationId] !== ticket) {
+    return {};
+  }
+  return clearPendingReplies(state, conversationId);
+}
+
+function removePendingReplyMemberIfCurrent(
+  state: PendingReplyStateSlice,
+  conversationId: string,
+  memberId: string,
+  ticket: string
+): Partial<PendingReplyStateSlice> {
+  if (state.pendingReplyTicketByConversation[conversationId] !== ticket) {
+    return {};
+  }
+
+  const nextMemberIds = (state.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId);
+  if (nextMemberIds.length === 0) {
+    return clearPendingReplies(state, conversationId);
+  }
+
+  return {
+    pendingReplyCount: {
+      ...state.pendingReplyCount,
+      [conversationId]: nextMemberIds.length,
+    },
+    pendingReplyMemberIds: {
+      ...state.pendingReplyMemberIds,
+      [conversationId]: nextMemberIds,
+    },
+  };
 }
 
 function isVisibleMessage(message: Message) {
@@ -782,6 +874,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedConversationId: '',
   pendingReplyCount: {},
   pendingReplyMemberIds: {},
+  pendingReplyTicketByConversation: {},
   compactionCheckInFlightByConversation: {},
   memberDocuments: {},
   kbDocumentsByMember: {},
@@ -1283,6 +1376,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const ready = candidate.status === 'shortlisted' || candidate.status === 'speaking';
     const force = !ready;
+    const pendingTicket = createPendingReplyTicket();
 
     const inProgress = await markRoundtableInProgress({
       conversationId,
@@ -1296,14 +1390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...state.roundtableStateByConversation,
         [conversationId]: inProgress,
       },
-      pendingReplyCount: {
-        ...state.pendingReplyCount,
-        [conversationId]: 1,
-      },
-      pendingReplyMemberIds: {
-        ...state.pendingReplyMemberIds,
-        [conversationId]: [memberId],
-      },
+      ...beginPendingReplies(state, conversationId, [memberId], pendingTicket),
     }));
 
     try {
@@ -1376,14 +1463,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().refreshRoundtableState(conversationId);
     } finally {
       set((state) => ({
-        pendingReplyCount: {
-          ...state.pendingReplyCount,
-          [conversationId]: 0,
-        },
-        pendingReplyMemberIds: {
-          ...state.pendingReplyMemberIds,
-          [conversationId]: [],
-        },
+        ...clearPendingRepliesIfCurrent(state, conversationId, pendingTicket),
       }));
     }
   },
@@ -1602,6 +1682,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
       return {
         conversations: nextConversations,
+        ...clearPendingReplies(state, conversationId),
         hallParticipantsByConversation: nextParticipants,
         roundtableStateByConversation: nextRoundtable,
         roundtablePreparingByConversation: nextPreparing,
@@ -1637,14 +1718,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           state.routingConversationId === conversationId ? false : state.isRouting,
         routingConversationId:
           state.routingConversationId === conversationId ? undefined : state.routingConversationId,
-        pendingReplyCount: {
-          ...state.pendingReplyCount,
-          [conversationId]: 0,
-        },
-        pendingReplyMemberIds: {
-          ...state.pendingReplyMemberIds,
-          [conversationId]: [],
-        },
+        ...clearPendingReplies(state, conversationId),
         roundtableStateByConversation: {
           ...state.roundtableStateByConversation,
           [conversationId]: null,
@@ -1869,6 +1943,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     routingOverride = { mode: 'auto' as const, memberIds: [] }
   ) => {
     const state = get();
+    const pendingTicket = createPendingReplyTicket();
     let conversation = state.conversations.find((item) => item.id === conversationId);
     if (!conversation) return;
     if (isClosedHallConversation(conversation)) {
@@ -1928,8 +2003,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         if (routedIds.length === 0 && routingOverride.mode === 'manual') {
           set((current) => ({
-            pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
-            pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: [] },
+            ...clearPendingReplies(current, conversationId),
           }));
           return;
         }
@@ -1980,8 +2054,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (activeParticipantIds.length === 0) {
         set((current) => ({
-          pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
-          pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: [] },
+          ...clearPendingReplies(current, conversationId),
         }));
         return;
       }
@@ -2020,14 +2093,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 ...current.roundtableStateByConversation,
                 [conversationId]: inProgress,
               },
-              pendingReplyCount: {
-                ...current.pendingReplyCount,
-                [conversationId]: openingSpeakerIds.length,
-              },
-              pendingReplyMemberIds: {
-                ...current.pendingReplyMemberIds,
-                [conversationId]: openingSpeakerIds,
-              },
+              ...beginPendingReplies(current, conversationId, openingSpeakerIds, pendingTicket),
             }));
 
             const membersById = new Map(get().members.map((member) => [member.id, member]));
@@ -2111,14 +2177,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               void get().syncHallRoundSummaries(conversationId);
             } finally {
               set((current) => ({
-                pendingReplyCount: {
-                  ...current.pendingReplyCount,
-                  [conversationId]: 0,
-                },
-                pendingReplyMemberIds: {
-                  ...current.pendingReplyMemberIds,
-                  [conversationId]: [],
-                },
+                ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
               }));
             }
           }
@@ -2199,8 +2258,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         if (memberIds.length === 0 && routingOverride.mode === 'manual') {
           set((current) => ({
-            pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
-            pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: [] },
+            ...clearPendingReplies(current, conversationId),
           }));
           return;
         }
@@ -2282,8 +2340,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (memberIds.length === 0) {
       set((current) => ({
-        pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: 0 },
-        pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: [] },
+        ...clearPendingReplies(current, conversationId),
       }));
       return;
     }
@@ -2333,8 +2390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set((current) => ({
-      pendingReplyCount: { ...current.pendingReplyCount, [conversationId]: memberIds.length },
-      pendingReplyMemberIds: { ...current.pendingReplyMemberIds, [conversationId]: memberIds },
+      ...beginPendingReplies(current, conversationId, memberIds, pendingTicket),
     }));
     const hallParticipants = conversation.kind === 'hall'
       ? (state.hallParticipantsByConversation[conversationId] ?? [])
@@ -2448,14 +2504,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((current) => ({
         messages: [...current.messages, reply],
         ...updateConversationStamp(current, conversationId, true),
-        pendingReplyCount: {
-          ...current.pendingReplyCount,
-          [conversationId]: Math.max(0, (current.pendingReplyCount[conversationId] ?? 1) - 1),
-        },
-        pendingReplyMemberIds: {
-          ...current.pendingReplyMemberIds,
-          [conversationId]: (current.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId),
-        },
+        ...removePendingReplyMemberIfCurrent(current, conversationId, memberId, pendingTicket),
       }));
 
       const persistedReplies = await councilRepository.appendMessages({
@@ -2576,6 +2625,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const nextConversations = state.conversations.filter((conversation) => !targetSet.has(conversation.id));
       const nextPendingReplyCount = { ...state.pendingReplyCount };
       const nextPendingReplyMemberIds = { ...state.pendingReplyMemberIds };
+      const nextPendingReplyTickets = { ...state.pendingReplyTicketByConversation };
       const nextCompactionInFlight = { ...state.compactionCheckInFlightByConversation };
       const nextPagination = { ...state.messagePaginationByConversation };
       const nextNotebooks = { ...state.conversationNotebooksByConversation };
@@ -2587,6 +2637,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       for (const id of targetIds) {
         delete nextPendingReplyCount[id];
         delete nextPendingReplyMemberIds[id];
+        delete nextPendingReplyTickets[id];
         delete nextCompactionInFlight[id];
         delete nextPagination[id];
         delete nextNotebooks[id];
@@ -2605,6 +2656,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         messages: state.messages.filter((message) => !targetSet.has(message.conversationId)),
         pendingReplyCount: nextPendingReplyCount,
         pendingReplyMemberIds: nextPendingReplyMemberIds,
+        pendingReplyTicketByConversation: nextPendingReplyTickets,
         compactionCheckInFlightByConversation: nextCompactionInFlight,
         chamberMemoryByConversation: Object.fromEntries(
           Object.entries(state.chamberMemoryByConversation).filter(([id]) => !targetSet.has(id))
@@ -2656,6 +2708,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ?? (await councilRepository.getLatestChamberMemoryLog(conversationId))?.memory;
     const refinementProfiles = resolveRefinementProfiles(action);
     const refinementGenerationProfile = getRefinementGenerationProfile(action);
+    const pendingTicket = createPendingReplyTicket();
     const contextMessages = buildMemberContextWindow(
       visibleMessages.filter((message) => message.id !== target.id),
       conversationId,
@@ -2669,14 +2722,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...current.refiningActionByMessageId,
         [target.id]: action,
       },
-      pendingReplyCount: {
-        ...current.pendingReplyCount,
-        [conversationId]: 1,
-      },
-      pendingReplyMemberIds: {
-        ...current.pendingReplyMemberIds,
-        [conversationId]: [member.id],
-      },
+      ...beginPendingReplies(current, conversationId, [member.id], pendingTicket),
     }));
 
     try {
@@ -2710,14 +2756,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           messages: [...current.messages, appended],
           ...updateConversationStamp(current, conversationId, true),
           refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
-          pendingReplyCount: {
-            ...current.pendingReplyCount,
-            [conversationId]: 0,
-          },
-          pendingReplyMemberIds: {
-            ...current.pendingReplyMemberIds,
-            [conversationId]: [],
-          },
+          ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
         }));
         const [activeMessages, latestLog] = await Promise.all([
           councilRepository.listMessages(conversationId),
@@ -2757,14 +2796,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           .sort((a, b) => a.createdAt - b.createdAt),
         ...updateConversationStamp(current, conversationId, true),
         refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
-        pendingReplyCount: {
-          ...current.pendingReplyCount,
-          [conversationId]: 0,
-        },
-        pendingReplyMemberIds: {
-          ...current.pendingReplyMemberIds,
-          [conversationId]: [],
-        },
+        ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
       }));
       const [activeMessages, latestLog] = await Promise.all([
         councilRepository.listMessages(conversationId),
@@ -2783,14 +2815,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       set((current) => ({
         refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
-        pendingReplyCount: {
-          ...current.pendingReplyCount,
-          [conversationId]: 0,
-        },
-        pendingReplyMemberIds: {
-          ...current.pendingReplyMemberIds,
-          [conversationId]: [],
-        },
+        ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
       }));
       get().showToast(error instanceof Error ? error.message : 'Could not refine the reply.');
     }
