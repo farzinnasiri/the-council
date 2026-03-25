@@ -12,7 +12,6 @@ import type {
   Message,
   MessageFeedbackKey,
   MessageRouting,
-  PersonalArchiveAccess,
   RoundtableState,
   RetrievalStrategy,
   TimeAwareReentryGapBucket,
@@ -57,7 +56,7 @@ interface CreateMemberPayload {
   ttsVoiceName?: MemberVoiceName;
   ttsPersonaPrompt?: string;
   specialties?: string[];
-  personalArchiveAccess?: PersonalArchiveAccess;
+  personalSourcesPermissionEnabled?: boolean;
 }
 
 type NotebookSaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -130,6 +129,7 @@ interface AppState {
   createConversation: (type: ConversationType) => Promise<Conversation>;
   setChamberResponseMode: (conversationId: string, mode: ChamberResponseMode) => Promise<void>;
   setChamberTimeAwareReentryEnabled: (conversationId: string, enabled: boolean) => Promise<void>;
+  setChamberPersonalSourcesEnabled: (conversationId: string, enabled: boolean) => Promise<void>;
   markChamberTimeAwareReentryNoticeSeen: (conversationId: string) => Promise<void>;
   renameConversation: (conversationId: string, title: string) => Promise<void>;
   archiveConversation: (conversationId: string) => Promise<void>;
@@ -1546,6 +1546,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       timeAwareReentryNoticePendingByConversation: enabled
         ? state.timeAwareReentryNoticePendingByConversation
         : removeKey(state.timeAwareReentryNoticePendingByConversation, conversationId),
+    }));
+  },
+
+  setChamberPersonalSourcesEnabled: async (conversationId, enabled) => {
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.kind !== 'chamber') return;
+    const updated = await councilRepository.setChamberPersonalSourcesEnabled(conversationId, enabled);
+    set((state) => ({
+      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
     }));
   },
 

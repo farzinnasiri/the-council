@@ -36,31 +36,27 @@ export interface CouncilKBDocumentDigestHint {
   queryHints: string[];
 }
 
-export interface CouncilPersonalArchiveAccess {
-  reflection: boolean;
-  cookieJar: boolean;
-  accountability: boolean;
-  worldModel: boolean;
+export interface CouncilPersonalSourceDigestHint {
+  displayName: string;
+  personalSourceName: string;
+  documentKinds: string[];
+  semanticClasses: string[];
+  queryHints: string[];
 }
 
-export type CouncilPersonalArchiveBucket =
-  | 'reflection'
-  | 'cookie_jar'
-  | 'accountability'
-  | 'world_model';
-
-export interface CouncilPersonalArchiveRetriever {
-  listSources(input: {
-    access: CouncilPersonalArchiveAccess;
-  }): Promise<{
-    availableBuckets: CouncilPersonalArchiveBucket[];
-    totalEntries: number;
+export interface CouncilPersonalSourceRetriever {
+  listSources(): Promise<{
+    sources: CouncilPersonalSourceDigestHint[];
   }>;
   retrieve(input: {
     query: string;
-    buckets: CouncilPersonalArchiveBucket[];
-    limit?: number;
-    traceId: string;
+    targetDocumentKinds?: string[];
+    targetSemanticClasses?: string[];
+    candidateSourceCount?: number;
+    chunkLimitPerQuery?: number;
+    injectedSourceGroupCount?: number;
+    chunksPerSourceGroup?: number;
+    traceId?: string;
   }): Promise<{
     retrievalText: string;
     citations: Array<{ title: string; uri?: string }>;
@@ -103,7 +99,7 @@ export interface ProviderChatResponse {
   retrievalModel: string;
   grounded: boolean;
   usedKnowledgeBase?: boolean;
-  usedPersonalArchive?: boolean;
+  usedPersonalSources?: boolean;
   attemptedResponseModelSlot?: number;
   attemptedResponseModelSpec?: string;
   finalResponseModelSlot?: number;
@@ -170,8 +166,7 @@ export interface CouncilAiProvider {
     query: string;
     storeName?: string | null;
     knowledgeRetriever?: CouncilKnowledgeRetriever;
-    personalArchiveRetriever?: CouncilPersonalArchiveRetriever;
-    personalArchiveAccess?: CouncilPersonalArchiveAccess;
+    personalSourceRetriever?: CouncilPersonalSourceRetriever;
     identityContext?: string;
     memoryHint?: string;
     kbDigests?: CouncilKBDocumentDigestHint[];

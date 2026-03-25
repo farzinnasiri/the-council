@@ -8,7 +8,6 @@
  * @module
  */
 
-import type * as ai_archive from "../ai/archive.js";
 import type * as ai_chat from "../ai/chat.js";
 import type * as ai_graphs_fallbacks from "../ai/graphs/fallbacks.js";
 import type * as ai_graphs_hallClosureGraph from "../ai/graphs/hallClosureGraph.js";
@@ -18,6 +17,7 @@ import type * as ai_graphs_memberChatGraph from "../ai/graphs/memberChatGraph.js
 import type * as ai_graphs_memberGuidanceGraph from "../ai/graphs/memberGuidanceGraph.js";
 import type * as ai_graphs_memberMemoryGraph from "../ai/graphs/memberMemoryGraph.js";
 import type * as ai_graphs_memberVoiceGraph from "../ai/graphs/memberVoiceGraph.js";
+import type * as ai_graphs_personalSourceDigestGraph from "../ai/graphs/personalSourceDigestGraph.js";
 import type * as ai_graphs_roundBidGraph from "../ai/graphs/roundBidGraph.js";
 import type * as ai_graphs_routeMembersGraph from "../ai/graphs/routeMembersGraph.js";
 import type * as ai_graphs_specialtiesGraph from "../ai/graphs/specialtiesGraph.js";
@@ -33,7 +33,9 @@ import type * as ai_modelConfig from "../ai/modelConfig.js";
 import type * as ai_openaiEmbeddings from "../ai/openaiEmbeddings.js";
 import type * as ai_orchestration_advisoryHall from "../ai/orchestration/advisoryHall.js";
 import type * as ai_orchestration_roundtableHall from "../ai/orchestration/roundtableHall.js";
-import type * as ai_personalArchiveStore from "../ai/personalArchiveStore.js";
+import type * as ai_personalSourceRetrievalConfig from "../ai/personalSourceRetrievalConfig.js";
+import type * as ai_personalSourceStore from "../ai/personalSourceStore.js";
+import type * as ai_personalSources from "../ai/personalSources.js";
 import type * as ai_provider_factory from "../ai/provider/factory.js";
 import type * as ai_provider_langchainProvider from "../ai/provider/langchainProvider.js";
 import type * as ai_provider_types from "../ai/provider/types.js";
@@ -84,7 +86,6 @@ import type * as contexts_knowledge_application_uploadMemberDocuments from "../c
 import type * as contexts_knowledge_contracts from "../contexts/knowledge/contracts.js";
 import type * as contexts_knowledge_infrastructure_knowledgeIngestGateway from "../contexts/knowledge/infrastructure/knowledgeIngestGateway.js";
 import type * as contexts_knowledge_infrastructure_knowledgeRepo from "../contexts/knowledge/infrastructure/knowledgeRepo.js";
-import type * as contexts_personalArchive_infrastructure_archiveRepo from "../contexts/personalArchive/infrastructure/archiveRepo.js";
 import type * as contexts_shared_auth from "../contexts/shared/auth.js";
 import type * as contexts_shared_chatResponseFallback from "../contexts/shared/chatResponseFallback.js";
 import type * as contexts_shared_contracts from "../contexts/shared/contracts.js";
@@ -107,9 +108,10 @@ import type * as migrations from "../migrations.js";
 import type * as notebooks from "../notebooks.js";
 import type * as observability_errors from "../observability/errors.js";
 import type * as observability_wideEvents from "../observability/wideEvents.js";
-import type * as personalArchive from "../personalArchive.js";
-import type * as personalArchiveChunks from "../personalArchiveChunks.js";
-import type * as personalArchiveShared from "../personalArchiveShared.js";
+import type * as personalSourceChunks from "../personalSourceChunks.js";
+import type * as personalSourceDigests from "../personalSourceDigests.js";
+import type * as personalSourceDocuments from "../personalSourceDocuments.js";
+import type * as personalSourcesShared from "../personalSourcesShared.js";
 import type * as seed from "../seed.js";
 import type * as settings from "../settings.js";
 import type * as upload from "../upload.js";
@@ -122,7 +124,6 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  "ai/archive": typeof ai_archive;
   "ai/chat": typeof ai_chat;
   "ai/graphs/fallbacks": typeof ai_graphs_fallbacks;
   "ai/graphs/hallClosureGraph": typeof ai_graphs_hallClosureGraph;
@@ -132,6 +133,7 @@ declare const fullApi: ApiFromModules<{
   "ai/graphs/memberGuidanceGraph": typeof ai_graphs_memberGuidanceGraph;
   "ai/graphs/memberMemoryGraph": typeof ai_graphs_memberMemoryGraph;
   "ai/graphs/memberVoiceGraph": typeof ai_graphs_memberVoiceGraph;
+  "ai/graphs/personalSourceDigestGraph": typeof ai_graphs_personalSourceDigestGraph;
   "ai/graphs/roundBidGraph": typeof ai_graphs_roundBidGraph;
   "ai/graphs/routeMembersGraph": typeof ai_graphs_routeMembersGraph;
   "ai/graphs/specialtiesGraph": typeof ai_graphs_specialtiesGraph;
@@ -147,7 +149,9 @@ declare const fullApi: ApiFromModules<{
   "ai/openaiEmbeddings": typeof ai_openaiEmbeddings;
   "ai/orchestration/advisoryHall": typeof ai_orchestration_advisoryHall;
   "ai/orchestration/roundtableHall": typeof ai_orchestration_roundtableHall;
-  "ai/personalArchiveStore": typeof ai_personalArchiveStore;
+  "ai/personalSourceRetrievalConfig": typeof ai_personalSourceRetrievalConfig;
+  "ai/personalSourceStore": typeof ai_personalSourceStore;
+  "ai/personalSources": typeof ai_personalSources;
   "ai/provider/factory": typeof ai_provider_factory;
   "ai/provider/langchainProvider": typeof ai_provider_langchainProvider;
   "ai/provider/types": typeof ai_provider_types;
@@ -198,7 +202,6 @@ declare const fullApi: ApiFromModules<{
   "contexts/knowledge/contracts": typeof contexts_knowledge_contracts;
   "contexts/knowledge/infrastructure/knowledgeIngestGateway": typeof contexts_knowledge_infrastructure_knowledgeIngestGateway;
   "contexts/knowledge/infrastructure/knowledgeRepo": typeof contexts_knowledge_infrastructure_knowledgeRepo;
-  "contexts/personalArchive/infrastructure/archiveRepo": typeof contexts_personalArchive_infrastructure_archiveRepo;
   "contexts/shared/auth": typeof contexts_shared_auth;
   "contexts/shared/chatResponseFallback": typeof contexts_shared_chatResponseFallback;
   "contexts/shared/contracts": typeof contexts_shared_contracts;
@@ -221,9 +224,10 @@ declare const fullApi: ApiFromModules<{
   notebooks: typeof notebooks;
   "observability/errors": typeof observability_errors;
   "observability/wideEvents": typeof observability_wideEvents;
-  personalArchive: typeof personalArchive;
-  personalArchiveChunks: typeof personalArchiveChunks;
-  personalArchiveShared: typeof personalArchiveShared;
+  personalSourceChunks: typeof personalSourceChunks;
+  personalSourceDigests: typeof personalSourceDigests;
+  personalSourceDocuments: typeof personalSourceDocuments;
+  personalSourcesShared: typeof personalSourcesShared;
   seed: typeof seed;
   settings: typeof settings;
   upload: typeof upload;

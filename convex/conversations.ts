@@ -20,6 +20,7 @@ const conversationDoc = v.object({
     )
   ),
   timeAwareReentryEnabled: v.optional(v.boolean()),
+  personalSourcesEnabled: v.optional(v.boolean()),
   timeAwareReentryState: v.optional(
     v.object({
       gapBucket: v.union(
@@ -245,6 +246,7 @@ async function createChamberThreadDoc(ctx: any, userId: any, memberId: any) {
     kind: 'chamber',
     chamberResponseMode: 'instant',
     timeAwareReentryEnabled: true,
+    personalSourcesEnabled: true,
     title: 'New Thread',
     chamberMemberId: memberId,
     updatedAt: now,
@@ -476,6 +478,26 @@ export const setChamberTimeAwareReentryEnabled = mutation({
     await ctx.db.patch(args.conversationId, {
       timeAwareReentryEnabled: args.enabled,
       timeAwareReentryState: args.enabled ? conversation.timeAwareReentryState : undefined,
+      updatedAt: Date.now(),
+    });
+    return (await ctx.db.get(args.conversationId))!;
+  },
+});
+
+export const setChamberPersonalSourcesEnabled = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    enabled: v.boolean(),
+  },
+  returns: conversationDoc,
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const conversation = await getOwnedConversation(ctx, userId, args.conversationId);
+    if (conversation.kind !== 'chamber' || conversation.deletedAt) {
+      throw new Error('Chamber conversation not found');
+    }
+    await ctx.db.patch(args.conversationId, {
+      personalSourcesEnabled: args.enabled,
       updatedAt: Date.now(),
     });
     return (await ctx.db.get(args.conversationId))!;

@@ -14,16 +14,15 @@ import type {
   MemberMemoryDocument,
   MemberMemoryEpisode,
   MemberMemoryRefreshState,
-  PersonalArchiveAccess,
-  PersonalArchiveCapturePreview,
-  PersonalArchiveEntry,
-  PersonalArchiveProfile,
+  PersonalSourceDigest,
+  PersonalSourceDocument,
   RoundtableState,
   RetrievalStrategy,
   ConversationGuidanceDirective,
   TimeAwareReentryGapBucket,
   MemberVoiceName,
   ThemeMode,
+  User,
 } from '../types/domain';
 import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/compactionPolicy';
 
@@ -35,7 +34,7 @@ export interface CreateMemberInput {
   ttsVoiceName?: MemberVoiceName;
   ttsPersonaPrompt?: string;
   specialties?: string[];
-  personalArchiveAccess?: PersonalArchiveAccess;
+  personalSourcesPermissionEnabled?: boolean;
 }
 
 export interface UpdateMemberPatch {
@@ -48,7 +47,7 @@ export interface UpdateMemberPatch {
   ttsPersonaPrompt?: string;
   ttsPersonaGeneratedAt?: number;
   specialties?: string[];
-  personalArchiveAccess?: PersonalArchiveAccess;
+  personalSourcesPermissionEnabled?: boolean;
   kbStoreName?: string | null;
   deletedAt?: number;
 }
@@ -93,7 +92,7 @@ export interface MemberChatResult {
   model: string;
   retrievalModel: string;
   usedKnowledgeBase: boolean;
-  usedPersonalArchive?: boolean;
+  usedPersonalSources?: boolean;
   attemptedResponseModelSlot?: number;
   attemptedResponseModelSpec?: string;
   finalResponseModelSlot?: number;
@@ -224,6 +223,7 @@ export interface CouncilRepository {
   getLatestChamberThread(memberId: string): Promise<Conversation | null>;
   setChamberResponseMode(conversationId: string, mode: ChamberResponseMode): Promise<Conversation>;
   setChamberTimeAwareReentryEnabled(conversationId: string, enabled: boolean): Promise<Conversation>;
+  setChamberPersonalSourcesEnabled(conversationId: string, enabled: boolean): Promise<Conversation>;
   setChamberTimeAwareReentryState(input: {
     conversationId: string;
     state?: {
@@ -315,34 +315,36 @@ export interface CouncilRepository {
   setToken(token: string | null): void;
   generateUploadUrl(): Promise<string>;
   setMemberAvatar(memberId: string, storageId: string): Promise<Member>;
-  getPersonalArchiveProfile(): Promise<PersonalArchiveProfile | null>;
-  updatePersonalArchiveIdentity(identity: string): Promise<PersonalArchiveProfile>;
-  previewPersonalArchiveCapture(input: {
-    sourceType: 'text' | 'audio' | 'file' | 'import';
-    rawText?: string;
-    storageId?: string;
-    originalLabel?: string;
-    mimeType?: string;
-    sizeBytes?: number;
-    forcedBucket?: PersonalArchiveEntry['bucket'];
-  }): Promise<PersonalArchiveCapturePreview>;
-  commitPersonalArchiveCapture(input: {
-    captureId: string;
-    entries: Array<{
-      bucket: PersonalArchiveEntry['bucket'];
-      title?: string;
-      content: string;
-    }>;
-  }): Promise<void>;
-  listPersonalArchiveEntries(includeArchived?: boolean): Promise<PersonalArchiveEntry[]>;
-  updatePersonalArchiveEntry(input: {
-    entryId: string;
-    bucket: PersonalArchiveEntry['bucket'];
-    title?: string;
-    content: string;
-  }): Promise<void>;
-  archivePersonalArchiveEntry(entryId: string): Promise<void>;
-  deletePersonalArchiveEntry(entryId: string): Promise<void>;
+  migrateLegacyProfileNote(): Promise<User>;
+  updateProfileNote(profileNote: string): Promise<User>;
+  listPersonalSourceDocuments(): Promise<PersonalSourceDocument[]>;
+  createPersonalSourceRecord(input: {
+    stagedFile: {
+      storageId: string;
+      displayName: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    };
+    chunkConfig?: KbChunkConfig;
+  }): Promise<{ personalSourceDocumentId: string; document: PersonalSourceDocument }>;
+  processPersonalSource(input: { personalSourceDocumentId: string }): Promise<{ ok: boolean; document: PersonalSourceDocument }>;
+  reprocessPersonalSource(input: {
+    personalSourceDocumentId: string;
+    chunkConfig?: KbChunkConfig;
+  }): Promise<{ ok: boolean; document: PersonalSourceDocument }>;
+  deletePersonalSource(input: { personalSourceDocumentId: string }): Promise<{ ok: boolean }>;
+  getPersonalSourceDownloadUrl(input: { personalSourceDocumentId: string }): Promise<string | null>;
+  listPersonalSourceDigests(): Promise<PersonalSourceDigest[]>;
+  updatePersonalSourceDigestMetadata(input: {
+    digestId: string;
+    displayName: string;
+    metadata: {
+      documentKinds: string[];
+      semanticClasses: string[];
+      queryHints: string[];
+      voice?: 'first_person' | 'second_person' | 'mixed' | 'unknown';
+    };
+  }): Promise<{ ok: boolean }>;
   getConversationNotebook(conversationId: string): Promise<ConversationNotebook | null>;
   listActiveConversationNotebooks(): Promise<ConversationNotebook[]>;
   saveConversationNotebook(conversationId: string, content: string): Promise<ConversationNotebook | null>;

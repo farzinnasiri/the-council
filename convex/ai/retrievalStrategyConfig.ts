@@ -9,8 +9,7 @@ export type QueryFamily =
   | 'thematic'
   | 'contrast'
   | 'adjacent'
-  | 'wildcard'
-  | 'archive_personal';
+  | 'wildcard';
 
 export type PlannerPromptVariant = 'instant' | 'brainstorm' | 'deep_dive';
 export type RetrievalLengthBucket = 'short' | 'medium' | 'long' | 'very_long';
@@ -20,9 +19,7 @@ export interface RetrievalStrategyConfig {
   plannerModelOverride?: string;
   allowedQueryFamilies: QueryFamily[];
   maxKnowledgeQueries: number;
-  maxArchiveQueries: number;
   initialKnowledgeChunkLimit: number;
-  initialArchiveChunkLimit: number;
   targetedDocCount: number;
   wildcardDocCount: number;
   allowBroadFallback: boolean;
@@ -36,9 +33,7 @@ export interface RetrievalStrategyConfig {
 
 export interface RetrievalLengthAdjustments {
   maxKnowledgeQueriesDelta: number;
-  maxArchiveQueriesDelta: number;
   initialKnowledgeChunkLimitDelta: number;
-  initialArchiveChunkLimitDelta: number;
   targetedDocCountDelta: number;
   wildcardDocCountDelta: number;
   secondPassKnowledgeQueriesDelta: number;
@@ -53,11 +48,9 @@ export interface ResolvedRetrievalStrategyConfig extends RetrievalStrategyConfig
 export const RETRIEVAL_STRATEGY_CONFIG: Record<RetrievalStrategy, RetrievalStrategyConfig> = {
   instant: {
     plannerPromptVariant: 'instant',
-    allowedQueryFamilies: ['anchor', 'tactical', 'autobiographical', 'adjacent', 'archive_personal'],
+    allowedQueryFamilies: ['anchor', 'tactical', 'autobiographical', 'adjacent'],
     maxKnowledgeQueries: 3,
-    maxArchiveQueries: 1,
     initialKnowledgeChunkLimit: 4,
-    initialArchiveChunkLimit: 3,
     targetedDocCount: 3,
     wildcardDocCount: 1,
     allowBroadFallback: true,
@@ -70,11 +63,9 @@ export const RETRIEVAL_STRATEGY_CONFIG: Record<RetrievalStrategy, RetrievalStrat
   },
   brainstorm: {
     plannerPromptVariant: 'brainstorm',
-    allowedQueryFamilies: ['anchor', 'thematic', 'contrast', 'adjacent', 'wildcard', 'archive_personal'],
+    allowedQueryFamilies: ['anchor', 'thematic', 'contrast', 'adjacent', 'wildcard'],
     maxKnowledgeQueries: 5,
-    maxArchiveQueries: 1,
     initialKnowledgeChunkLimit: 3,
-    initialArchiveChunkLimit: 3,
     targetedDocCount: 4,
     wildcardDocCount: 2,
     allowBroadFallback: true,
@@ -87,11 +78,9 @@ export const RETRIEVAL_STRATEGY_CONFIG: Record<RetrievalStrategy, RetrievalStrat
   },
   deep_dive: {
     plannerPromptVariant: 'deep_dive',
-    allowedQueryFamilies: ['anchor', 'tactical', 'autobiographical', 'thematic', 'adjacent', 'archive_personal'],
+    allowedQueryFamilies: ['anchor', 'tactical', 'autobiographical', 'thematic', 'adjacent'],
     maxKnowledgeQueries: 4,
-    maxArchiveQueries: 2,
     initialKnowledgeChunkLimit: 4,
-    initialArchiveChunkLimit: 4,
     targetedDocCount: 3,
     wildcardDocCount: 1,
     allowBroadFallback: true,
@@ -106,9 +95,7 @@ export const RETRIEVAL_STRATEGY_CONFIG: Record<RetrievalStrategy, RetrievalStrat
 
 const EMPTY_LENGTH_ADJUSTMENTS: RetrievalLengthAdjustments = {
   maxKnowledgeQueriesDelta: 0,
-  maxArchiveQueriesDelta: 0,
   initialKnowledgeChunkLimitDelta: 0,
-  initialArchiveChunkLimitDelta: 0,
   targetedDocCountDelta: 0,
   wildcardDocCountDelta: 0,
   secondPassKnowledgeQueriesDelta: 0,
@@ -129,7 +116,6 @@ const RETRIEVAL_LENGTH_ADJUSTMENTS: Record<
     long: {
       ...EMPTY_LENGTH_ADJUSTMENTS,
       maxKnowledgeQueriesDelta: 2,
-      maxArchiveQueriesDelta: 1,
       targetedDocCountDelta: 1,
       wildcardDocCountDelta: 1,
       initialKnowledgeChunkLimitDelta: 1,
@@ -137,11 +123,9 @@ const RETRIEVAL_LENGTH_ADJUSTMENTS: Record<
     very_long: {
       ...EMPTY_LENGTH_ADJUSTMENTS,
       maxKnowledgeQueriesDelta: 4,
-      maxArchiveQueriesDelta: 1,
       targetedDocCountDelta: 2,
       wildcardDocCountDelta: 1,
       initialKnowledgeChunkLimitDelta: 1,
-      initialArchiveChunkLimitDelta: 1,
     },
   },
   brainstorm: {
@@ -155,14 +139,12 @@ const RETRIEVAL_LENGTH_ADJUSTMENTS: Record<
     long: {
       ...EMPTY_LENGTH_ADJUSTMENTS,
       maxKnowledgeQueriesDelta: 2,
-      maxArchiveQueriesDelta: 1,
       targetedDocCountDelta: 2,
       wildcardDocCountDelta: 1,
     },
     very_long: {
       ...EMPTY_LENGTH_ADJUSTMENTS,
       maxKnowledgeQueriesDelta: 3,
-      maxArchiveQueriesDelta: 1,
       targetedDocCountDelta: 2,
       wildcardDocCountDelta: 2,
       initialKnowledgeChunkLimitDelta: 1,
@@ -179,7 +161,6 @@ const RETRIEVAL_LENGTH_ADJUSTMENTS: Record<
     long: {
       ...EMPTY_LENGTH_ADJUSTMENTS,
       maxKnowledgeQueriesDelta: 2,
-      maxArchiveQueriesDelta: 1,
       targetedDocCountDelta: 1,
       wildcardDocCountDelta: 1,
       initialKnowledgeChunkLimitDelta: 1,
@@ -189,11 +170,9 @@ const RETRIEVAL_LENGTH_ADJUSTMENTS: Record<
     very_long: {
       ...EMPTY_LENGTH_ADJUSTMENTS,
       maxKnowledgeQueriesDelta: 4,
-      maxArchiveQueriesDelta: 1,
       targetedDocCountDelta: 2,
       wildcardDocCountDelta: 1,
       initialKnowledgeChunkLimitDelta: 1,
-      initialArchiveChunkLimitDelta: 1,
       secondPassKnowledgeQueriesDelta: 2,
       secondPassKnowledgeChunkLimitDelta: 2,
     },
@@ -228,9 +207,7 @@ export function resolveRetrievalStrategyConfig(
   return {
     ...base,
     maxKnowledgeQueries: base.maxKnowledgeQueries + deltas.maxKnowledgeQueriesDelta,
-    maxArchiveQueries: base.maxArchiveQueries + deltas.maxArchiveQueriesDelta,
     initialKnowledgeChunkLimit: base.initialKnowledgeChunkLimit + deltas.initialKnowledgeChunkLimitDelta,
-    initialArchiveChunkLimit: base.initialArchiveChunkLimit + deltas.initialArchiveChunkLimitDelta,
     targetedDocCount: base.targetedDocCount + deltas.targetedDocCountDelta,
     wildcardDocCount: base.wildcardDocCount + deltas.wildcardDocCountDelta,
     secondPassKnowledgeQueries: base.secondPassKnowledgeQueries + deltas.secondPassKnowledgeQueriesDelta,

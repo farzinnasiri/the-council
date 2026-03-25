@@ -93,6 +93,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const renameConversation = useAppStore((state) => state.renameConversation);
   const archiveConversation = useAppStore((state) => state.archiveConversation);
   const clearChamberByMember = useAppStore((state) => state.clearChamberByMember);
+  const setChamberPersonalSourcesEnabled = useAppStore((state) => state.setChamberPersonalSourcesEnabled);
   const sessionItemBaseClass =
     'group relative rounded-md border border-transparent bg-transparent px-3 py-2 transition-colors duration-200 ease-out hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border';
   const sessionItemActiveClass = 'bg-muted shadow-[inset_2px_0_0_hsl(var(--foreground))]';
@@ -305,6 +306,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
               <div className="space-y-1">
                 {selectedVisibleThreads.map((thread) => {
                   const isActive = location.pathname === `/chamber/${thread.id}`;
+                  const personalSourcesEnabled = thread.personalSourcesEnabled !== false;
+                  const memberAllowsPersonalSources = Boolean(selectedThreadPanelMember?.personalSourcesPermissionEnabled);
                   return (
                     <NavLink
                       key={thread.id}
@@ -318,9 +321,18 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                       <div className="flex min-w-0 items-start justify-between gap-1">
                         <div className="min-w-0 flex-1">
                           <p className="line-clamp-2 break-words pr-1 text-sm font-medium leading-5">{thread.title}</p>
-                          <p className="truncate text-xs leading-5 text-muted-foreground">
-                            {formatSessionTime(thread.updatedAt)}
-                          </p>
+                          <div className="flex items-center gap-1.5 text-xs leading-5 text-muted-foreground">
+                            <span className="truncate">{formatSessionTime(thread.updatedAt)}</span>
+                            {memberAllowsPersonalSources ? (
+                              <Archive
+                                className={cn(
+                                  'h-3 w-3 shrink-0 transition-colors',
+                                  personalSourcesEnabled ? 'text-foreground/70' : 'text-muted-foreground/40',
+                                )}
+                                aria-hidden="true"
+                              />
+                            ) : null}
+                          </div>
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -336,7 +348,19 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                               <MoreVertical className="h-3.5 w-3.5" />
                             </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-36">
+                          <DropdownMenuContent align="end" className="w-48">
+                            {memberAllowsPersonalSources ? (
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void setChamberPersonalSourcesEnabled(thread.id, !personalSourcesEnabled);
+                                }}
+                                className="gap-2"
+                              >
+                                <Archive className="h-3.5 w-3.5" />
+                                {personalSourcesEnabled ? 'Hide sources' : 'Use sources'}
+                              </DropdownMenuItem>
+                            ) : null}
                             <DropdownMenuItem
                               onSelect={(event) => {
                                 event.preventDefault();
@@ -624,7 +648,6 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       <div className="shrink-0 p-3">
         <nav className="grid gap-1">
           <NavItem to="/members" icon={<Users2 className="h-4 w-4" />} label="Members" onNavigate={onNavigate} />
-          <NavItem to="/archive" icon={<Archive className="h-4 w-4" />} label="Personal Archive" onNavigate={onNavigate} />
           <NavItem to="/notebooks" icon={<NotebookPen className="h-4 w-4" />} label="Notebooks" onNavigate={onNavigate} />
           <NavItem
             to="/settings"

@@ -1,13 +1,7 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { authTables } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
-import {
-  personalArchiveAccessValidator,
-  personalArchiveBucketValidator,
-  personalArchiveCaptureStatusValidator,
-  personalArchiveProposedEntryValidator,
-  personalArchiveSourceTypeValidator,
-} from './personalArchiveShared';
+import { personalSourceDocumentMetadataValidator } from './personalSourcesShared';
 
 export default defineSchema({
   ...authTables,
@@ -17,6 +11,7 @@ export default defineSchema({
     email: v.optional(v.string()),
     emailVerificationTime: v.optional(v.number()),
     image: v.optional(v.string()),
+    profileNote: v.optional(v.string()),
     isAnonymous: v.optional(v.boolean()),
   }).index('email', ['email']),
 
@@ -43,7 +38,14 @@ export default defineSchema({
     ttsPersonaGeneratedAt: v.optional(v.number()),
     ttsPersonaUpdatedAt: v.optional(v.number()),
     kbStoreName: v.optional(v.string()),
-    personalArchiveAccess: v.optional(personalArchiveAccessValidator),
+    // Legacy compatibility shim for stored members created before Personal Sources replaced Personal Archive.
+    personalArchiveAccess: v.optional(v.object({
+      reflection: v.boolean(),
+      cookieJar: v.boolean(),
+      accountability: v.boolean(),
+      worldModel: v.boolean(),
+    })),
+    personalSourcesPermissionEnabled: v.optional(v.boolean()),
     // Legacy compatibility only. Active/archived now derives from deletedAt.
     status: v.optional(v.union(v.literal('active'), v.literal('archived'))),
     deletedAt: v.optional(v.number()),
@@ -62,9 +64,10 @@ export default defineSchema({
         v.literal('think'),
         v.literal('brainstorm'),
         v.literal('deep_dive')
-      )
-    ),
+    )
+  ),
     timeAwareReentryEnabled: v.optional(v.boolean()),
+    personalSourcesEnabled: v.optional(v.boolean()),
     timeAwareReentryState: v.optional(
       v.object({
         gapBucket: v.union(
@@ -468,58 +471,68 @@ export default defineSchema({
       filterFields: ['userId', 'memberId', 'kbStoreName', 'kbDocumentName'],
     }),
 
-  personalArchiveProfiles: defineTable({
+  personalSourceDocuments: defineTable({
     userId: v.id('users'),
-    identity: v.string(),
-    updatedAt: v.number(),
-  }).index('by_user', ['userId']),
-
-  personalArchiveCaptures: defineTable({
-    userId: v.id('users'),
-    sourceType: personalArchiveSourceTypeValidator,
-    rawText: v.optional(v.string()),
-    storageId: v.optional(v.id('_storage')),
-    originalLabel: v.optional(v.string()),
+    storageId: v.id('_storage'),
+    displayName: v.string(),
     mimeType: v.optional(v.string()),
     sizeBytes: v.optional(v.number()),
-    parseStatus: personalArchiveCaptureStatusValidator,
-    parseError: v.optional(v.string()),
-    proposedEntries: v.array(personalArchiveProposedEntryValidator),
-    updatedAt: v.number(),
-    committedAt: v.optional(v.number()),
-  })
-    .index('by_user_updated', ['userId', 'updatedAt']),
-
-  personalArchiveEntries: defineTable({
-    userId: v.id('users'),
-    captureId: v.optional(v.id('personalArchiveCaptures')),
-    bucket: personalArchiveBucketValidator,
-    title: v.optional(v.string()),
-    content: v.string(),
-    archivedAt: v.optional(v.number()),
+    personalSourceName: v.string(),
+    uploadStatus: v.union(v.literal('uploaded'), v.literal('failed')),
+    chunkingStatus: v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed')),
+    indexingStatus: v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed')),
+    metadataStatus: v.union(v.literal('pending'), v.literal('running'), v.literal('completed'), v.literal('failed')),
+    chunkSizeChars: v.optional(v.number()),
+    chunkOverlapChars: v.optional(v.number()),
+    chunkCountTotal: v.optional(v.number()),
+    chunkCountIndexed: v.optional(v.number()),
+    ingestErrorChunking: v.optional(v.string()),
+    ingestErrorIndexing: v.optional(v.string()),
+    ingestErrorMetadata: v.optional(v.string()),
+    status: v.union(v.literal('active'), v.literal('deleted')),
+    createdAt: v.number(),
     updatedAt: v.number(),
     deletedAt: v.optional(v.number()),
   })
-    .index('by_user_updated', ['userId', 'updatedAt'])
-    .index('by_user_bucket', ['userId', 'bucket']),
+    .index('by_user_status', ['userId', 'status'])
+    .index('by_user_storage', ['userId', 'storageId'])
+    .index('by_user_source', ['userId', 'personalSourceName']),
 
-  personalArchiveChunks: defineTable({
+  personalSourceDigests: defineTable({
     userId: v.id('users'),
-    entryId: v.id('personalArchiveEntries'),
-    bucket: personalArchiveBucketValidator,
-    title: v.optional(v.string()),
+    personalSourceName: v.string(),
+    displayName: v.string(),
+    storageId: v.optional(v.id('_storage')),
+    metadata: personalSourceDocumentMetadataValidator,
+    status: v.union(v.literal('active'), v.literal('deleted')),
+    updatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+  })
+    .index('by_user_status', ['userId', 'status'])
+    .index('by_user_source', ['userId', 'personalSourceName']),
+
+  personalSourceChunks: defineTable({
+    userId: v.id('users'),
+    personalSourceName: v.string(),
+    displayName: v.string(),
     chunkIndex: v.number(),
     text: v.string(),
     embedding: v.array(v.float64()),
     createdAt: v.number(),
   })
-    .index('by_entry', ['entryId'])
-    .index('by_user_bucket_createdAt', ['userId', 'bucket', 'createdAt'])
+    .index('by_user_source', ['userId', 'personalSourceName'])
     .vectorIndex('by_embedding', {
       vectorField: 'embedding',
       dimensions: 1536,
-      filterFields: ['userId', 'bucket'],
+      filterFields: ['userId', 'personalSourceName'],
     }),
+
+  // Legacy compatibility shim used only to migrate old Personal Archive identity into users.profileNote.
+  personalArchiveProfiles: defineTable({
+    userId: v.id('users'),
+    identity: v.string(),
+    updatedAt: v.optional(v.number()),
+  }).index('by_user', ['userId']),
 
   memberUserInteractionPolicies: defineTable({
     userId: v.id('users'),

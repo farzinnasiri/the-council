@@ -1,7 +1,6 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { mutation, query } from './_generated/server';
 import { v } from 'convex/values';
-import { defaultPersonalArchiveAccess, personalArchiveAccessValidator } from './personalArchiveShared';
 import { listConfiguredChatResponseSlots } from './ai/modelConfig';
 
 const ttsVoiceNameValidator = v.union(
@@ -81,7 +80,7 @@ export const create = mutation({
     guidanceProfilePrompt: v.optional(v.string()),
     ttsVoiceName: v.optional(ttsVoiceNameValidator),
     ttsPersonaPrompt: v.optional(v.string()),
-    personalArchiveAccess: v.optional(personalArchiveAccessValidator),
+    personalSourcesPermissionEnabled: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
@@ -98,7 +97,7 @@ export const create = mutation({
       ttsPersonaPrompt: args.ttsPersonaPrompt,
       ttsPersonaGeneratedAt: args.ttsPersonaPrompt ? Date.now() : undefined,
       ttsPersonaUpdatedAt: args.ttsPersonaPrompt ? Date.now() : undefined,
-      personalArchiveAccess: args.personalArchiveAccess ?? defaultPersonalArchiveAccess(),
+      personalSourcesPermissionEnabled: args.personalSourcesPermissionEnabled ?? false,
       updatedAt: Date.now(),
     });
     const doc = (await ctx.db.get(id))!;
@@ -120,7 +119,7 @@ export const update = mutation({
     ttsPersonaGeneratedAt: v.optional(v.number()),
     avatarId: v.optional(v.id('_storage')),
     kbStoreName: v.optional(v.string()),
-    personalArchiveAccess: v.optional(personalArchiveAccessValidator),
+    personalSourcesPermissionEnabled: v.optional(v.boolean()),
     deletedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {

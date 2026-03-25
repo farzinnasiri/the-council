@@ -16,8 +16,7 @@ import type {
   CouncilKBDocumentDigestHint,
   CouncilKnowledgeRetriever,
   LegacyRetrievalProfile,
-  CouncilPersonalArchiveAccess,
-  CouncilPersonalArchiveRetriever,
+  CouncilPersonalSourceRetriever,
   RetrievalStrategy,
   CouncilRouteMemberCandidate,
   RoundBidProposal,
@@ -106,8 +105,7 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     query: string;
     storeName?: string | null;
     knowledgeRetriever?: CouncilKnowledgeRetriever;
-    personalArchiveRetriever?: CouncilPersonalArchiveRetriever;
-    personalArchiveAccess?: CouncilPersonalArchiveAccess;
+    personalSourceRetriever?: CouncilPersonalSourceRetriever;
     identityContext?: string;
     memoryHint?: string;
     kbDigests?: CouncilKBDocumentDigestHint[];

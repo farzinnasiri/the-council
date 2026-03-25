@@ -66,7 +66,7 @@ export const chatWithMember = action({
     model: v.string(),
     retrievalModel: v.string(),
     usedKnowledgeBase: v.boolean(),
-    usedPersonalArchive: v.optional(v.boolean()),
+    usedPersonalSources: v.optional(v.boolean()),
     attemptedResponseModelSlot: v.optional(v.number()),
     attemptedResponseModelSpec: v.optional(v.string()),
     finalResponseModelSlot: v.optional(v.number()),
@@ -85,6 +85,7 @@ export const chatWithMember = action({
     return {
       ...result,
       usedKnowledgeBase: Boolean(result.usedKnowledgeBase),
+      usedPersonalSources: Boolean(result.usedPersonalSources),
     };
   }),
 });

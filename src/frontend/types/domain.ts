@@ -22,7 +22,6 @@ export type RoundtableRoundStatus = 'awaiting_user' | 'in_progress' | 'completed
 export type RoundtableCandidateStatus = 'shortlisted' | 'speaking' | 'spoken' | 'dismissed';
 export type RoundtableCandidateSelectedBy = 'allocator' | 'mention_boost' | 'user_manual_fallback';
 export type RoundtableRationaleTag = 'pushback' | 'new angle' | 'evidence' | 'synthesis' | 'clarify';
-export type PersonalArchiveBucket = 'reflection' | 'cookie_jar' | 'accountability' | 'world_model';
 export type SystemMessageKind = 'routing' | 'hall_followup_context' | 'hall_closure';
 export type MemberVoiceName = 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
 export type MessageFeedbackKey =
@@ -45,18 +44,12 @@ export type CustomGuidanceChipKey =
   | 'persona'
   | 'missed_my_point';
 
-export interface PersonalArchiveAccess {
-  reflection: boolean;
-  cookieJar: boolean;
-  accountability: boolean;
-  worldModel: boolean;
-}
-
 export interface User {
   id: string;
   name?: string;
   email?: string;
   image?: string;
+  profileNote?: string;
   themeMode?: ThemeMode;
 }
 
@@ -75,7 +68,7 @@ export interface Member {
   ttsPersonaGeneratedAt?: number;
   ttsPersonaUpdatedAt?: number;
   kbStoreName?: string;
-  personalArchiveAccess: PersonalArchiveAccess;
+  personalSourcesPermissionEnabled: boolean;
   deletedAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -126,6 +119,7 @@ export interface Conversation {
   hallMode?: HallMode;
   chamberResponseMode?: ChamberResponseMode;
   timeAwareReentryEnabled?: boolean;
+  personalSourcesEnabled?: boolean;
   timeAwareReentryState?: {
     gapBucket: TimeAwareReentryGapBucket;
     repliesRemaining: 1 | 2;
@@ -285,31 +279,41 @@ export interface KnowledgeDocument {
   uploadedAt?: string;
 }
 
-export interface PersonalArchiveProfile {
-  id: string;
-  identity: string;
-  updatedAt: number;
+export interface PersonalSourceMetadata {
+  documentKinds: string[];
+  semanticClasses: string[];
+  queryHints: string[];
+  voice?: 'first_person' | 'second_person' | 'mixed' | 'unknown';
 }
 
-export interface PersonalArchiveCapturePreview {
-  captureId: string;
-  parseStatus: 'ready' | 'failed';
-  parseError?: string;
-  rawText: string;
-  proposedEntries: Array<{
-    bucket: PersonalArchiveBucket;
-    title?: string;
-    content: string;
-  }>;
-}
-
-export interface PersonalArchiveEntry {
+export interface PersonalSourceDocument {
   id: string;
-  captureId?: string;
-  bucket: PersonalArchiveBucket;
-  title?: string;
-  content: string;
-  archivedAt?: number;
-  updatedAt: number;
+  storageId: string;
+  displayName: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  personalSourceName: string;
+  uploadStatus: 'uploaded' | 'failed';
+  chunkingStatus: 'pending' | 'running' | 'completed' | 'failed';
+  indexingStatus: 'pending' | 'running' | 'completed' | 'failed';
+  metadataStatus: 'pending' | 'running' | 'completed' | 'failed';
+  chunkConfig: {
+    chunkSizeChars: number;
+    chunkOverlapChars: number;
+  };
+  chunkCountTotal?: number;
+  chunkCountIndexed?: number;
+  ingestErrorChunking?: string;
+  ingestErrorIndexing?: string;
+  ingestErrorMetadata?: string;
   createdAt: number;
+  updatedAt: number;
+}
+
+export interface PersonalSourceDigest {
+  id: string;
+  personalSourceName: string;
+  displayName: string;
+  metadata: PersonalSourceMetadata;
+  updatedAt: number;
 }

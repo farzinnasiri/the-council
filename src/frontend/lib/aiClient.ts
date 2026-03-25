@@ -40,7 +40,7 @@ interface MemberChatResult {
   model: string;
   retrievalModel: string;
   usedKnowledgeBase: boolean;
-  usedPersonalArchive?: boolean;
+  usedPersonalSources?: boolean;
   attemptedResponseModelSlot?: number;
   attemptedResponseModelSpec?: string;
   finalResponseModelSlot?: number;

@@ -15,7 +15,7 @@ import {
   getKbChunkPresetConfig,
   validateKbChunkConfig,
 } from '../constants/kbChunking';
-import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, MemberVoiceName, PersonalArchiveAccess } from '../types/domain';
+import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, MemberVoiceName } from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
 
 interface MemberFormState {
@@ -26,7 +26,7 @@ interface MemberFormState {
   guidanceProfilePrompt: string;
   ttsVoiceName: MemberVoiceName;
   ttsPersonaPrompt: string;
-  personalArchiveAccess: PersonalArchiveAccess;
+  personalSourcesPermissionEnabled: boolean;
 }
 
 interface DigestEditorState {
@@ -58,12 +58,7 @@ const emptyForm: MemberFormState = {
   guidanceProfilePrompt: '',
   ttsVoiceName: DEFAULT_MEMBER_VOICE,
   ttsPersonaPrompt: '',
-  personalArchiveAccess: {
-    reflection: false,
-    cookieJar: false,
-    accountability: false,
-    worldModel: false,
-  },
+  personalSourcesPermissionEnabled: false,
 };
 
 export function MembersPage() {
@@ -240,7 +235,7 @@ export function MembersPage() {
       guidanceProfilePrompt: member.guidanceProfilePrompt ?? '',
       ttsVoiceName: member.ttsVoiceName,
       ttsPersonaPrompt: member.ttsPersonaPrompt ?? '',
-      personalArchiveAccess: member.personalArchiveAccess,
+      personalSourcesPermissionEnabled: member.personalSourcesPermissionEnabled,
     });
     setIsCreating(false);
     setPendingAvatarBlob(null);
@@ -312,7 +307,7 @@ export function MembersPage() {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean),
-      personalArchiveAccess: form.personalArchiveAccess,
+      personalSourcesPermissionEnabled: form.personalSourcesPermissionEnabled,
     };
 
     if (editingMemberId) {
@@ -333,7 +328,7 @@ export function MembersPage() {
         guidanceProfilePrompt: created.guidanceProfilePrompt ?? '',
         ttsVoiceName: created.ttsVoiceName,
         ttsPersonaPrompt: created.ttsPersonaPrompt ?? '',
-        personalArchiveAccess: created.personalArchiveAccess,
+        personalSourcesPermissionEnabled: created.personalSourcesPermissionEnabled,
       });
       return;
     }
@@ -790,16 +785,6 @@ export function MembersPage() {
     }));
   };
 
-  const toggleArchiveAccess = (key: keyof PersonalArchiveAccess) => {
-    setForm((current) => ({
-      ...current,
-      personalArchiveAccess: {
-        ...current.personalArchiveAccess,
-        [key]: !current.personalArchiveAccess[key],
-      },
-    }));
-  };
-
   return (
     <div className="h-full overflow-y-auto px-4 py-5 md:px-8 md:py-8">
       <div className={`mx-auto grid w-full gap-6 ${isFormActive ? 'max-w-6xl lg:grid-cols-[1.2fr_1fr]' : 'max-w-2xl grid-cols-1'}`}>
@@ -1115,40 +1100,31 @@ export function MembersPage() {
               <section className="rounded-md border border-border bg-background/50 p-3">
                 <div className="mb-2">
                   <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Personal Archive Access
+                    Personal Sources
                   </p>
                   <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                    Identity is always on. These toggles control searchable archive buckets for this member.
+                    Allow this member to access the user&apos;s shared personal source library in chamber threads.
                   </p>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {[
-                    ['reflection', 'Reflection'],
-                    ['cookieJar', 'Cookie Jar'],
-                    ['accountability', 'Accountability'],
-                    ['worldModel', 'World Model'],
-                  ].map(([key, label]) => {
-                    const typedKey = key as keyof PersonalArchiveAccess;
-                    const enabled = form.personalArchiveAccess[typedKey];
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => toggleArchiveAccess(typedKey)}
-                        className={`flex items-center justify-between rounded-md border px-3 py-2 text-left font-mono text-xs transition-colors ${
-                          enabled
-                            ? 'border-foreground/30 bg-foreground text-background'
-                            : 'border-border bg-transparent text-foreground hover:border-foreground/20 hover:bg-muted/40'
-                        }`}
-                      >
-                        <span>{label}</span>
-                        <span className="text-[10px] uppercase tracking-[0.14em]">
-                          {enabled ? 'On' : 'Off'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((current) => ({
+                      ...current,
+                      personalSourcesPermissionEnabled: !current.personalSourcesPermissionEnabled,
+                    }))
+                  }
+                  className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left font-mono text-xs transition-colors ${
+                    form.personalSourcesPermissionEnabled
+                      ? 'border-foreground/30 bg-foreground text-background'
+                      : 'border-border bg-transparent text-foreground hover:border-foreground/20 hover:bg-muted/40'
+                  }`}
+                >
+                  <span>Use personal sources in chamber</span>
+                  <span className="text-[10px] uppercase tracking-[0.14em]">
+                    {form.personalSourcesPermissionEnabled ? 'On' : 'Off'}
+                  </span>
+                </button>
               </section>
 
               <div className="mt-2 flex items-center gap-2">
@@ -1214,7 +1190,7 @@ export function MembersPage() {
                           Chunk size
                           <input
                             type="number"
-                            min={200}
+                            min={50}
                             max={12000}
                             className="h-9 rounded-md border border-border bg-background px-3"
                             value={uploadChunkConfig.chunkSizeChars}
@@ -1427,7 +1403,7 @@ export function MembersPage() {
                                       Chunk size
                                       <input
                                         type="number"
-                                        min={200}
+                                        min={50}
                                         max={12000}
                                         className="h-8 rounded-md border border-border bg-background px-2"
                                         value={docChunkConfig.chunkSizeChars}

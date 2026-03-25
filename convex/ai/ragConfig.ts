@@ -20,7 +20,7 @@ export const KB_CHUNK_PRESETS = {
 
 export const DEFAULT_KB_CHUNK_CONFIG: KBChunkConfig = KB_CHUNK_PRESETS.default;
 
-export const MIN_CHUNK_SIZE_CHARS = 200;
+export const MIN_CHUNK_SIZE_CHARS = 50;
 export const MAX_CHUNK_SIZE_CHARS = 12000;
 export const MIN_CHUNK_OVERLAP_CHARS = 0;
 export const MAX_CHUNK_OVERLAP_CHARS = 4000;

@@ -30,12 +30,7 @@ export interface MemberListRow {
   ttsVoiceName?: 'Kore' | 'Zephyr' | 'Fenrir' | 'Puck' | 'Charon';
   ttsPersonaPrompt?: string;
   kbStoreName?: string;
-  personalArchiveAccess?: {
-    reflection: boolean;
-    cookieJar: boolean;
-    accountability: boolean;
-    worldModel: boolean;
-  };
+  personalSourcesPermissionEnabled?: boolean;
   deletedAt?: number;
   avatarUrl?: string | null;
 }

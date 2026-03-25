@@ -20,12 +20,7 @@ export interface OwnedMember {
   ttsPersonaGeneratedAt?: number;
   ttsPersonaUpdatedAt?: number;
   kbStoreName?: string;
-  personalArchiveAccess?: {
-    reflection: boolean;
-    cookieJar: boolean;
-    accountability: boolean;
-    worldModel: boolean;
-  };
+  personalSourcesPermissionEnabled?: boolean;
   deletedAt?: number;
 }
 
@@ -35,6 +30,7 @@ export interface OwnedConversation {
   hallMode?: 'advisory' | 'roundtable';
   title: string;
   chamberMemberId?: Id<'members'>;
+  personalSourcesEnabled?: boolean;
   guidanceLastReflectedUserTurnCount?: number;
   deletedAt?: number;
   closedAt?: number;

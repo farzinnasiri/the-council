@@ -43,8 +43,8 @@ export function validateKbChunkConfig(config: KbChunkConfig): string | null {
   if (!Number.isFinite(config.chunkSizeChars) || !Number.isFinite(config.chunkOverlapChars)) {
     return 'Chunk settings must be numeric.';
   }
-  if (config.chunkSizeChars < 200 || config.chunkSizeChars > 12000) {
-    return 'Chunk size must be between 200 and 12000 characters.';
+  if (config.chunkSizeChars < 50 || config.chunkSizeChars > 12000) {
+    return 'Chunk size must be between 50 and 12000 characters.';
   }
   if (config.chunkOverlapChars < 0 || config.chunkOverlapChars > 4000) {
     return 'Chunk overlap must be between 0 and 4000 characters.';

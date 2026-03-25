@@ -9,7 +9,6 @@ const HallDraftPage = lazy(() => import('./routes/HallDraftPage').then((m) => ({
 const ChamberPage = lazy(() => import('./routes/ChamberPage').then((m) => ({ default: m.ChamberPage })));
 const ChamberMemberPage = lazy(() => import('./routes/ChamberMemberPage').then((m) => ({ default: m.ChamberMemberPage })));
 const MembersPage = lazy(() => import('./routes/MembersPage').then((m) => ({ default: m.MembersPage })));
-const PersonalArchivePage = lazy(() => import('./routes/PersonalArchivePage').then((m) => ({ default: m.PersonalArchivePage })));
 const NotebooksPage = lazy(() => import('./routes/NotebooksPage').then((m) => ({ default: m.NotebooksPage })));
 const ProfilePage = lazy(() => import('./routes/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 
@@ -31,7 +30,6 @@ export default function App() {
           <Route path="/chamber/member/:memberId" element={<ChamberMemberPage />} />
           <Route path="/chamber/:conversationId" element={<ChamberPage />} />
           <Route path="/members" element={<MembersPage />} />
-          <Route path="/archive" element={<PersonalArchivePage />} />
           <Route path="/notebooks" element={<NotebooksPage />} />
           <Route path="/notebooks/:conversationId" element={<NotebooksPage />} />
           <Route path="/settings" element={<ProfilePage />} />

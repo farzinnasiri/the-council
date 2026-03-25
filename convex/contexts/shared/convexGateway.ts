@@ -1,13 +1,14 @@
 'use node';
 
+import { api } from '../../_generated/api';
 import type { Id } from '../../_generated/dataModel';
 import { createCouncilAiProvider } from '../../ai/provider/factory';
 import type {
   CouncilKBDocumentDigestHint,
-  CouncilPersonalArchiveAccess,
+  CouncilPersonalSourceDigestHint,
 } from '../../ai/provider/types';
 import { listMemberChunkDocuments, searchMemberChunks } from '../../ai/ragStore';
-import { searchPersonalArchiveChunks } from '../../ai/personalArchiveStore';
+import { searchPersonalSourceChunks } from '../../ai/personalSourceStore';
 import type { ActionCtxLike, KBDigestRow } from './types';
 import { setMainSpanAttributes } from '../../observability/wideEvents';
 import { wideEventError } from '../../observability/errors';
@@ -81,34 +82,57 @@ export function createKnowledgeRetriever(ctx: ActionCtxLike, memberId: Id<'membe
   };
 }
 
-export function createPersonalArchiveRetriever(ctx: ActionCtxLike & { vectorSearch?: any }, userId: Id<'users'>) {
+export function createPersonalSourceRetriever(
+  ctx: ActionCtxLike & { vectorSearch?: any },
+  userId: Id<'users'>,
+  userName?: string,
+) {
   return {
-    listSources: async ({ access }: { access: CouncilPersonalArchiveAccess }) =>
-      await runNamedQuery<{ availableBuckets: Array<'reflection' | 'cookie_jar' | 'accountability' | 'world_model'>; totalEntries: number }>(
-        ctx,
-        'personalArchive:getAccessibleSummary',
-        { access },
-      ),
+    listSources: async () => {
+      const rows = (await runApiQuery<any[]>(ctx, api.personalSourceDigests.listByUser, {
+        includeDeleted: false,
+      })) as any[];
+      const sources: CouncilPersonalSourceDigestHint[] = rows.map((row) => ({
+        displayName: row.displayName,
+        personalSourceName: row.personalSourceName,
+        documentKinds: row.metadata?.documentKinds ?? [],
+        semanticClasses: row.metadata?.semanticClasses ?? [],
+        queryHints: row.metadata?.queryHints ?? [],
+      }));
+      return { sources };
+    },
     retrieve: async ({
       query,
-      buckets,
-      limit,
+      targetDocumentKinds,
+      targetSemanticClasses,
+      candidateSourceCount,
+      chunkLimitPerQuery,
+      injectedSourceGroupCount,
+      chunksPerSourceGroup,
       traceId: _traceId,
     }: {
       query: string;
-      buckets: Array<'reflection' | 'cookie_jar' | 'accountability' | 'world_model'>;
-      limit?: number;
-      traceId: string;
+      targetDocumentKinds?: string[];
+      targetSemanticClasses?: string[];
+      candidateSourceCount?: number;
+      chunkLimitPerQuery?: number;
+      injectedSourceGroupCount?: number;
+      chunksPerSourceGroup?: number;
+      traceId?: string;
     }) => {
       setMainSpanAttributes({
-        'archive.bucket_count': buckets.length,
-        'archive.query.length': query.trim().length,
+        'personal_source.query.length': query.trim().length,
       });
-      return await searchPersonalArchiveChunks(ctx, {
+      return await searchPersonalSourceChunks(ctx, {
         userId,
+        userName,
         query,
-        allowedBuckets: buckets,
-        limit,
+        targetDocumentKinds,
+        targetSemanticClasses,
+        candidateSourceCount,
+        chunkLimitPerQuery,
+        injectedSourceGroupCount,
+        chunksPerSourceGroup,
       });
     },
   };

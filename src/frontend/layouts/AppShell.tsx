@@ -81,14 +81,6 @@ export function AppShell() {
       };
     }
 
-    if (location.pathname.startsWith('/archive')) {
-      return {
-        title: 'Personal Archive',
-        subtitle: '',
-        showParticipants: false,
-      };
-    }
-
     if (location.pathname.startsWith('/notebooks')) {
       return {
         title: 'Notebooks',

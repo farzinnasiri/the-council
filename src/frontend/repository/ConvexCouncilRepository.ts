@@ -19,10 +19,8 @@ import type {
   MessageCustomGuidance,
   MessageFeedback,
   MessageFeedbackKey,
-  PersonalArchiveAccess,
-  PersonalArchiveCapturePreview,
-  PersonalArchiveEntry,
-  PersonalArchiveProfile,
+  PersonalSourceDigest,
+  PersonalSourceDocument,
   RetrievalStrategy,
   ThemeMode,
   TimeAwareReentryGapBucket,
@@ -65,12 +63,6 @@ type ConvexParticipantDoc = any;
 type ConvexMessageDoc = any;
 
 function toMember(doc: ConvexMemberDoc): Member {
-  const personalArchiveAccess: PersonalArchiveAccess = {
-    reflection: Boolean(doc.personalArchiveAccess?.reflection),
-    cookieJar: Boolean(doc.personalArchiveAccess?.cookieJar),
-    accountability: Boolean(doc.personalArchiveAccess?.accountability),
-    worldModel: Boolean(doc.personalArchiveAccess?.worldModel),
-  };
   return {
     id: doc._id,
     name: doc.name,
@@ -86,7 +78,7 @@ function toMember(doc: ConvexMemberDoc): Member {
     ttsPersonaGeneratedAt: doc.ttsPersonaGeneratedAt,
     ttsPersonaUpdatedAt: doc.ttsPersonaUpdatedAt,
     kbStoreName: doc.kbStoreName,
-    personalArchiveAccess,
+    personalSourcesPermissionEnabled: Boolean(doc.personalSourcesPermissionEnabled),
     deletedAt: doc.deletedAt,
     createdAt: doc._creationTime,
     updatedAt: doc.updatedAt,
@@ -100,6 +92,7 @@ function toConversation(doc: ConvexConversationDoc): Conversation {
     hallMode: doc.kind === 'hall' ? ((doc.hallMode as 'advisory' | 'roundtable' | undefined) ?? 'advisory') : undefined,
     chamberResponseMode: doc.kind === 'chamber' ? (doc.chamberResponseMode as ChamberResponseMode | undefined) ?? 'instant' : undefined,
     timeAwareReentryEnabled: doc.kind === 'chamber' ? Boolean(doc.timeAwareReentryEnabled ?? true) : undefined,
+    personalSourcesEnabled: doc.kind === 'chamber' ? Boolean(doc.personalSourcesEnabled ?? true) : undefined,
     timeAwareReentryState: doc.kind === 'chamber' && doc.timeAwareReentryState
       ? {
           gapBucket: doc.timeAwareReentryState.gapBucket as TimeAwareReentryGapBucket,
@@ -330,24 +323,44 @@ function toKbDocumentLifecycle(doc: any): KbDocumentLifecycle {
   };
 }
 
-function toPersonalArchiveProfile(doc: any): PersonalArchiveProfile {
+function toPersonalSourceDocument(doc: any): PersonalSourceDocument {
   return {
     id: doc._id,
-    identity: doc.identity ?? '',
-    updatedAt: doc.updatedAt ?? doc._creationTime,
+    storageId: doc.storageId,
+    displayName: doc.displayName,
+    mimeType: doc.mimeType,
+    sizeBytes: doc.sizeBytes,
+    personalSourceName: doc.personalSourceName,
+    uploadStatus: doc.uploadStatus,
+    chunkingStatus: doc.chunkingStatus,
+    indexingStatus: doc.indexingStatus,
+    metadataStatus: doc.metadataStatus,
+    chunkConfig: {
+      chunkSizeChars: doc.chunkSizeChars ?? DEFAULT_KB_CHUNK_CONFIG.chunkSizeChars,
+      chunkOverlapChars: doc.chunkOverlapChars ?? DEFAULT_KB_CHUNK_CONFIG.chunkOverlapChars,
+    },
+    chunkCountTotal: doc.chunkCountTotal,
+    chunkCountIndexed: doc.chunkCountIndexed,
+    ingestErrorChunking: doc.ingestErrorChunking,
+    ingestErrorIndexing: doc.ingestErrorIndexing,
+    ingestErrorMetadata: doc.ingestErrorMetadata,
+    createdAt: doc.createdAt ?? doc._creationTime,
+    updatedAt: doc.updatedAt,
   };
 }
 
-function toPersonalArchiveEntry(doc: any): PersonalArchiveEntry {
+function toPersonalSourceDigest(doc: any): PersonalSourceDigest {
   return {
     id: doc._id,
-    captureId: doc.captureId,
-    bucket: doc.bucket,
-    title: doc.title,
-    content: doc.content,
-    archivedAt: doc.archivedAt,
+    personalSourceName: doc.personalSourceName,
+    displayName: doc.displayName,
+    metadata: {
+      documentKinds: doc.metadata?.documentKinds ?? [],
+      semanticClasses: doc.metadata?.semanticClasses ?? [],
+      queryHints: doc.metadata?.queryHints ?? [],
+      voice: doc.metadata?.voice,
+    },
     updatedAt: doc.updatedAt,
-    createdAt: doc._creationTime,
   };
 }
 
@@ -402,6 +415,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       name: user.name,
       email: user.email,
       image: user.image,
+      profileNote: user.profileNote,
     };
   }
 
@@ -419,7 +433,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       ttsVoiceName: input.ttsVoiceName,
       ttsPersonaPrompt: input.ttsPersonaPrompt,
       specialties: input.specialties,
-      personalArchiveAccess: input.personalArchiveAccess,
+      personalSourcesPermissionEnabled: input.personalSourcesPermissionEnabled,
     } as any);
     return toMember(doc as any);
   }
@@ -554,86 +568,119 @@ class ConvexCouncilRepository implements CouncilRepository {
     return toMember(doc as any);
   }
 
-  async getPersonalArchiveProfile(): Promise<PersonalArchiveProfile | null> {
-    const doc = await this.client.query(api.personalArchive.getProfile, {});
-    return doc ? toPersonalArchiveProfile(doc) : null;
-  }
-
-  async updatePersonalArchiveIdentity(identity: string): Promise<PersonalArchiveProfile> {
-    const doc = await this.client.mutation(api.personalArchive.upsertProfile, { identity });
-    return toPersonalArchiveProfile(doc);
-  }
-
-  async previewPersonalArchiveCapture(input: {
-    sourceType: 'text' | 'audio' | 'file' | 'import';
-    rawText?: string;
-    storageId?: string;
-    originalLabel?: string;
-    mimeType?: string;
-    sizeBytes?: number;
-    forcedBucket?: PersonalArchiveEntry['bucket'];
-  }): Promise<PersonalArchiveCapturePreview> {
-    const doc = await this.client.action(api.ai.archive.previewCapture as any, {
-      sourceType: input.sourceType,
-      rawText: input.rawText,
-      storageId: input.storageId as Id<'_storage'> | undefined,
-      originalLabel: input.originalLabel,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      forcedBucket: input.forcedBucket,
-    });
+  async updateProfileNote(profileNote: string): Promise<User> {
+    const doc = await this.client.mutation(api.users.update, { profileNote });
     return {
-      captureId: doc.captureId,
-      parseStatus: doc.parseStatus,
-      parseError: doc.parseError,
-      rawText: doc.rawText,
-      proposedEntries: doc.proposedEntries,
+      id: doc._id,
+      name: doc.name,
+      email: doc.email,
+      image: doc.image,
+      profileNote: doc.profileNote,
     };
   }
 
-  async commitPersonalArchiveCapture(input: {
-    captureId: string;
-    entries: Array<{
-      bucket: PersonalArchiveEntry['bucket'];
-      title?: string;
-      content: string;
-    }>;
-  }): Promise<void> {
-    await this.client.action(api.ai.archive.commitCaptureEntries as any, {
-      captureId: input.captureId as Id<'personalArchiveCaptures'>,
-      entries: input.entries,
-    });
+  async migrateLegacyProfileNote(): Promise<User> {
+    const doc = await this.client.mutation(api.users.migrateLegacyProfileNote, {});
+    return {
+      id: doc._id,
+      name: doc.name,
+      email: doc.email,
+      image: doc.image,
+      profileNote: doc.profileNote,
+    };
   }
 
-  async listPersonalArchiveEntries(includeArchived = false): Promise<PersonalArchiveEntry[]> {
-    const docs = await this.client.query(api.personalArchive.listEntries, { includeArchived });
-    return docs.map(toPersonalArchiveEntry);
+  async listPersonalSourceDocuments(): Promise<PersonalSourceDocument[]> {
+    const rows = (await this.client.action(api.ai.personalSources.listPersonalSources as any, {})) as any[];
+    return rows.map(toPersonalSourceDocument);
   }
 
-  async updatePersonalArchiveEntry(input: {
-    entryId: string;
-    bucket: PersonalArchiveEntry['bucket'];
-    title?: string;
-    content: string;
-  }): Promise<void> {
-    await this.client.action(api.ai.archive.updateEntry as any, {
-      entryId: input.entryId as Id<'personalArchiveEntries'>,
-      bucket: input.bucket,
-      title: input.title,
-      content: input.content,
-    });
+  async createPersonalSourceRecord(input: {
+    stagedFile: {
+      storageId: string;
+      displayName: string;
+      mimeType?: string;
+      sizeBytes?: number;
+    };
+    chunkConfig?: KbChunkConfig;
+  }): Promise<{ personalSourceDocumentId: string; document: PersonalSourceDocument }> {
+    const body = (await this.client.action(api.ai.personalSources.createPersonalSourceRecord as any, {
+      stagedFile: {
+        storageId: input.stagedFile.storageId as Id<'_storage'>,
+        displayName: input.stagedFile.displayName,
+        mimeType: input.stagedFile.mimeType,
+        sizeBytes: input.stagedFile.sizeBytes,
+      },
+      chunkConfig: input.chunkConfig,
+    })) as any;
+    return {
+      personalSourceDocumentId: body.personalSourceDocumentId,
+      document: toPersonalSourceDocument(body.document),
+    };
   }
 
-  async archivePersonalArchiveEntry(entryId: string): Promise<void> {
-    await this.client.action(api.ai.archive.archiveEntry as any, {
-      entryId: entryId as Id<'personalArchiveEntries'>,
-    });
+  async processPersonalSource(input: {
+    personalSourceDocumentId: string;
+  }): Promise<{ ok: boolean; document: PersonalSourceDocument }> {
+    const body = (await this.client.action(api.ai.personalSources.processPersonalSource as any, {
+      personalSourceDocumentId: input.personalSourceDocumentId as Id<'personalSourceDocuments'>,
+    })) as any;
+    return {
+      ok: Boolean(body.ok),
+      document: toPersonalSourceDocument(body.document),
+    };
   }
 
-  async deletePersonalArchiveEntry(entryId: string): Promise<void> {
-    await this.client.action(api.ai.archive.deleteEntry as any, {
-      entryId: entryId as Id<'personalArchiveEntries'>,
+  async reprocessPersonalSource(input: {
+    personalSourceDocumentId: string;
+    chunkConfig?: KbChunkConfig;
+  }): Promise<{ ok: boolean; document: PersonalSourceDocument }> {
+    const body = (await this.client.action(api.ai.personalSources.reprocessPersonalSource as any, {
+      personalSourceDocumentId: input.personalSourceDocumentId as Id<'personalSourceDocuments'>,
+      chunkConfig: input.chunkConfig,
+    })) as any;
+    return {
+      ok: Boolean(body.ok),
+      document: toPersonalSourceDocument(body.document),
+    };
+  }
+
+  async deletePersonalSource(input: { personalSourceDocumentId: string }): Promise<{ ok: boolean }> {
+    return (await this.client.action(api.ai.personalSources.deletePersonalSource as any, {
+      personalSourceDocumentId: input.personalSourceDocumentId as Id<'personalSourceDocuments'>,
+    })) as { ok: boolean };
+  }
+
+  async getPersonalSourceDownloadUrl(input: { personalSourceDocumentId: string }): Promise<string | null> {
+    return (await this.client.query(api.personalSourceDocuments.getDownloadUrl as any, {
+      personalSourceDocumentId: input.personalSourceDocumentId as Id<'personalSourceDocuments'>,
+    })) as string | null;
+  }
+
+  async listPersonalSourceDigests(): Promise<PersonalSourceDigest[]> {
+    const rows = (await this.client.query(api.personalSourceDigests.listByUser as any, {
+      includeDeleted: false,
+    })) as any[];
+    return rows.map(toPersonalSourceDigest);
+  }
+
+  async updatePersonalSourceDigestMetadata(input: {
+    digestId: string;
+    displayName: string;
+    metadata: {
+      documentKinds: string[];
+      semanticClasses: string[];
+      queryHints: string[];
+      voice?: 'first_person' | 'second_person' | 'mixed' | 'unknown';
+    };
+  }): Promise<{ ok: boolean }> {
+    await this.client.mutation(api.personalSourceDigests.updateDigestMetadata as any, {
+      digestId: input.digestId as Id<'personalSourceDigests'>,
+      displayName: input.displayName,
+      metadata: input.metadata,
+      updatedAt: Date.now(),
     });
+    return { ok: true };
   }
 
   async getConversationNotebook(conversationId: string): Promise<ConversationNotebook | null> {
@@ -781,6 +828,14 @@ class ConvexCouncilRepository implements CouncilRepository {
 
   async setChamberTimeAwareReentryEnabled(conversationId: string, enabled: boolean): Promise<Conversation> {
     const doc = await this.clientAny.mutation('conversations:setChamberTimeAwareReentryEnabled', {
+      conversationId: conversationId as Id<'conversations'>,
+      enabled,
+    });
+    return toConversation(doc);
+  }
+
+  async setChamberPersonalSourcesEnabled(conversationId: string, enabled: boolean): Promise<Conversation> {
+    const doc = await this.clientAny.mutation('conversations:setChamberPersonalSourcesEnabled', {
       conversationId: conversationId as Id<'conversations'>,
       enabled,
     });

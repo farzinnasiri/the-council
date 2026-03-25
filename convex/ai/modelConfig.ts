@@ -15,6 +15,7 @@ export type ModelSlot =
   | 'chamberMemory'
   | 'kbGate'
   | 'kbQueryRewrite'
+  | 'personalSourceQueryRewrite'
   | 'kbDigest'
   | 'tts'
   | 'voicePersona'
@@ -55,6 +56,7 @@ const SLOT_ENV_KEYS: Record<ModelSlot, string> = {
   chamberMemory: 'AI_MODEL_CHAMBER_MEMORY',
   kbGate: 'AI_MODEL_KB_GATE',
   kbQueryRewrite: 'AI_MODEL_KB_QUERY_REWRITE',
+  personalSourceQueryRewrite: 'AI_MODEL_PERSONAL_SOURCE_QUERY_REWRITE',
   kbDigest: 'AI_MODEL_KB_DIGEST',
   tts: 'AI_MODEL_TTS',
   voicePersona: 'AI_MODEL_VOICE_PERSONA',
@@ -79,6 +81,7 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
   chamberMemory: ['GEMINI_CHAMBER_MEMORY_MODEL', 'GEMINI_MODEL'],
   kbGate: ['GEMINI_KB_GATE_MODEL', 'GEMINI_ROUTER_MODEL', 'GEMINI_MODEL'],
   kbQueryRewrite: ['GEMINI_KB_QUERY_REWRITE_MODEL', 'GEMINI_MODEL'],
+  personalSourceQueryRewrite: ['GEMINI_MODEL'],
   kbDigest: ['GEMINI_KB_DIGEST_MODEL', 'GEMINI_MODEL'],
   tts: ['GEMINI_TTS_MODEL', 'GEMINI_MODEL'],
   voicePersona: ['GEMINI_VOICE_PERSONA_MODEL', 'GEMINI_SPECIALTIES_MODEL', 'GEMINI_MODEL'],
@@ -103,6 +106,7 @@ const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
   chamberMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
   kbGate: { provider: 'google', model: 'gemma-3-12b-it' },
   kbQueryRewrite: { provider: 'google', model: 'gemini-2.5-flash-lite' },
+  personalSourceQueryRewrite: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   kbDigest: { provider: 'google', model: 'gemini-2.5-flash-lite' },
   tts: { provider: 'google', model: 'gemini-2.5-flash-preview-tts' },
   voicePersona: { provider: 'google', model: 'gemini-2.5-flash-lite' },
@@ -186,6 +190,7 @@ export const MODEL_IDS: Record<ModelSlot, string> = {
   chamberMemory: resolveModelTarget('chamberMemory').model,
   kbGate: resolveModelTarget('kbGate').model,
   kbQueryRewrite: resolveModelTarget('kbQueryRewrite').model,
+  personalSourceQueryRewrite: resolveModelTarget('personalSourceQueryRewrite').model,
   kbDigest: resolveModelTarget('kbDigest').model,
   tts: resolveModelTarget('tts').model,
   voicePersona: resolveModelTarget('voicePersona').model,
