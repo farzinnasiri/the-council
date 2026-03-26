@@ -112,6 +112,8 @@ import type * as personalSourceChunks from "../personalSourceChunks.js";
 import type * as personalSourceDigests from "../personalSourceDigests.js";
 import type * as personalSourceDocuments from "../personalSourceDocuments.js";
 import type * as personalSourcesShared from "../personalSourcesShared.js";
+import type * as promptTraceValidators from "../promptTraceValidators.js";
+import type * as promptTraces from "../promptTraces.js";
 import type * as seed from "../seed.js";
 import type * as settings from "../settings.js";
 import type * as upload from "../upload.js";
@@ -228,6 +230,8 @@ declare const fullApi: ApiFromModules<{
   personalSourceDigests: typeof personalSourceDigests;
   personalSourceDocuments: typeof personalSourceDocuments;
   personalSourcesShared: typeof personalSourcesShared;
+  promptTraceValidators: typeof promptTraceValidators;
+  promptTraces: typeof promptTraces;
   seed: typeof seed;
   settings: typeof settings;
   upload: typeof upload;

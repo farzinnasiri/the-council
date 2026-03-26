@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from 'convex/server';
 import { authTables } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
 import { personalSourceDocumentMetadataValidator } from './personalSourcesShared';
+import { promptTraceKindValidator, promptTraceRetrievalValidator, promptTraceSectionValidator } from './promptTraceValidators';
 
 export default defineSchema({
   ...authTables,
@@ -98,6 +99,18 @@ export default defineSchema({
     .index('by_user_kind_member', ['userId', 'kind', 'chamberMemberId'])
     .index('by_user_kind_member_updated', ['userId', 'kind', 'chamberMemberId', 'updatedAt'])
     .index('by_kind_updated', ['kind', 'updatedAt']),
+
+  messagePromptTraces: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    messageId: v.id('messages'),
+    kind: promptTraceKindValidator,
+    sections: v.array(promptTraceSectionValidator),
+    retrieval: promptTraceRetrievalValidator,
+    capturedAt: v.number(),
+  })
+    .index('by_message', ['messageId'])
+    .index('by_conversation', ['conversationId']),
 
   conversationParticipants: defineTable({
     conversationId: v.id('conversations'),

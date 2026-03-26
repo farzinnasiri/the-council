@@ -2,6 +2,7 @@
 
 import type { Id } from '../../_generated/dataModel';
 import type { RoundBidMoveType, RoundIntent } from '../../ai/provider/types';
+import type { PromptTraceDraft } from '../../../shared/promptTrace';
 
 export interface ActionCtxLike {
   runQuery: (...args: any[]) => Promise<unknown>;
@@ -178,6 +179,7 @@ export interface RoundtableSpeakerResult {
   finalResponseModelSlot?: number;
   finalResponseModelSpec?: string;
   fallbackUsed?: boolean;
+  promptTraceDraft?: PromptTraceDraft;
 }
 
 export interface ConversationRow {

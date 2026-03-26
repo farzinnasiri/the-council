@@ -15,6 +15,7 @@ import { refreshRoundtableRoundUseCase } from '../contexts/hall/application/refr
 import { chatRoundtableSpeakersUseCase } from '../contexts/hall/application/chatRoundtableSpeakers';
 import { chatRoundtableSpeakerUseCase } from '../contexts/hall/application/chatRoundtableSpeaker';
 import { observeAction, setMainSpanAttributes } from '../observability/wideEvents';
+import { promptTraceDraftValidator } from '../promptTraceValidators';
 
 export const prepareRoundtableRound = action({
   args: {
@@ -133,6 +134,7 @@ export const chatRoundtableSpeaker = action({
     force: v.optional(v.boolean()),
     retrievalModel: v.optional(v.string()),
     chatModel: v.optional(v.string()),
+    debugPromptTrace: v.optional(v.boolean()),
   },
   returns: v.object({
     answer: v.string(),
@@ -148,6 +150,7 @@ export const chatRoundtableSpeaker = action({
     finalResponseModelSlot: v.optional(v.number()),
     finalResponseModelSpec: v.optional(v.string()),
     fallbackUsed: v.optional(v.boolean()),
+    promptTraceDraft: v.optional(promptTraceDraftValidator),
   }),
   handler: observeAction('ai.roundtable.chatRoundtableSpeaker', async (ctx, args) => {
     setMainSpanAttributes({
@@ -166,6 +169,7 @@ export const chatRoundtableSpeakers = action({
     roundNumber: v.number(),
     retrievalModel: v.optional(v.string()),
     chatModel: v.optional(v.string()),
+    debugPromptTrace: v.optional(v.boolean()),
   },
   returns: v.object({
     results: v.array(
@@ -181,6 +185,7 @@ export const chatRoundtableSpeakers = action({
         finalResponseModelSlot: v.optional(v.number()),
         finalResponseModelSpec: v.optional(v.string()),
         fallbackUsed: v.optional(v.boolean()),
+        promptTraceDraft: v.optional(promptTraceDraftValidator),
       })
     ),
   }),

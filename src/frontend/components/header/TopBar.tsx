@@ -1,5 +1,5 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { LoaderCircle, Lock, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
+import { Bug, LoaderCircle, Lock, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -49,6 +49,8 @@ export function TopBar({
   const setMessagePinned = useAppStore((state) => state.setMessagePinned);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
   const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
+  const promptDebugMode = useAppStore((state) => state.promptDebugMode);
+  const setPromptDebugMode = useAppStore((state) => state.setPromptDebugMode);
   const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
   const participants = participantIds
     .map((id) => members.find((member) => member.id === id && !member.deletedAt))
@@ -294,6 +296,16 @@ export function TopBar({
             <NotebookPen className="h-4 w-4" />
           </Button>
         ) : null}
+        <Button
+          type="button"
+          variant={promptDebugMode ? 'outline' : 'ghost'}
+          className="h-9 shrink-0 gap-1.5 px-3 text-xs"
+          onClick={() => setPromptDebugMode(!promptDebugMode)}
+          aria-label={promptDebugMode ? 'Disable prompt debug mode' : 'Enable prompt debug mode'}
+        >
+          <Bug className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Prompt Debug</span>
+        </Button>
         {isChamber && pinnedMessages.length > 0 ? (
           <DialogPrimitive.Root open={isPinnedManagerOpen} onOpenChange={setIsPinnedManagerOpen}>
             <DialogPrimitive.Trigger asChild>

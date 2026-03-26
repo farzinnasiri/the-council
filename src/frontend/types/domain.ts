@@ -1,3 +1,14 @@
+export type {
+  PromptTraceDraft,
+  PromptTraceKind,
+  PromptTraceMeta,
+  PromptTraceMetaValue,
+  PromptTraceRecord,
+  PromptTraceRetrievalMetadata,
+  PromptTraceSection,
+  PromptTraceSourceKind,
+} from '../../../shared/promptTrace';
+
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type ConversationKind = 'hall' | 'chamber';
 export type ConversationType = ConversationKind;

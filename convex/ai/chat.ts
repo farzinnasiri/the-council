@@ -18,6 +18,7 @@ import { wideEventError } from '../observability/errors';
 import { runHallClosureGraph } from './graphs/hallClosureGraph';
 import type { Id } from '../_generated/dataModel';
 import { api } from '../_generated/api';
+import { promptTraceDraftValidator } from '../promptTraceValidators';
 
 function resolveLegacyRetrievalProfile(
   retrievalStrategy?: 'instant' | 'brainstorm' | 'deep_dive',
@@ -58,6 +59,7 @@ export const chatWithMember = action({
     turnDirective: v.optional(v.union(v.literal('shorter'), v.literal('elaborate'))),
     timeAwareReentry: v.optional(timeAwareReentryDirectiveValidator),
     guidanceDirectives: v.optional(v.array(activeGuidanceDirectiveValidator)),
+    debugPromptTrace: v.optional(v.boolean()),
   },
   returns: v.object({
     answer: v.string(),
@@ -72,6 +74,7 @@ export const chatWithMember = action({
     finalResponseModelSlot: v.optional(v.number()),
     finalResponseModelSpec: v.optional(v.string()),
     fallbackUsed: v.optional(v.boolean()),
+    promptTraceDraft: v.optional(promptTraceDraftValidator),
   }),
   handler: observeAction('ai.chat.chatWithMember', async (ctx, args) => {
     setMainSpanAttributes({

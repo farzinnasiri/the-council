@@ -9,7 +9,7 @@ import { createAiProvider, createKnowledgeRetriever, toKBDigestHints, withTimeou
 import type { MemberListRow, MessageRow, RoundCandidateRow, RoundtableSpeakerResult } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
 import { moveTypeToRoundIntent } from '../domain/roundtableAllocator';
-import { buildContextMessages, buildHallSystemPrompt } from '../domain/hallPrompt';
+import { buildContextMessages, buildHallSystemPrompt, buildHallSystemPromptSections } from '../domain/hallPrompt';
 import type { ChatRoundtableSpeakersInput } from '../contracts';
 import { runWithChatResponseFallback } from '../../shared/chatResponseFallback';
 import { listHallRoundSummaries } from '../infrastructure/memoryRepo';
@@ -32,6 +32,7 @@ interface RunRoundtableSpeakerOptions {
   chatResponseModelSlot: number;
   retrievalModel?: string;
   chatModel?: string;
+  debugPromptTrace?: boolean;
 }
 
 export interface RoundtableSpeakerContribution extends RoundtableSpeakerResult {
@@ -142,6 +143,14 @@ export async function runRoundtableSpeakerContribution(
 
   try {
     const provider = createAiProvider();
+    const hallPromptSections = buildHallSystemPromptSections({
+      member,
+      participants: options.activeMembers,
+      hallMode: 'roundtable',
+      roundSummaries: options.roundSummaries,
+      rawMessages: options.rawContextMessages,
+      conversationId: options.conversationId,
+    });
     const invokeProvider = async (responseModel: string) =>
       await withTimeout(
         provider.chatMember({
@@ -163,6 +172,9 @@ export async function runRoundtableSpeakerContribution(
             rawMessages: options.rawContextMessages,
             conversationId: options.conversationId,
           }),
+          promptTraceKind: 'hall_roundtable',
+          promptTraceSections: hallPromptSections,
+          debugPromptTrace: Boolean(options.debugPromptTrace),
           contextMessages: buildContextMessages({
             messages: options.rawContextMessages,
             membersById: options.membersById,
@@ -196,6 +208,7 @@ export async function runRoundtableSpeakerContribution(
       finalResponseModelSlot: metadata.finalResponseModelSlot,
       finalResponseModelSpec: metadata.finalResponseModelSpec,
       fallbackUsed: metadata.fallbackUsed,
+      promptTraceDraft: result.promptTraceDraft,
       error: undefined,
     };
   } catch (error) {
@@ -293,6 +306,7 @@ export async function chatRoundtableSpeakersUseCase(
         chatResponseModelSlot: participantSlotsByMemberId.get(String(candidateRow.memberId)) ?? 1,
         retrievalModel: args.retrievalModel,
         chatModel: args.chatModel,
+        debugPromptTrace: args.debugPromptTrace,
       })
     )
   );
@@ -310,6 +324,7 @@ export async function chatRoundtableSpeakersUseCase(
       finalResponseModelSlot: result.finalResponseModelSlot,
       finalResponseModelSpec: result.finalResponseModelSpec,
       fallbackUsed: result.fallbackUsed,
+      promptTraceDraft: result.promptTraceDraft,
     })),
   };
 }

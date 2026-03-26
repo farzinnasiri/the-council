@@ -10,7 +10,12 @@ import { AuthGate } from './components/auth/AuthGate';
 import { useAppStore } from './store/appStore';
 import { convex } from './lib/convexClient';
 
-registerSW({ immediate: true });
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW(true);
+  },
+});
 
 function Bootstrap() {
   const initializeApp = useAppStore((state) => state.initializeApp);

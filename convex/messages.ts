@@ -1,6 +1,8 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { query, mutation } from './_generated/server';
 import { v } from 'convex/values';
+import { upsertPromptTraceForMessage } from './promptTraces';
+import { promptTraceDraftValidator } from './promptTraceValidators';
 
 const routingValidator = v.object({
   memberIds: v.array(v.id('members')),
@@ -50,7 +52,7 @@ const messageDoc = v.object({
   error: v.optional(v.string()),
 });
 
-const messageInputValidator = v.object({
+const messageInputFields = {
   conversationId: v.id('conversations'),
   role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
   systemKind: v.optional(v.union(v.literal('routing'), v.literal('hall_followup_context'), v.literal('hall_closure'))),
@@ -83,6 +85,13 @@ const messageInputValidator = v.object({
   roundTargetMemberId: v.optional(v.id('members')),
   pinnedAt: v.optional(v.number()),
   error: v.optional(v.string()),
+};
+
+const messageInputValidator = v.object(messageInputFields);
+
+const messagePersistInputValidator = v.object({
+  ...messageInputFields,
+  promptTraceDraft: v.optional(promptTraceDraftValidator),
 });
 
 const conversationCounts = v.object({
@@ -312,7 +321,7 @@ export const getConversationCounts = query({
 });
 
 export const appendMany = mutation({
-  args: { messages: v.array(messageInputValidator) },
+  args: { messages: v.array(messagePersistInputValidator) },
   returns: v.array(messageDoc),
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
@@ -365,11 +374,18 @@ export const appendMany = mutation({
         }
       }
 
+      const { promptTraceDraft, ...messageFields } = msg;
       const insertedId = await ctx.db.insert('messages', {
         userId,
-        ...msg,
+        ...messageFields,
         systemKind: msg.role === 'system' ? msg.systemKind ?? (msg.routing ? 'routing' : undefined) : undefined,
         compacted: false,
+      });
+      await upsertPromptTraceForMessage(ctx, {
+        userId,
+        conversationId,
+        messageId: insertedId,
+        promptTraceDraft,
       });
       inserted.push(await ctx.db.get(insertedId));
     }
@@ -430,7 +446,7 @@ export const discard = mutation({
 export const replaceWithRefinement = mutation({
   args: {
     targetMessageId: v.id('messages'),
-    replacement: messageInputValidator,
+    replacement: messagePersistInputValidator,
   },
   returns: v.object({
     superseded: messageDoc,
@@ -453,12 +469,19 @@ export const replaceWithRefinement = mutation({
 
     await assertOwnedMember(ctx, userId, args.replacement.authorMemberId);
     const now = Date.now();
+    const { promptTraceDraft, ...replacementFields } = args.replacement;
     const replacementId = await ctx.db.insert('messages', {
       userId,
-      ...args.replacement,
+      ...replacementFields,
       compacted: false,
       pinnedAt: target.pinnedAt,
       supersedesMessageId: args.targetMessageId,
+    });
+    await upsertPromptTraceForMessage(ctx, {
+      userId,
+      conversationId: target.conversationId,
+      messageId: replacementId,
+      promptTraceDraft,
     });
 
     await ctx.db.patch(args.targetMessageId, {
@@ -481,7 +504,7 @@ export const replaceWithRefinement = mutation({
 export const appendElaborationReply = mutation({
   args: {
     targetMessageId: v.id('messages'),
-    reply: messageInputValidator,
+    reply: messagePersistInputValidator,
   },
   returns: messageDoc,
   handler: async (ctx, args) => {
@@ -501,11 +524,18 @@ export const appendElaborationReply = mutation({
 
     await assertOwnedMember(ctx, userId, args.reply.authorMemberId);
     const now = Date.now();
+    const { promptTraceDraft, ...replyFields } = args.reply;
     const replyId = await ctx.db.insert('messages', {
       userId,
-      ...args.reply,
+      ...replyFields,
       compacted: false,
       inReplyToMessageId: args.reply.inReplyToMessageId ?? args.targetMessageId,
+    });
+    await upsertPromptTraceForMessage(ctx, {
+      userId,
+      conversationId: target.conversationId,
+      messageId: replyId,
+      promptTraceDraft,
     });
     await ctx.db.patch(target.conversationId, {
       updatedAt: now,

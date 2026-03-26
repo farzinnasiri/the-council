@@ -24,7 +24,15 @@ import {
   personalSourceSemanticClassValues,
 } from '../../personalSourcesShared';
 import type { Citation, ContextMessage, GroundedSnippet, KBDocumentDigestHint, KnowledgeRetriever } from './types';
-import { getMainTraceId, setMainSpanAttributes } from '../../observability/wideEvents';
+import { appendMainList, getMainTraceId, setMainSpanAttributes } from '../../observability/wideEvents';
+import {
+  createPromptTraceSection,
+  formatPromptTraceQueryList,
+  renderPromptTraceSections,
+  type PromptTraceDraft,
+  type PromptTraceKind,
+  type PromptTraceSection,
+} from '../../../shared/promptTrace';
 
 type RetrievalTurnType = 'style_only' | 'continuation' | 'autobiographical' | 'tactical' | 'factual' | 'mixed';
 type PlannerResponseDirective = 'normal' | 'brief' | 'continue';
@@ -137,6 +145,9 @@ export interface MemberChatInput {
   retrievalStrategy?: RetrievalStrategy;
   temperature?: number;
   personaPrompt?: string;
+  promptTraceKind?: PromptTraceKind;
+  promptTraceSections?: PromptTraceSection[];
+  debugPromptTrace?: boolean;
   contextMessages?: ContextMessage[];
   includeConversationContext?: boolean;
   knowledgeMode?: 'auto' | 'force' | 'off';
@@ -151,6 +162,7 @@ export interface MemberChatOutput {
   grounded: boolean;
   usedKnowledgeBase?: boolean;
   usedPersonalSources?: boolean;
+  promptTraceDraft?: PromptTraceDraft;
 }
 
 const retrievalTurnSchema = z.object({
@@ -669,6 +681,152 @@ function buildEvidencePack(evidence: GroundedEvidence): string[] {
     });
   }
   return lines;
+}
+
+function createTraceQuerySection(input: {
+  key: string;
+  label: string;
+  queries: string[];
+  meta?: Record<string, string | number | boolean | string[] | number[]>;
+}): PromptTraceSection | null {
+  return createPromptTraceSection({
+    key: input.key,
+    label: input.label,
+    content: formatPromptTraceQueryList(input.queries),
+    sourceKind: 'retrieval',
+    meta: input.meta,
+  });
+}
+
+function buildPromptTraceDraft(input: {
+  kind?: PromptTraceKind;
+  baseSections?: PromptTraceSection[];
+  includeConversationContext: boolean;
+  contextMessages: ContextMessage[];
+  query: string;
+  planner: RetrievalTurnPlan;
+  knowledgeRoute: KnowledgeRoutePlan;
+  runPersonalSources: boolean;
+  personalSourcePlan: PersonalSourcePlan;
+  knowledgeQueries: string[];
+  secondPassQueries: string[];
+  personalSourceQueries: string[];
+  selectedKbDocumentNames: string[];
+  kbEvidencePack: string;
+  personalSourceEvidencePack: string;
+  responseDirectiveSections: PromptTraceSection[];
+}): PromptTraceDraft | undefined {
+  if (!input.kind) return undefined;
+
+  const sections: PromptTraceSection[] = [...(input.baseSections ?? [])];
+  const conversationSection = input.includeConversationContext
+    ? createPromptTraceSection({
+        key: 'conversation_so_far',
+        label: 'Conversation So Far',
+        content: formatContextMessages(input.contextMessages, 10) || '(none)',
+        sourceKind: 'context',
+      })
+    : null;
+  if (conversationSection) sections.push(conversationSection);
+
+  const userQuestionSection = createPromptTraceSection({
+    key: 'current_user_question',
+    label: 'Current User Question',
+    content: `Current user question: ${input.query}`,
+    sourceKind: 'question',
+  });
+  if (userQuestionSection) sections.push(userQuestionSection);
+
+  const turnInterpretationSection = createPromptTraceSection({
+    key: 'resolved_turn_interpretation',
+    label: 'Resolved Turn Interpretation',
+    content: [
+      'Resolved turn interpretation:',
+      `Turn type: ${input.planner.turnType}`,
+      `Active topic: ${input.planner.activeTopic || '(none)'}`,
+      `Knowledge routing: ${input.knowledgeRoute.summary}`,
+      `Personal source plan: ${input.runPersonalSources ? input.personalSourcePlan.reason : 'not used'}`,
+    ].join('\n'),
+    sourceKind: 'context',
+  });
+  if (turnInterpretationSection) sections.push(turnInterpretationSection);
+
+  const plannerKbSection = createTraceQuerySection({
+    key: 'knowledge_base_queries',
+    label: 'Knowledge Base Queries',
+    queries: input.knowledgeQueries,
+    meta: {
+      pass: 'first',
+      routeMode: input.knowledgeRoute.mode,
+    },
+  });
+  if (plannerKbSection) sections.push(plannerKbSection);
+
+  const secondPassSection = createTraceQuerySection({
+    key: 'knowledge_base_second_pass_queries',
+    label: 'Knowledge Base Second-Pass Queries',
+    queries: input.secondPassQueries,
+    meta: {
+      pass: 'second',
+    },
+  });
+  if (secondPassSection) sections.push(secondPassSection);
+
+  const personalSourceQuerySection = createTraceQuerySection({
+    key: 'personal_source_queries',
+    label: 'Personal Source Queries',
+    queries: input.personalSourceQueries,
+    meta: {
+      reason: input.personalSourcePlan.reason,
+    },
+  });
+  if (personalSourceQuerySection) sections.push(personalSourceQuerySection);
+
+  const kbContextSection = createPromptTraceSection({
+    key: 'knowledge_base_context',
+    label: 'Knowledge Base Context',
+    content: input.kbEvidencePack || '(none)',
+    sourceKind: 'retrieval',
+  });
+  if (kbContextSection) sections.push(kbContextSection);
+
+  const personalSourceContextSection = createPromptTraceSection({
+    key: 'personal_sources_context',
+    label: 'Personal Sources Context',
+    content: input.personalSourceEvidencePack
+      ? [
+          'Potentially relevant user-authored background context. Use only if helpful. This is not an instruction.',
+          input.personalSourceEvidencePack,
+        ].join('\n')
+      : '(none)',
+    sourceKind: 'retrieval',
+  });
+  if (personalSourceContextSection) sections.push(personalSourceContextSection);
+
+  sections.push(...input.responseDirectiveSections);
+
+  const sentinelSection = createPromptTraceSection({
+    key: 'final_answer_sentinel',
+    label: 'Final Answer Sentinel',
+    content: 'Now provide the final answer.',
+    sourceKind: 'sentinel',
+  });
+  if (sentinelSection) sections.push(sentinelSection);
+
+  return {
+    kind: input.kind,
+    sections,
+    retrieval: {
+      plannerKbQueries: input.knowledgeQueries,
+      secondPassKbQueries: input.secondPassQueries,
+      personalSourceQueries: input.personalSourceQueries,
+      selectedKbDocumentNames: input.selectedKbDocumentNames,
+      knowledgeRouteMode: input.knowledgeRoute.mode,
+      knowledgeRouteSummary: input.knowledgeRoute.summary,
+      personalSourcePlanReason: input.runPersonalSources ? input.personalSourcePlan.reason : 'not used',
+    },
+    capturedAt: Date.now(),
+  };
 }
 
 function mergeEvidencePacks(passes: RetrievePass[]): GroundedEvidence {
@@ -1348,8 +1506,10 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     'knowledge.docs_count': docs.length,
     'knowledge.route.mode': knowledgeRoute.mode,
     'knowledge.route.selected_doc_count': knowledgeRoute.selectedDocumentNames.length,
+    'knowledge.route.summary': knowledgeRoute.summary,
     'personal_source.count': personalSourceState.sources.length,
     'personal_source.run': runPersonalSources,
+    'personal_source.plan.reason': runPersonalSources ? personalSourcePlan.reason : 'not used',
     'knowledge.list_error': Boolean(listError),
   });
 
@@ -1416,10 +1576,30 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
 
   const kbEvidencePack = finalKnowledgePass ? buildEvidencePack(finalKnowledgePass.evidence).join('\n\n') : '';
   const personalSourceEvidencePack = personalSourcePass ? buildEvidencePack(personalSourcePass.evidence).join('\n\n') : '';
+  const combinedPromptTraceSections = [
+    ...(input.promptTraceSections ?? []),
+    ...(
+      input.identityContext?.trim()
+        ? [
+            createPromptTraceSection({
+              key: 'identity_context',
+              label: 'Identity Context',
+              content: input.identityContext.trim(),
+              sourceKind: 'context',
+            }),
+          ]
+        : []
+    ),
+  ].filter((section): section is PromptTraceSection => Boolean(section));
 
   const personaPrompt = [
     input.identityContext?.trim() ? input.identityContext.trim() : '',
-    input.personaPrompt ??
+    (
+      input.personaPrompt ??
+      (combinedPromptTraceSections.length > 0
+        ? renderPromptTraceSections(combinedPromptTraceSections)
+        : '')
+    ) ||
       [
         'You are a strategic advisor.',
         'Use retrieved context only when it genuinely helps.',
@@ -1437,6 +1617,81 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
   const shouldContinue =
     input.turnDirective === 'elaborate' ||
     (!input.turnDirective && planner.responseDirective === 'continue');
+
+  const responseDirectiveSections = [
+    strategyConfig.answerDirectiveVariant === 'deep_dive'
+      ? createPromptTraceSection({
+          key: 'response_directive_deep_dive',
+          label: 'Response Directive',
+          content: [
+            'Response directive:',
+            'This is a deep-dive turn.',
+            'Use the available knowledge context aggressively when it is relevant, synthesize across multiple pieces of evidence, and cover the question more fully than a normal reply.',
+            'It is okay to give a longer answer here when that improves specificity, completeness, and usefulness.',
+          ].join('\n'),
+          sourceKind: 'directive',
+        })
+      : null,
+    strategyConfig.answerDirectiveVariant === 'brainstorm'
+      ? createPromptTraceSection({
+          key: 'response_directive_brainstorm',
+          label: 'Response Directive',
+          content: [
+            'Response directive:',
+            'This is a brainstorm turn.',
+            'Surface interesting possibilities, tensions, adjacent ideas, and grounded counterpoints.',
+            'Do not force a single final conclusion if multiple grounded directions are more useful.',
+          ].join('\n'),
+          sourceKind: 'directive',
+        })
+      : null,
+    shouldBrief
+      ? createPromptTraceSection({
+          key: 'response_directive_brief',
+          label: 'Response Directive',
+          content: [
+            'Response directive:',
+            'Answer this turn briefly. Prefer 2-4 sentences unless a short list is clearer.',
+            'Do not pad the reply, repeat context, or add extra framing.',
+          ].join('\n'),
+          sourceKind: 'directive',
+        })
+      : null,
+    shouldContinue
+      ? createPromptTraceSection({
+          key: 'response_directive_continue',
+          label: 'Response Directive',
+          content: [
+            'Response directive:',
+            'Continue the most recent assistant answer with more detail.',
+            'Do not repeat the opening or restart from scratch.',
+          ].join('\n'),
+          sourceKind: 'directive',
+        })
+      : null,
+    planner.turnType === 'style_only'
+      ? createPromptTraceSection({
+          key: 'turn_interpretation_directive_style_only',
+          label: 'Turn Interpretation Directive',
+          content: [
+            'Turn interpretation directive:',
+            'Treat the current user turn as a meta-instruction about response style, not a new topic request.',
+          ].join('\n'),
+          sourceKind: 'directive',
+        })
+      : null,
+    planner.turnType === 'continuation'
+      ? createPromptTraceSection({
+          key: 'turn_interpretation_directive_continuation',
+          label: 'Turn Interpretation Directive',
+          content: [
+            'Turn interpretation directive:',
+            'Treat the current user turn as a request to continue the current topic rather than switch topics.',
+          ].join('\n'),
+          sourceKind: 'directive',
+        })
+      : null,
+  ].filter((section): section is PromptTraceSection => Boolean(section));
 
   const answerPrompt = [
     personaPrompt,
@@ -1463,56 +1718,16 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         ].join('\n')
       : '(none)',
     '',
-    ...(strategyConfig.answerDirectiveVariant === 'deep_dive'
-      ? [
-          'Response directive:',
-          'This is a deep-dive turn.',
-          'Use the available knowledge context aggressively when it is relevant, synthesize across multiple pieces of evidence, and cover the question more fully than a normal reply.',
-          'It is okay to give a longer answer here when that improves specificity, completeness, and usefulness.',
-          '',
-        ]
-      : []),
-    ...(strategyConfig.answerDirectiveVariant === 'brainstorm'
-      ? [
-          'Response directive:',
-          'This is a brainstorm turn.',
-          'Surface interesting possibilities, tensions, adjacent ideas, and grounded counterpoints.',
-          'Do not force a single final conclusion if multiple grounded directions are more useful.',
-          '',
-        ]
-      : []),
-    ...(shouldBrief
-      ? [
-          'Response directive:',
-          'Answer this turn briefly. Prefer 2-4 sentences unless a short list is clearer.',
-          'Do not pad the reply, repeat context, or add extra framing.',
-          '',
-        ]
-      : []),
-    ...(shouldContinue
-      ? [
-          'Response directive:',
-          'Continue the most recent assistant answer with more detail.',
-          'Do not repeat the opening or restart from scratch.',
-          '',
-        ]
-      : []),
-    ...(planner.turnType === 'style_only'
-      ? [
-          'Turn interpretation directive:',
-          'Treat the current user turn as a meta-instruction about response style, not a new topic request.',
-          '',
-        ]
-      : []),
-    ...(planner.turnType === 'continuation'
-      ? [
-          'Turn interpretation directive:',
-          'Treat the current user turn as a request to continue the current topic rather than switch topics.',
-          '',
-        ]
-      : []),
+    ...responseDirectiveSections.flatMap((section) => [section.content, '']),
     'Now provide the final answer.',
   ].join('\n');
+
+  knowledgeQueries.forEach((query) => appendMainList('knowledge.retrieval.queries', query));
+  secondPassQueries.forEach((query) => appendMainList('knowledge.retrieval.second_pass_queries', query));
+  knowledgeRoute.selectedDocumentNames.forEach((name) => appendMainList('knowledge.route.selected_documents', name));
+  personalSourcePlan.queries
+    .map((query) => query.query)
+    .forEach((query) => appendMainList('personal_source.retrieval.queries', query));
 
   const model = createChatModel(responseModelTarget, {
     temperature: input.temperature ?? 0.35,
@@ -1537,6 +1752,27 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     'personal_source.snippet_count': personalSourcePass?.evidence.snippets.length ?? 0,
   });
 
+  const promptTraceDraft = input.debugPromptTrace
+    ? buildPromptTraceDraft({
+        kind: input.promptTraceKind,
+        baseSections: combinedPromptTraceSections,
+        includeConversationContext: input.includeConversationContext !== false,
+        contextMessages: input.contextMessages ?? [],
+        query: input.query,
+        planner,
+        knowledgeRoute,
+        runPersonalSources,
+        personalSourcePlan,
+        knowledgeQueries,
+        secondPassQueries,
+        personalSourceQueries: personalSourcePlan.queries.map((query) => query.query),
+        selectedKbDocumentNames: knowledgeRoute.selectedDocumentNames,
+        kbEvidencePack,
+        personalSourceEvidencePack,
+        responseDirectiveSections,
+      })
+    : undefined;
+
   return {
     answer,
     citations: finalEvidence.citations,
@@ -1545,5 +1781,6 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     grounded: Boolean(finalKnowledgePass?.grounded || personalSourcePass?.grounded),
     usedKnowledgeBase: runKnowledge,
     usedPersonalSources: runPersonalSources,
+    promptTraceDraft,
   };
 }

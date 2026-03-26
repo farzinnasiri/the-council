@@ -10,6 +10,12 @@ import { wideEventError } from '../../../observability/errors';
 import { embedText } from '../../../ai/openaiEmbeddings';
 import { buildEpisodeRetrievalQuery } from '../../../ai/retrievalQueries';
 import { runWithChatResponseFallback } from '../../shared/chatResponseFallback';
+import {
+  createPromptTraceSection,
+  renderPromptTraceSections,
+  type PromptTraceKind,
+  type PromptTraceSection,
+} from '../../../../shared/promptTrace';
 
 const COMPACTION_THRESHOLD_KEY = 'compaction-threshold';
 const COMPACTION_RECENT_RAW_TAIL_KEY = 'compaction-recent-raw-tail';
@@ -24,7 +30,7 @@ function clipBlock(text: string | undefined, maxChars: number): string {
   return (text ?? '').trim().slice(0, maxChars).trim();
 }
 
-function buildEffectiveSystemPrompt(input: {
+function buildEffectiveSystemPromptSections(input: {
   systemPrompt: string;
   guidanceBlock?: string;
   interactionPolicyBlock?: string;
@@ -35,20 +41,65 @@ function buildEffectiveSystemPrompt(input: {
   hallBlock?: string;
   summaryBlock?: string;
   includeGuidance: boolean;
-}) {
+}): PromptTraceSection[] {
   return [
-    input.systemPrompt.trim(),
-    input.includeGuidance ? input.guidanceBlock ?? '' : '',
-    input.interactionPolicyBlock ?? '',
-    input.mentalModelBlock ?? '',
-    input.episodesBlock ?? '',
-    input.pinnedMessagesBlock ?? '',
-    input.identityBlock ?? '',
-    input.hallBlock ?? '',
-    input.summaryBlock ?? '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+    createPromptTraceSection({
+      key: 'member_system_prompt',
+      label: 'Member System Prompt',
+      content: input.systemPrompt,
+      sourceKind: 'persona',
+    }),
+    input.includeGuidance
+      ? createPromptTraceSection({
+          key: 'inner_compass_guidance',
+          label: 'Inner Compass Guidance',
+          content: input.guidanceBlock,
+          sourceKind: 'directive',
+        })
+      : null,
+    createPromptTraceSection({
+      key: 'member_interaction_policy',
+      label: 'Member-User Interaction Policy',
+      content: input.interactionPolicyBlock,
+      sourceKind: 'directive',
+    }),
+    createPromptTraceSection({
+      key: 'member_mental_model',
+      label: 'Member Mental Model Of User',
+      content: input.mentalModelBlock,
+      sourceKind: 'memory',
+    }),
+    createPromptTraceSection({
+      key: 'relevant_episodic_memories',
+      label: 'Relevant Episodic Memories',
+      content: input.episodesBlock,
+      sourceKind: 'memory',
+    }),
+    createPromptTraceSection({
+      key: 'pinned_thread_messages',
+      label: 'Pinned Thread Messages',
+      content: input.pinnedMessagesBlock,
+      sourceKind: 'memory',
+    }),
+    createPromptTraceSection({
+      key: 'user_profile_note',
+      label: 'User Profile Note',
+      content: input.identityBlock,
+      sourceKind: 'context',
+    }),
+    createPromptTraceSection({
+      key: 'hall_context_addendum',
+      label: 'Hall Context Addendum',
+      content: input.hallBlock,
+      sourceKind: 'context',
+    }),
+    createPromptTraceSection({
+      key: 'thread_working_memory',
+      label: 'Thread Working Memory',
+      content: input.summaryBlock,
+      sourceKind: 'memory',
+    }),
+  ].filter((section): section is PromptTraceSection => Boolean(section));
 }
 
 function buildChamberContextMessages(rows: Array<{ role: string; content: string; status?: string }>) {
@@ -304,7 +355,8 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
         effectiveProfileNote,
       ].join('\n')
     : '';
-  const effectiveSystemPrompt = buildEffectiveSystemPrompt({
+  const promptTraceKind: PromptTraceKind = conversation.kind === 'hall' ? 'hall_advisory' : 'chamber';
+  const promptTraceSections = buildEffectiveSystemPromptSections({
     systemPrompt: member.systemPrompt,
     guidanceBlock,
     interactionPolicyBlock,
@@ -316,6 +368,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     summaryBlock,
     includeGuidance: true,
   });
+  const effectiveSystemPrompt = renderPromptTraceSections(promptTraceSections);
 
   const kbDigests = member.deletedAt ? [] : await listMemberDigests(ctx, args.memberId);
   const participantRows = conversation.kind === 'hall'
@@ -364,6 +417,9 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
         ...providerInput,
         responseModel,
         personaPrompt: effectiveSystemPrompt,
+        promptTraceKind,
+        promptTraceSections,
+        debugPromptTrace: Boolean(args.debugPromptTrace),
       });
     } catch (error) {
       const hasGuidance = guidanceNotes.length > 0;
@@ -375,7 +431,19 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
       return await provider.chatMember({
         ...providerInput,
         responseModel,
-        personaPrompt: buildEffectiveSystemPrompt({
+        personaPrompt: renderPromptTraceSections(buildEffectiveSystemPromptSections({
+          systemPrompt: member.systemPrompt,
+          interactionPolicyBlock,
+          mentalModelBlock,
+          episodesBlock,
+          pinnedMessagesBlock,
+          identityBlock,
+          hallBlock,
+          summaryBlock,
+          includeGuidance: false,
+        })),
+        promptTraceKind,
+        promptTraceSections: buildEffectiveSystemPromptSections({
           systemPrompt: member.systemPrompt,
           interactionPolicyBlock,
           mentalModelBlock,
@@ -386,6 +454,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
           summaryBlock,
           includeGuidance: false,
         }),
+        debugPromptTrace: Boolean(args.debugPromptTrace),
       });
     }
   };

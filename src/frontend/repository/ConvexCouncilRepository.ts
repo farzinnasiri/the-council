@@ -16,6 +16,8 @@ import type {
   MemberMemoryEpisode,
   MemberMemoryRefreshState,
   Message,
+  PromptTraceDraft,
+  PromptTraceRecord,
   MessageCustomGuidance,
   MessageFeedback,
   MessageFeedbackKey,
@@ -56,11 +58,13 @@ const DEFAULT_KB_CHUNK_CONFIG: KbChunkConfig = {
   chunkSizeChars: 2000,
   chunkOverlapChars: 500,
 };
+const PROMPT_TRACE_QUERY_TIMEOUT_MS = 12_000;
 
 type ConvexMemberDoc = any;
 type ConvexConversationDoc = any;
 type ConvexParticipantDoc = any;
 type ConvexMessageDoc = any;
+type ConvexPromptTraceDoc = any;
 
 function toMember(doc: ConvexMemberDoc): Member {
   return {
@@ -215,6 +219,24 @@ function toConversationNotebook(doc: any): ConversationNotebook {
     updatedAt: doc.updatedAt,
     createdAt: doc._creationTime,
     archivedAt: doc.archivedAt,
+  };
+}
+
+function toPromptTraceRecord(doc: ConvexPromptTraceDoc): PromptTraceRecord {
+  return {
+    id: doc._id,
+    conversationId: doc.conversationId,
+    messageId: doc.messageId,
+    kind: doc.kind,
+    sections: doc.sections ?? [],
+    retrieval: doc.retrieval ?? {
+      plannerKbQueries: [],
+      secondPassKbQueries: [],
+      personalSourceQueries: [],
+      selectedKbDocumentNames: [],
+    },
+    capturedAt: doc.capturedAt,
+    createdAt: doc._creationTime,
   };
 }
 
@@ -373,6 +395,15 @@ class ConvexCouncilRepository implements CouncilRepository {
 
   private get clientAny() {
     return this.client as any;
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
   }
 
   async init(): Promise<void> {
@@ -1076,6 +1107,28 @@ class ConvexCouncilRepository implements CouncilRepository {
     };
   }
 
+  async getMessagePromptTrace(messageId: string): Promise<PromptTraceRecord | null> {
+    const doc = await this.withTimeout(
+      this.client.query(api.promptTraces.getByMessageId as any, {
+        messageId: messageId as Id<'messages'>,
+      }),
+      PROMPT_TRACE_QUERY_TIMEOUT_MS,
+      'Timed out loading prompt trace.',
+    );
+    return doc ? toPromptTraceRecord(doc) : null;
+  }
+
+  async listPromptTraceMessageIds(conversationId: string): Promise<string[]> {
+    const ids = await this.withTimeout(
+      this.client.query(api.promptTraces.listMessageIdsByConversation as any, {
+        conversationId: conversationId as Id<'conversations'>,
+      }),
+      PROMPT_TRACE_QUERY_TIMEOUT_MS,
+      'Timed out loading prompt trace availability.',
+    );
+    return (ids ?? []) as string[];
+  }
+
   async appendMessages(input: AppendMessagesInput): Promise<Message[]> {
     const conversationId = input.conversationId as Id<'conversations'>;
     const rows = await this.client.mutation(api.messages.appendMany, {
@@ -1106,6 +1159,7 @@ class ConvexCouncilRepository implements CouncilRepository {
         roundIntent: message.roundIntent,
         roundTargetMemberId: message.roundTargetMemberId as Id<'members'> | undefined,
         error: message.error,
+        promptTraceDraft: message.promptTraceDraft,
       })),
     });
     return rows.map(toMessage);
@@ -1151,6 +1205,7 @@ class ConvexCouncilRepository implements CouncilRepository {
         roundIntent: input.replacement.roundIntent,
         roundTargetMemberId: input.replacement.roundTargetMemberId as Id<'members'> | undefined,
         error: input.replacement.error,
+        promptTraceDraft: input.replacement.promptTraceDraft,
       },
     });
     return {
@@ -1192,6 +1247,7 @@ class ConvexCouncilRepository implements CouncilRepository {
         roundIntent: input.reply.roundIntent,
         roundTargetMemberId: input.reply.roundTargetMemberId as Id<'members'> | undefined,
         error: input.reply.error,
+        promptTraceDraft: input.reply.promptTraceDraft,
       },
     });
     return toMessage(result);
@@ -1285,6 +1341,7 @@ class ConvexCouncilRepository implements CouncilRepository {
     guidanceDirectives?: Array<{
       note: string;
     }>;
+    debugPromptTrace?: boolean;
   }): Promise<MemberChatResult> {
     return (await this.client.action(api.ai.chat.chatWithMember as any, {
       conversationId: input.conversationId as Id<'conversations'>,
@@ -1299,6 +1356,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       turnDirective: input.turnDirective,
       timeAwareReentry: input.timeAwareReentry,
       guidanceDirectives: input.guidanceDirectives,
+      debugPromptTrace: input.debugPromptTrace,
     })) as MemberChatResult;
   }
 
@@ -1366,18 +1424,21 @@ class ConvexCouncilRepository implements CouncilRepository {
     roundNumber: number;
     memberId: string;
     force?: boolean;
+    debugPromptTrace?: boolean;
   }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
     return (await this.client.action(api.ai.roundtable.chatRoundtableSpeaker as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       roundNumber: input.roundNumber,
       memberId: input.memberId as Id<'members'>,
       force: input.force,
+      debugPromptTrace: input.debugPromptTrace,
     })) as MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string };
   }
 
   async chatRoundtableSpeakers(input: {
     conversationId: string;
     roundNumber: number;
+    debugPromptTrace?: boolean;
   }): Promise<Array<{
     memberId: string;
     status: 'sent' | 'error';
@@ -1389,11 +1450,13 @@ class ConvexCouncilRepository implements CouncilRepository {
     attemptedResponseModelSpec?: string;
     finalResponseModelSlot?: number;
     finalResponseModelSpec?: string;
-    fallbackUsed?: boolean;
-  }>> {
+      fallbackUsed?: boolean;
+      promptTraceDraft?: PromptTraceDraft;
+    }>> {
     const result = await this.client.action(api.ai.roundtable.chatRoundtableSpeakers as any, {
       conversationId: input.conversationId as Id<'conversations'>,
       roundNumber: input.roundNumber,
+      debugPromptTrace: input.debugPromptTrace,
     });
     return result.results as Array<{
       memberId: string;
@@ -1407,6 +1470,7 @@ class ConvexCouncilRepository implements CouncilRepository {
       finalResponseModelSlot?: number;
       finalResponseModelSpec?: string;
       fallbackUsed?: boolean;
+      promptTraceDraft?: PromptTraceDraft;
     }>;
   }
 

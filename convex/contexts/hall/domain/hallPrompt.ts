@@ -3,6 +3,11 @@
 import type { Id } from '../../../_generated/dataModel';
 import type { CouncilContextMessage } from '../../../ai/provider/types';
 import type { MemberListRow, MessageRow } from '../../shared/types';
+import {
+  createPromptTraceSection,
+  renderPromptTraceSections,
+  type PromptTraceSection,
+} from '../../../../shared/promptTrace';
 
 export function buildContextMessages(options: {
   messages: MessageRow[];
@@ -45,7 +50,34 @@ export function buildHallSystemPrompt(options: {
   rawMessages: MessageRow[];
   conversationId: Id<'conversations'>;
 }): string {
-  return [options.member.systemPrompt.trim(), buildHallContextAddendum(options)].filter(Boolean).join('\n\n');
+  return renderPromptTraceSections(buildHallSystemPromptSections(options));
+}
+
+export function buildHallSystemPromptSections(options: {
+  member: MemberListRow;
+  participants: MemberListRow[];
+  hallMode: 'advisory' | 'roundtable';
+  roundSummaries: string[];
+  rawMessages: MessageRow[];
+  conversationId: Id<'conversations'>;
+}): PromptTraceSection[] {
+  return [
+    createPromptTraceSection({
+      key: 'member_system_prompt',
+      label: 'Member System Prompt',
+      content: options.member.systemPrompt,
+      sourceKind: 'persona',
+    }),
+    createPromptTraceSection({
+      key: 'hall_deliberation_context',
+      label: 'Hall Deliberation Context',
+      content: buildHallContextAddendum(options),
+      sourceKind: 'context',
+      meta: {
+        hallMode: options.hallMode,
+      },
+    }),
+  ].filter((section): section is PromptTraceSection => Boolean(section));
 }
 
 export function buildHallContextAddendum(options: {

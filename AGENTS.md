@@ -6,6 +6,7 @@ The role of this file is to describe common mistakes and confusion points that a
 
 1. The workspace directory currently includes trailing spaces in its name (`/Users/farzin/MyProjects/the-council  `). Some tools fail if they trim the path or if `workdir` is passed without the trailing spaces.
 2. In at least some local sessions, the actual working directory resolves without trailing spaces (`/Users/farzin/MyProjects/the-council`). Treat the trailing-space warning as environment-dependent and verify with `pwd` before assuming either path form.
+3. `messagePromptTraces.by_message` is indexed but not uniqueness-enforced. Do not use `.unique()` on that index in user-facing fetch paths; duplicate rows can exist transiently and can trap the client in a retry loop.
 
 ## Keep These Invariants
 
@@ -27,6 +28,7 @@ The role of this file is to describe common mistakes and confusion points that a
 1. The workspace path currently includes trailing spaces (`.../the-council  `). Absolute-path tooling can fail with `Not a directory` unless paths preserve those trailing spaces exactly. Prefer repo-relative paths in shell/apply_patch commands.
 2. Wide events default to essential-only output. Set `WIDE_EVENTS_VERBOSE=1` when you need the full debugging payload instead of just the baseline event plus `llm.calls`.
 3. In the chamber retrieval stack, `retrievalModel` does not currently change the embedding backend used for KB vector search. It still uses the OpenAI embedding path in `convex/ai/openaiEmbeddings.ts` unless that is explicitly refactored.
+4. To disable prompt-trace debug mode entirely, hide the UI toggle/button path in `src/frontend/components/header/TopBar.tsx` and `src/frontend/features/chat/MessageBubble.tsx`, and short-circuit backend persistence in `convex/ai/chat.ts`, `convex/ai/roundtable.ts`, and `convex/messages.ts` so `debugPromptTrace`/`promptTraceDraft` are never forwarded or stored.
 
 ## Required Validation Before Finalizing
 

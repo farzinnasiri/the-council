@@ -44,6 +44,7 @@ export interface ChatWithMemberInput {
   guidanceDirectives?: Array<{
     note: string;
   }>;
+  debugPromptTrace?: boolean;
 }
 
 export type ChatWithMemberResult = ProviderChatResponse;

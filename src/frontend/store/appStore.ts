@@ -12,6 +12,8 @@ import type {
   Message,
   MessageFeedbackKey,
   MessageRouting,
+  PromptTraceDraft,
+  PromptTraceRecord,
   RoundtableState,
   RetrievalStrategy,
   TimeAwareReentryGapBucket,
@@ -68,6 +70,7 @@ interface AppToast {
 
 let initializeAppPromise: Promise<void> | null = null;
 let hydrateMemberDocumentsPromise: Promise<void> | null = null;
+const PROMPT_DEBUG_MODE_STORAGE_KEY = 'the-council.prompt-debug-mode';
 
 interface AppState {
   hydrated: boolean;
@@ -75,6 +78,7 @@ interface AppState {
   routingConversationId?: string;
   closingConversationId?: string;
   themeMode: ThemeMode;
+  promptDebugMode: boolean;
   members: Member[];
   conversations: Conversation[];
   messages: Message[];
@@ -118,6 +122,8 @@ interface AppState {
   compactionPolicy: CompactionPolicy;
   refiningActionByMessageId: Record<string, 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate' | undefined>;
   retryingMessageIds: Record<string, boolean>;
+  promptTraceByMessageId: Record<string, PromptTraceRecord | null | undefined>;
+  promptTraceMessageIdsByConversation: Record<string, string[]>;
 
   initializeApp: () => Promise<void>;
   refreshCompactionPolicy: () => Promise<CompactionPolicy>;
@@ -187,6 +193,9 @@ interface AppState {
   showToast: (message: string) => void;
   dismissToast: (toastId: string) => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
+  setPromptDebugMode: (enabled: boolean) => void;
+  refreshPromptTraceAvailability: (conversationId: string) => Promise<void>;
+  getMessagePromptTrace: (messageId: string) => Promise<PromptTraceRecord | null>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
   updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
   generateMemberGuidanceProfile: (memberId: string, force?: boolean) => Promise<{ guidanceProfilePrompt: string; model: string }>;
@@ -225,10 +234,35 @@ function mapNotebooksByConversation(notebooks: ConversationNotebook[]) {
   >;
 }
 
+function readPromptDebugMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(PROMPT_DEBUG_MODE_STORAGE_KEY) === '1';
+}
+
+function writePromptDebugMode(enabled: boolean) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PROMPT_DEBUG_MODE_STORAGE_KEY, enabled ? '1' : '0');
+}
+
 function removeKey<T>(record: Record<string, T>, key: string) {
   const next = { ...record };
   delete next[key];
   return next;
+}
+
+function addPromptTraceMessageId(
+  state: Pick<AppState, 'promptTraceMessageIdsByConversation'>,
+  conversationId: string,
+  messageId: string,
+) {
+  const existing = state.promptTraceMessageIdsByConversation[conversationId] ?? [];
+  if (existing.includes(messageId)) {
+    return state.promptTraceMessageIdsByConversation;
+  }
+  return {
+    ...state.promptTraceMessageIdsByConversation,
+    [conversationId]: [...existing, messageId],
+  };
 }
 
 // Reply generation can overlap with later async state work; tickets keep stale writers
@@ -868,6 +902,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   routingConversationId: undefined,
   closingConversationId: undefined,
   themeMode: 'system',
+  promptDebugMode: readPromptDebugMode(),
   members: [],
   conversations: [],
   messages: [],
@@ -904,6 +939,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   compactionPolicy: COMPACTION_POLICY_DEFAULTS,
   refiningActionByMessageId: {},
   retryingMessageIds: {},
+  promptTraceByMessageId: {},
+  promptTraceMessageIdsByConversation: {},
 
   refreshCompactionPolicy: async () => {
     const policy = await councilRepository.getCompactionPolicy();
@@ -1090,6 +1127,45 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
+  setPromptDebugMode: (enabled) => {
+    writePromptDebugMode(enabled);
+    set({ promptDebugMode: enabled });
+    get().showToast(
+      enabled
+        ? 'Prompt debug enabled. New member replies will capture traces.'
+        : 'Prompt debug disabled.'
+    );
+    const conversationId = get().selectedConversationId;
+    if (enabled && conversationId) {
+      void get().refreshPromptTraceAvailability(conversationId);
+    }
+  },
+
+  refreshPromptTraceAvailability: async (conversationId) => {
+    const ids = await councilRepository.listPromptTraceMessageIds(conversationId);
+    set((state) => ({
+      promptTraceMessageIdsByConversation: {
+        ...state.promptTraceMessageIdsByConversation,
+        [conversationId]: ids,
+      },
+    }));
+  },
+
+  getMessagePromptTrace: async (messageId) => {
+    const cached = get().promptTraceByMessageId[messageId];
+    if (cached !== undefined) {
+      return cached ?? null;
+    }
+    const trace = await councilRepository.getMessagePromptTrace(messageId);
+    set((state) => ({
+      promptTraceByMessageId: {
+        ...state.promptTraceByMessageId,
+        [messageId]: trace,
+      },
+    }));
+    return trace;
+  },
+
   initializeApp: async () => {
     if (get().hydrated) return;
     if (initializeAppPromise) {
@@ -1151,6 +1227,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     if (!already) {
       void get().loadMessages(conversationId);
+    } else if (get().promptDebugMode) {
+      void get().refreshPromptTraceAvailability(conversationId);
     }
   },
 
@@ -1188,6 +1266,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
     void get().evaluateChamberCompactionOnLoad(conversationId);
     void get().refreshRoundtableState(conversationId);
+    if (get().promptDebugMode) {
+      void get().refreshPromptTraceAvailability(conversationId);
+    }
   },
 
   loadOlderMessages: async (conversationId) => {
@@ -1246,6 +1327,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           ),
         };
       });
+      if (get().promptDebugMode) {
+        void get().refreshPromptTraceAvailability(conversationId);
+      }
     } catch {
       set((state) => ({
         messagePaginationByConversation: {
@@ -1397,6 +1481,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const membersById = new Map(get().members.map((member) => [member.id, member]));
       const memberName = membersById.get(memberId)?.name ?? 'Member';
       let reply: Message;
+      let replyPromptTraceDraft: PromptTraceDraft | undefined;
 
       try {
         const result = await chatRoundtableSpeaker({
@@ -1404,10 +1489,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           roundNumber,
           memberId,
           force,
+          debugPromptTrace: get().promptDebugMode,
         });
         if (result.fallbackUsed) {
           get().showToast(formatResponseModelFallbackToast(memberName, result.attemptedResponseModelSpec));
         }
+        replyPromptTraceDraft = result.promptTraceDraft;
         reply = buildMessage({
           conversationId,
           role: 'member',
@@ -1438,10 +1525,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const persistedReplies = await councilRepository.appendMessages({
         conversationId,
-        messages: [reply],
+        messages: [{ ...reply, promptTraceDraft: replyPromptTraceDraft }],
       });
       set((state) => ({
         messages: replaceOptimisticMessages(state.messages, [reply], persistedReplies),
+        promptTraceMessageIdsByConversation:
+          replyPromptTraceDraft && persistedReplies[0]
+            ? addPromptTraceMessageId(state, conversationId, persistedReplies[0].id)
+            : state.promptTraceMessageIdsByConversation,
       }));
 
       const refreshed = await refreshRoundtableRound({
@@ -2110,6 +2201,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               const openingResults = await chatRoundtableSpeakers({
                 conversationId,
                 roundNumber: nextRound.round.roundNumber,
+                debugPromptTrace: get().promptDebugMode,
               });
               const openingFallbackEvents = openingResults
                 .filter((result) => result.fallbackUsed)
@@ -2121,6 +2213,11 @@ export const useAppStore = create<AppState>((set, get) => ({
                 get().showToast(formatHallResponseModelFallbackToast(openingFallbackEvents));
               }
               const resultsByMemberId = new Map(openingResults.map((result) => [result.memberId, result]));
+              const traceByMemberId = new Map(
+                openingResults
+                  .filter((result) => Boolean(result.promptTraceDraft))
+                  .map((result) => [result.memberId, result.promptTraceDraft])
+              );
               const openingReplies = openingSpeakerIds.map((memberId) => {
                 const memberName = membersById.get(memberId)?.name ?? 'Member';
                 const result = resultsByMemberId.get(memberId);
@@ -2157,10 +2254,29 @@ export const useAppStore = create<AppState>((set, get) => ({
 
               const persistedReplies = await councilRepository.appendMessages({
                 conversationId,
-                messages: openingReplies,
+                messages: openingReplies.map((reply) => ({
+                  ...reply,
+                  promptTraceDraft: reply.authorMemberId ? traceByMemberId.get(reply.authorMemberId) : undefined,
+                })),
               });
               set((current) => ({
                 messages: replaceOptimisticMessages(current.messages, openingReplies, persistedReplies),
+                promptTraceMessageIdsByConversation: persistedReplies.reduce(
+                  (next, persistedReply) => {
+                    if (!persistedReply.authorMemberId || !traceByMemberId.get(persistedReply.authorMemberId)) {
+                      return next;
+                    }
+                    const existing = next[conversationId] ?? [];
+                    if (existing.includes(persistedReply.id)) {
+                      return next;
+                    }
+                    return {
+                      ...next,
+                      [conversationId]: [...existing, persistedReply.id],
+                    };
+                  },
+                  current.promptTraceMessageIdsByConversation,
+                ),
               }));
 
               const completed = await markRoundtableCompleted({
@@ -2423,6 +2539,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           isVisibleMessage(message)
         );
       let reply: Message;
+      let replyPromptTraceDraft: PromptTraceDraft | undefined;
 
       if (!member) {
         reply = buildMessage({
@@ -2460,6 +2577,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 : undefined,
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
             retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
+            debugPromptTrace: get().promptDebugMode,
           });
           if (result.fallbackUsed) {
             if (conversation.kind === 'hall') {
@@ -2471,6 +2589,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               get().showToast(formatResponseModelFallbackToast(member.name, result.attemptedResponseModelSpec));
             }
           }
+          replyPromptTraceDraft = result.promptTraceDraft;
 
           reply = buildMessage({
             conversationId,
@@ -2509,10 +2628,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const persistedReplies = await councilRepository.appendMessages({
         conversationId,
-        messages: [reply],
+        messages: [{ ...reply, promptTraceDraft: replyPromptTraceDraft }],
       });
       set((current) => ({
         messages: replaceOptimisticMessages(current.messages, [reply], persistedReplies),
+        promptTraceMessageIdsByConversation:
+          replyPromptTraceDraft && persistedReplies[0]
+            ? addPromptTraceMessageId(current, conversationId, persistedReplies[0].id)
+            : current.promptTraceMessageIdsByConversation,
       }));
 
       if (conversation.kind === 'chamber' && reply.status === 'sent' && activeTimeAwareReentryState) {
@@ -2735,6 +2858,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         chatProfile: refinementProfiles.chatProfile,
         retrievalStrategy: refinementProfiles.retrievalStrategy,
         turnDirective: refinementProfiles.turnDirective,
+        debugPromptTrace: get().promptDebugMode,
       });
 
       if (action === 'elaborate') {
@@ -2749,6 +2873,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             inReplyToMessageId: target.id,
             revisionKind: 'elaborate',
             generationProfile: refinementGenerationProfile,
+            promptTraceDraft: result.promptTraceDraft,
           },
         });
 
@@ -2757,6 +2882,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...updateConversationStamp(current, conversationId, true),
           refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
           ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
+          promptTraceMessageIdsByConversation:
+            result.promptTraceDraft
+              ? addPromptTraceMessageId(current, conversationId, appended.id)
+              : current.promptTraceMessageIdsByConversation,
         }));
         const [activeMessages, latestLog] = await Promise.all([
           councilRepository.listMessages(conversationId),
@@ -2786,6 +2915,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           inReplyToMessageId: promptMessage.id,
           revisionKind: action,
           generationProfile: refinementGenerationProfile,
+          promptTraceDraft: result.promptTraceDraft,
         },
       });
 
@@ -2797,6 +2927,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...updateConversationStamp(current, conversationId, true),
         refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
         ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
+        promptTraceMessageIdsByConversation:
+          result.promptTraceDraft
+            ? addPromptTraceMessageId(current, conversationId, replaced.replacement.id)
+            : current.promptTraceMessageIdsByConversation,
       }));
       const [activeMessages, latestLog] = await Promise.all([
         councilRepository.listMessages(conversationId),
@@ -3026,6 +3160,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       let retriedReply: Message;
+      let retriedPromptTraceDraft: PromptTraceDraft | undefined;
 
       if (conversation.kind === 'hall' && conversation.hallMode === 'roundtable') {
         const member = get().members.find((item) => item.id === failedMessage.authorMemberId);
@@ -3036,10 +3171,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             roundNumber: failedMessage.roundNumber ?? 1,
             memberId: failedMessage.authorMemberId,
             force: true,
+            debugPromptTrace: get().promptDebugMode,
           });
           if (result.fallbackUsed) {
             get().showToast(formatResponseModelFallbackToast(memberName, result.attemptedResponseModelSpec));
           }
+          retriedPromptTraceDraft = result.promptTraceDraft;
           retriedReply = buildMessage({
             conversationId: failedMessage.conversationId,
             role: 'member',
@@ -3126,6 +3263,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 : undefined,
             chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
             retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
+            debugPromptTrace: currentState.promptDebugMode,
           });
           if (result.fallbackUsed) {
             if (conversation.kind === 'hall') {
@@ -3138,6 +3276,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               get().showToast(formatResponseModelFallbackToast(member.name, result.attemptedResponseModelSpec));
             }
           }
+          retriedPromptTraceDraft = result.promptTraceDraft;
 
           retriedReply = buildMessage({
             conversationId: conversation.id,
@@ -3176,10 +3315,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const persistedReplies = await councilRepository.appendMessages({
         conversationId: failedMessage.conversationId,
-        messages: [retriedReply],
+        messages: [{ ...retriedReply, promptTraceDraft: retriedPromptTraceDraft }],
       });
       set((current) => ({
         messages: replaceOptimisticMessages(current.messages, [retriedReply], persistedReplies),
+        promptTraceMessageIdsByConversation:
+          retriedPromptTraceDraft && persistedReplies[0]
+            ? addPromptTraceMessageId(current, failedMessage.conversationId, persistedReplies[0].id)
+            : current.promptTraceMessageIdsByConversation,
       }));
     } finally {
       set((current) => ({

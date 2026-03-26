@@ -116,6 +116,15 @@ export class LangChainCouncilAiProvider implements CouncilAiProvider {
     retrievalProfile?: LegacyRetrievalProfile;
     temperature?: number;
     personaPrompt?: string;
+    promptTraceKind?: 'chamber' | 'hall_advisory' | 'hall_roundtable';
+    promptTraceSections?: Array<{
+      key: string;
+      label: string;
+      content: string;
+      sourceKind: 'persona' | 'memory' | 'context' | 'question' | 'retrieval' | 'directive' | 'sentinel';
+      meta?: Record<string, string | number | boolean | string[] | number[]>;
+    }>;
+    debugPromptTrace?: boolean;
     contextMessages?: CouncilContextMessage[];
     includeConversationContext?: boolean;
     knowledgeMode?: 'auto' | 'force' | 'off';

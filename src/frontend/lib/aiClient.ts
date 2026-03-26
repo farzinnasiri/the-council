@@ -6,6 +6,7 @@ import type {
 } from '../repository/CouncilRepository';
 import type {
   ChamberResponseMode,
+  PromptTraceDraft,
   RetrievalStrategy,
   RoundtableState,
   TimeAwareReentryGapBucket,
@@ -46,6 +47,7 @@ interface MemberChatResult {
   finalResponseModelSlot?: number;
   finalResponseModelSpec?: string;
   fallbackUsed?: boolean;
+  promptTraceDraft?: PromptTraceDraft;
 }
 
 export async function uploadFileToConvexStorage(
@@ -285,6 +287,7 @@ export async function chatWithMember(input: {
     repliesRemaining: 1 | 2;
     explicitContinuation: boolean;
   };
+  debugPromptTrace?: boolean;
 }): Promise<MemberChatResult> {
   const result = await convexRepository.chatWithMember({
     conversationId: input.conversationId,
@@ -297,6 +300,7 @@ export async function chatWithMember(input: {
     retrievalStrategy: input.retrievalStrategy,
     turnDirective: input.turnDirective,
     timeAwareReentry: input.timeAwareReentry,
+    debugPromptTrace: input.debugPromptTrace,
   });
 
   return result;
@@ -343,6 +347,7 @@ export async function chatRoundtableSpeaker(input: {
   roundNumber: number;
   memberId: string;
   force?: boolean;
+  debugPromptTrace?: boolean;
 }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }> {
   return await convexRepository.chatRoundtableSpeaker(input);
 }
@@ -350,6 +355,7 @@ export async function chatRoundtableSpeaker(input: {
 export async function chatRoundtableSpeakers(input: {
   conversationId: string;
   roundNumber: number;
+  debugPromptTrace?: boolean;
 }): Promise<Array<{
   memberId: string;
   status: 'sent' | 'error';
@@ -362,6 +368,7 @@ export async function chatRoundtableSpeakers(input: {
   finalResponseModelSlot?: number;
   finalResponseModelSpec?: string;
   fallbackUsed?: boolean;
+  promptTraceDraft?: PromptTraceDraft;
 }>> {
   return await convexRepository.chatRoundtableSpeakers(input);
 }

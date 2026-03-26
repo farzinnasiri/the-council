@@ -126,6 +126,7 @@ export async function chatRoundtableSpeakerUseCase(
     chatResponseModelSlot: participantSlotsByMemberId.get(String(args.memberId)) ?? 1,
     retrievalModel: args.retrievalModel,
     chatModel: args.chatModel,
+    debugPromptTrace: args.debugPromptTrace,
   });
 
   if (single.status !== 'sent') {
@@ -150,5 +151,6 @@ export async function chatRoundtableSpeakerUseCase(
     finalResponseModelSlot: single.finalResponseModelSlot,
     finalResponseModelSpec: single.finalResponseModelSpec,
     fallbackUsed: single.fallbackUsed,
+    promptTraceDraft: single.promptTraceDraft,
   };
 }

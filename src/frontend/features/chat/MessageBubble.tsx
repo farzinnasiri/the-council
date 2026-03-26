@@ -1,9 +1,9 @@
-import { AlignJustify, Brain, Check, Copy, Expand, LoaderCircle, MessageCircle, MessageSquarePlus, NotebookPen, Pin, Reply, Search, SlidersHorizontal, Square, SquarePen, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
-import { useState } from 'react';
+import { AlignJustify, Brain, Bug, Check, ChevronRight, Copy, Expand, LoaderCircle, MessageCircle, MessageSquarePlus, NotebookPen, Pin, Reply, Search, SlidersHorizontal, Square, SquarePen, ThumbsDown, ThumbsUp, UserCircle2, Volume2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
-import type { CustomGuidanceChipKey, Message } from '../../types/domain';
+import type { CustomGuidanceChipKey, Message, PromptTraceRecord } from '../../types/domain';
 import { Button } from '../../components/ui/button';
 import { Textarea } from '../../components/ui/textarea';
 import { RoutePill } from './RoutePill';
@@ -52,6 +52,13 @@ function MemberAvatar({ avatarUrl, name }: { avatarUrl?: string | null; name: st
   );
 }
 
+function formatPromptTraceMetaValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+  return String(value);
+}
+
 export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
@@ -61,6 +68,10 @@ export function MessageBubble({ message }: { message: Message }) {
   const [customGuidanceText, setCustomGuidanceText] = useState('');
   const [savingCustomGuidance, setSavingCustomGuidance] = useState(false);
   const [clearingCustomGuidance, setClearingCustomGuidance] = useState(false);
+  const [promptTraceDialogOpen, setPromptTraceDialogOpen] = useState(false);
+  const [promptTraceLoading, setPromptTraceLoading] = useState(false);
+  const [promptTraceError, setPromptTraceError] = useState<string | null>(null);
+  const [collapsedPromptTraceSections, setCollapsedPromptTraceSections] = useState<Record<string, boolean>>({});
   const { toggleMessage, isLoading: isSpeechLoading, isQueued: isSpeechQueued, isPlaying: isSpeechPlaying } = useChatSpeech();
   const navigate = useNavigate();
   const members = useAppStore((state) => state.members);
@@ -78,6 +89,10 @@ export function MessageBubble({ message }: { message: Message }) {
   const retryFailedMessage = useAppStore((state) => state.retryFailedMessage);
   const retryingMessageIds = useAppStore((state) => state.retryingMessageIds);
   const startHallFollowUpThread = useAppStore((state) => state.startHallFollowUpThread);
+  const promptDebugMode = useAppStore((state) => state.promptDebugMode);
+  const promptTraceByMessageId = useAppStore((state) => state.promptTraceByMessageId);
+  const promptTraceMessageIdsByConversation = useAppStore((state) => state.promptTraceMessageIdsByConversation);
+  const getMessagePromptTrace = useAppStore((state) => state.getMessagePromptTrace);
   const showToast = useAppStore((state) => state.showToast);
 
   if (message.role === 'system') {
@@ -210,6 +225,58 @@ export function MessageBubble({ message }: { message: Message }) {
   const speechPlaying = canSpeak && isSpeechPlaying(message.id);
   const canSaveCustomGuidance = customGuidanceChips.length > 0 && !savingCustomGuidance;
   const customGuidanceCharactersRemaining = CUSTOM_GUIDANCE_TEXT_MAX - customGuidanceText.length;
+  const promptTrace = promptTraceByMessageId[message.id] ?? null;
+  const hasPromptTrace = Boolean(promptTraceMessageIdsByConversation[message.conversationId]?.includes(message.id));
+  const canOpenPromptTrace =
+    Boolean(
+      promptDebugMode &&
+      hasPromptTrace &&
+      !isUser &&
+      message.role === 'member' &&
+      message.status === 'sent' &&
+      !message.deletedAt &&
+      !message.supersededAt &&
+      !message.compacted
+    );
+
+  useEffect(() => {
+    if (!promptTraceDialogOpen) {
+      setPromptTraceLoading(false);
+      setPromptTraceError(null);
+      return;
+    }
+    if (promptTrace) {
+      setPromptTraceLoading(false);
+      setPromptTraceError(null);
+      return;
+    }
+    if (!hasPromptTrace) return;
+    let unmounted = false;
+    setPromptTraceLoading(true);
+    setPromptTraceError(null);
+    void getMessagePromptTrace(message.id)
+      .then((result) => {
+        if (unmounted || result) return;
+        setPromptTraceError('Prompt trace not found for this message.');
+      })
+      .catch((error) => {
+        if (unmounted) return;
+        setPromptTraceError(error instanceof Error ? error.message : 'Could not load prompt trace.');
+      })
+      .finally(() => {
+        if (unmounted) return;
+        setPromptTraceLoading(false);
+      });
+    return () => {
+      unmounted = true;
+    };
+  }, [getMessagePromptTrace, hasPromptTrace, message.id, promptTrace, promptTraceDialogOpen]);
+
+  useEffect(() => {
+    if (!promptTraceDialogOpen) {
+      setCollapsedPromptTraceSections({});
+    }
+  }, [promptTraceDialogOpen]);
 
   const openCustomGuidanceDialog = () => {
     setCustomGuidanceChips(existingCustomGuidance?.chips ?? []);
@@ -320,6 +387,28 @@ export function MessageBubble({ message }: { message: Message }) {
         aria-label={isPinned ? 'Unpin from thread context' : 'Pin to thread context'}
       >
         <Pin className="h-3 w-3" />
+      </Button>
+    );
+  };
+
+  const renderPromptTraceButton = (tone: 'muted' | 'user' = 'muted') => {
+    if (!canOpenPromptTrace) return null;
+
+    const className =
+      tone === 'user'
+        ? 'h-6 w-6 text-background/70 hover:text-background hover:bg-background/20'
+        : 'h-6 w-6 text-muted-foreground';
+
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className={className}
+        onClick={() => setPromptTraceDialogOpen(true)}
+        title="Prompt trace"
+        aria-label="Open prompt trace"
+      >
+        <Bug className="h-3 w-3" />
       </Button>
     );
   };
@@ -531,6 +620,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                         <NotebookPen className="h-3 w-3" />
                       </Button>
+                      {renderPromptTraceButton()}
                       {renderSpeechButton()}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -553,6 +643,7 @@ export function MessageBubble({ message }: { message: Message }) {
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void addToNotebook()} title="Add to Notebook" aria-label="Add to Notebook">
                         <NotebookPen className="h-3 w-3" />
                       </Button>
+                      {renderPromptTraceButton()}
                       {renderSpeechButton()}
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => void copyContent()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy message'}>
                         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -609,6 +700,110 @@ export function MessageBubble({ message }: { message: Message }) {
               <Button type="button" className="h-9 px-4" onClick={() => void launchHallFollowUp()} disabled={startingFollowUp}>
                 {startingFollowUp ? 'Starting...' : 'Open thread'}
               </Button>
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+
+      <DialogPrimitive.Root open={promptTraceDialogOpen} onOpenChange={setPromptTraceDialogOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-[70] bg-background/80 backdrop-blur-sm" />
+          <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[71] flex h-[min(86vh,860px)] w-[min(94vw,960px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-none border border-border bg-card p-5 shadow-2xl focus:outline-none">
+            <div className="border-b border-border pb-3">
+              <DialogPrimitive.Title className="font-display text-lg">
+                Prompt trace
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Description className="mt-2 text-sm text-muted-foreground">
+                Exact prompt sections persisted for this reply, in model order.
+              </DialogPrimitive.Description>
+            </div>
+
+            <div className="mt-4 flex-1 overflow-y-auto pr-2">
+              {promptTraceLoading ? (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                  Loading prompt trace...
+                </div>
+              ) : promptTraceError ? (
+                <div className="rounded-none border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {promptTraceError}
+                </div>
+              ) : promptTrace ? (
+                <div className="space-y-4">
+                  <div className="rounded-none border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
+                    <div>Kind: <span className="font-mono text-foreground">{promptTrace.kind}</span></div>
+                    <div className="mt-1">KB queries: <span className="font-mono text-foreground">{promptTrace.retrieval.plannerKbQueries.length}</span></div>
+                    <div className="mt-1">KB second pass: <span className="font-mono text-foreground">{promptTrace.retrieval.secondPassKbQueries.length}</span></div>
+                    <div className="mt-1">Personal source queries: <span className="font-mono text-foreground">{promptTrace.retrieval.personalSourceQueries.length}</span></div>
+                  </div>
+
+                  {promptTrace.sections.map((section, index) => (
+                    (() => {
+                      const sectionId = `${section.key}-${index}`;
+                      const collapsed = Boolean(collapsedPromptTraceSections[sectionId]);
+                      return (
+                        <div key={sectionId} className="rounded-none border border-border/80 bg-background px-4 py-4 shadow-sm">
+                          <div className="flex items-start gap-3">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="mt-0.5 h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                              onClick={() =>
+                                setCollapsedPromptTraceSections((current) => ({
+                                  ...current,
+                                  [sectionId]: !collapsed,
+                                }))
+                              }
+                              aria-label={collapsed ? `Expand ${section.label}` : `Collapse ${section.label}`}
+                              title={collapsed ? 'Expand section' : 'Collapse section'}
+                            >
+                              <ChevronRight className={cn('h-4 w-4 transition-transform', !collapsed && 'rotate-90')} />
+                            </Button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                  {index + 1}. {section.label}
+                                </span>
+                                <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                  {section.sourceKind}
+                                </span>
+                                {section.meta
+                                  ? Object.entries(section.meta).map(([key, value]) => (
+                                      <span
+                                        key={key}
+                                        className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                                      >
+                                        {key}={formatPromptTraceMetaValue(value)}
+                                      </span>
+                                    ))
+                                  : null}
+                              </div>
+                              {!collapsed ? (
+                                <div className="mt-3 whitespace-pre-wrap rounded-none border border-border/70 bg-card px-3 py-3 font-mono text-xs leading-6 text-foreground">
+                                  {section.content}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-none border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+                  No prompt trace is available for this message.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <DialogPrimitive.Close asChild>
+                <Button type="button" variant="outline" className="h-9 px-4">
+                  Close
+                </Button>
+              </DialogPrimitive.Close>
             </div>
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>

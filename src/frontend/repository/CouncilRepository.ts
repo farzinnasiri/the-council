@@ -21,6 +21,8 @@ import type {
   ConversationGuidanceDirective,
   TimeAwareReentryGapBucket,
   MemberVoiceName,
+  PromptTraceDraft,
+  PromptTraceRecord,
   ThemeMode,
   User,
 } from '../types/domain';
@@ -60,7 +62,7 @@ export interface CreateHallInput {
 
 export interface AppendMessagesInput {
   conversationId: string;
-  messages: Omit<Message, 'id' | 'createdAt' | 'compacted'>[];
+  messages: Array<Omit<Message, 'id' | 'createdAt' | 'compacted'> & { promptTraceDraft?: PromptTraceDraft }>;
 }
 
 export interface CouncilSnapshot {
@@ -98,6 +100,7 @@ export interface MemberChatResult {
   finalResponseModelSlot?: number;
   finalResponseModelSpec?: string;
   fallbackUsed?: boolean;
+  promptTraceDraft?: PromptTraceDraft;
 }
 
 export interface ChatResponseModelSlotOption {
@@ -293,15 +296,17 @@ export interface CouncilRepository {
     compactedMessageCount: number;
   }): Promise<void>;
   getCompactionPolicy(): Promise<CompactionPolicyConfig>;
+  getMessagePromptTrace(messageId: string): Promise<PromptTraceRecord | null>;
+  listPromptTraceMessageIds(conversationId: string): Promise<string[]>;
   appendMessages(input: AppendMessagesInput): Promise<Message[]>;
   discardMessage(messageId: string): Promise<Message | null>;
   replaceWithRefinement(input: {
     targetMessageId: string;
-    replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+    replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'> & { promptTraceDraft?: PromptTraceDraft };
   }): Promise<{ superseded: Message; replacement: Message }>;
   appendElaborationReply(input: {
     targetMessageId: string;
-    reply: Omit<Message, 'id' | 'createdAt' | 'compacted'>;
+    reply: Omit<Message, 'id' | 'createdAt' | 'compacted'> & { promptTraceDraft?: PromptTraceDraft };
   }): Promise<Message>;
   clearMessages(conversationId: string): Promise<void>;
   clearChamberSummary(conversationId: string): Promise<void>;
@@ -394,6 +399,7 @@ export interface CouncilRepository {
     guidanceDirectives?: Array<{
       note: string;
     }>;
+    debugPromptTrace?: boolean;
   }): Promise<MemberChatResult>;
   prepareRoundtableRound(input: {
     conversationId: string;
@@ -421,10 +427,12 @@ export interface CouncilRepository {
     roundNumber: number;
     memberId: string;
     force?: boolean;
+    debugPromptTrace?: boolean;
   }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }>;
   chatRoundtableSpeakers(input: {
     conversationId: string;
     roundNumber: number;
+    debugPromptTrace?: boolean;
   }): Promise<Array<{
     memberId: string;
     status: 'sent' | 'error';
@@ -437,6 +445,7 @@ export interface CouncilRepository {
     finalResponseModelSlot?: number;
     finalResponseModelSpec?: string;
     fallbackUsed?: boolean;
+    promptTraceDraft?: PromptTraceDraft;
   }>>;
   compactConversation(input: {
     conversationId: string;

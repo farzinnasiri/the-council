@@ -1,6 +1,7 @@
 'use node';
 
 import type { Id } from '../../_generated/dataModel';
+import type { PromptTraceDraft } from '../../../shared/promptTrace';
 import type { RoundtableSpeakerResult, RoundtableState } from '../shared/types';
 
 export interface RouteHallMembersInput {
@@ -38,6 +39,7 @@ export interface ChatRoundtableSpeakersInput {
   roundNumber: number;
   retrievalModel?: string;
   chatModel?: string;
+  debugPromptTrace?: boolean;
 }
 
 export interface ChatRoundtableSpeakerInput {
@@ -47,6 +49,7 @@ export interface ChatRoundtableSpeakerInput {
   force?: boolean;
   retrievalModel?: string;
   chatModel?: string;
+  debugPromptTrace?: boolean;
 }
 
 export interface RefreshRoundtableRoundInput {
@@ -75,6 +78,7 @@ export type RoundtableSingleSpeakerResponse = {
   finalResponseModelSlot?: number;
   finalResponseModelSpec?: string;
   fallbackUsed?: boolean;
+  promptTraceDraft?: PromptTraceDraft;
 };
 
 export interface HallApplicationService {
