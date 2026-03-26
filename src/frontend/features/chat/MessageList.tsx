@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { UserCircle2 } from 'lucide-react';
-import type { Message } from '../../types/domain';
-import { MessageBubble } from './MessageBubble';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, UserCircle2 } from "lucide-react";
+import type { Message } from "../../types/domain";
+import { MessageBubble } from "./MessageBubble";
 import {
   TYPING_INDICATOR_INITIAL_DELAY_MS,
   TYPING_INDICATOR_STAGGER_MS,
-} from '../../constants/presence';
+} from "../../constants/presence";
+import { Button } from "../../components/ui/button";
 
 interface EmptyState {
   title: string;
@@ -29,10 +30,14 @@ export function MessageList({
   loadingOlderMessages,
   onLoadOlder,
   emptyState,
+  latestUserMessageId,
+  latestTurnActionsDisabled = false,
+  onDeleteLatestTurn,
+  onEditLatestTurn,
 }: {
   messages: Message[];
-  conversationKind?: 'hall' | 'chamber';
-  hallMode?: 'advisory' | 'roundtable';
+  conversationKind?: "hall" | "chamber";
+  hallMode?: "advisory" | "roundtable";
   pendingRoundNumber?: number;
   isRouting: boolean;
   typingMembers: TypingMember[];
@@ -40,6 +45,10 @@ export function MessageList({
   loadingOlderMessages?: boolean;
   onLoadOlder?: () => void | Promise<void>;
   emptyState?: EmptyState;
+  latestUserMessageId?: string;
+  latestTurnActionsDisabled?: boolean;
+  onDeleteLatestTurn?: (message: Message) => void | Promise<void>;
+  onEditLatestTurn?: (message: Message) => void | Promise<void>;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -47,14 +56,31 @@ export function MessageList({
   const prevLastMessageIdRef = useRef<string | undefined>(undefined);
   const pendingRestoreHeightRef = useRef<number | null>(null);
   const typingRevealTimersRef = useRef<number[]>([]);
-  const [visibleTypingMemberIds, setVisibleTypingMemberIds] = useState<string[]>([]);
+  const [visibleTypingMemberIds, setVisibleTypingMemberIds] = useState<
+    string[]
+  >([]);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const autoScrollToBottomRef = useRef(true);
+
+  const updateBottomState = () => {
+    const container = containerRef.current;
+    if (!container) return true;
+    const nextIsNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight <=
+      120;
+    autoScrollToBottomRef.current = nextIsNearBottom;
+    setIsNearBottom(nextIsNearBottom);
+    return nextIsNearBottom;
+  };
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const firstId = messages[0]?.renderId ?? messages[0]?.id;
-    const lastId = messages[messages.length - 1]?.renderId ?? messages[messages.length - 1]?.id;
+    const lastId =
+      messages[messages.length - 1]?.renderId ??
+      messages[messages.length - 1]?.id;
     const prevFirst = prevFirstMessageIdRef.current;
     const prevLast = prevLastMessageIdRef.current;
 
@@ -63,18 +89,24 @@ export function MessageList({
       pendingRestoreHeightRef.current = null;
       const delta = container.scrollHeight - previousHeight;
       container.scrollTop = Math.max(0, container.scrollTop + delta);
+      updateBottomState();
     } else if (prevLast && lastId && prevLast !== lastId) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (autoScrollToBottomRef.current) {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
     } else if (!prevFirst && !prevLast) {
-      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
 
     prevFirstMessageIdRef.current = firstId;
     prevLastMessageIdRef.current = lastId;
+    updateBottomState();
   }, [messages]);
 
   useEffect(() => {
-    typingRevealTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    typingRevealTimersRef.current.forEach((timerId) =>
+      window.clearTimeout(timerId),
+    );
     typingRevealTimersRef.current = [];
 
     const typingIds = typingMembers.map((member) => member.id);
@@ -83,20 +115,27 @@ export function MessageList({
       return;
     }
 
-    setVisibleTypingMemberIds((current) => current.filter((memberId) => typingIds.includes(memberId)));
+    setVisibleTypingMemberIds((current) =>
+      current.filter((memberId) => typingIds.includes(memberId)),
+    );
 
     typingIds.forEach((memberId, index) => {
-      const timerId = window.setTimeout(() => {
-        setVisibleTypingMemberIds((current) => {
-          if (current.includes(memberId)) return current;
-          return [...current, memberId];
-        });
-      }, TYPING_INDICATOR_INITIAL_DELAY_MS + index * TYPING_INDICATOR_STAGGER_MS);
+      const timerId = window.setTimeout(
+        () => {
+          setVisibleTypingMemberIds((current) => {
+            if (current.includes(memberId)) return current;
+            return [...current, memberId];
+          });
+        },
+        TYPING_INDICATOR_INITIAL_DELAY_MS + index * TYPING_INDICATOR_STAGGER_MS,
+      );
       typingRevealTimersRef.current.push(timerId);
     });
 
     return () => {
-      typingRevealTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      typingRevealTimersRef.current.forEach((timerId) =>
+        window.clearTimeout(timerId),
+      );
       typingRevealTimersRef.current = [];
     };
   }, [typingMembers]);
@@ -107,14 +146,18 @@ export function MessageList({
   }, [typingMembers, visibleTypingMemberIds]);
 
   useEffect(() => {
-    if (isRouting || visibleTypingMembers.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (
+      (isRouting || visibleTypingMembers.length > 0) &&
+      autoScrollToBottomRef.current
+    ) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [isRouting, visibleTypingMembers]);
 
   const tryLoadOlder = () => {
     const container = containerRef.current;
     if (!container) return;
+    updateBottomState();
     if (!hasOlderMessages || loadingOlderMessages || !onLoadOlder) return;
     if (container.scrollTop > 96) return;
 
@@ -123,13 +166,13 @@ export function MessageList({
   };
 
   const renderedItems = useMemo(() => {
-    if (conversationKind !== 'hall') {
-      return messages.map((message) => ({ kind: 'message' as const, message }));
+    if (conversationKind !== "hall") {
+      return messages.map((message) => ({ kind: "message" as const, message }));
     }
 
     const items: Array<
-      | { kind: 'message'; message: Message }
-      | { kind: 'round'; roundNumber: number }
+      | { kind: "message"; message: Message }
+      | { kind: "round"; roundNumber: number }
     > = [];
     let lastSeenRound = 0;
     let renderedRound: number | null = null;
@@ -137,127 +180,174 @@ export function MessageList({
     for (const message of messages) {
       let roundNumber: number | null = null;
 
-      if (hallMode === 'roundtable') {
-        if (typeof message.roundNumber === 'number') {
+      if (hallMode === "roundtable") {
+        if (typeof message.roundNumber === "number") {
           roundNumber = message.roundNumber;
           lastSeenRound = Math.max(lastSeenRound, message.roundNumber);
-        } else if (message.role === 'user') {
+        } else if (message.role === "user") {
           // Legacy fallback for older rows that do not have roundNumber.
           roundNumber = Math.max(1, lastSeenRound + 1);
           lastSeenRound = roundNumber;
-        } else if (message.role === 'member') {
+        } else if (message.role === "member") {
           roundNumber = lastSeenRound > 0 ? lastSeenRound : null;
         }
       } else {
-        if (typeof message.roundNumber === 'number') {
+        if (typeof message.roundNumber === "number") {
           roundNumber = message.roundNumber;
           lastSeenRound = Math.max(lastSeenRound, message.roundNumber);
-        } else if (message.role === 'user') {
+        } else if (message.role === "user") {
           roundNumber = lastSeenRound + 1;
           lastSeenRound = roundNumber;
-        } else if (message.role === 'member') {
+        } else if (message.role === "member") {
           roundNumber =
             lastSeenRound > 0
               ? lastSeenRound
-              : (pendingRoundNumber && pendingRoundNumber > 0 ? pendingRoundNumber : 1);
+              : pendingRoundNumber && pendingRoundNumber > 0
+                ? pendingRoundNumber
+                : 1;
         }
       }
 
       if (roundNumber && roundNumber !== renderedRound) {
-        items.push({ kind: 'round', roundNumber });
+        items.push({ kind: "round", roundNumber });
         renderedRound = roundNumber;
       }
 
-      items.push({ kind: 'message', message });
+      items.push({ kind: "message", message });
     }
 
     // Roundtable state can briefly lag behind an optimistic user message.
     // Only append a trailing round marker when it moves the transcript forward.
     if (
-      typeof pendingRoundNumber === 'number' &&
+      typeof pendingRoundNumber === "number" &&
       pendingRoundNumber > Math.max(0, renderedRound ?? 0)
     ) {
-      items.push({ kind: 'round', roundNumber: pendingRoundNumber });
+      items.push({ kind: "round", roundNumber: pendingRoundNumber });
     }
 
     return items;
   }, [conversationKind, hallMode, messages, pendingRoundNumber]);
 
   return (
-    <div
-      ref={containerRef}
-      onScroll={tryLoadOlder}
-      className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6"
-    >
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-        {loadingOlderMessages ? (
-          <div className="mx-auto rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-            Loading older messages...
-          </div>
-        ) : null}
-
-        {messages.length === 0 && emptyState ? (
-          <div className="grid min-h-[38vh] place-items-center px-4 text-center">
-            <div>
-              <h2 className="font-display text-2xl">{emptyState.title}</h2>
-              <p className="mt-2 text-sm text-muted-foreground">{emptyState.description}</p>
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={containerRef}
+        onScroll={tryLoadOlder}
+        className="h-full overflow-y-auto px-4 py-4 md:px-8 md:py-6"
+      >
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+          {loadingOlderMessages ? (
+            <div className="mx-auto rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+              Loading older messages...
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {renderedItems.map((item, index) => {
-          if (item.kind === 'round') {
-            return <RoundSeparator key={`round-${item.roundNumber}-${index}`} roundNumber={item.roundNumber} />;
-          }
-          return (
-            <div
-              key={item.message.renderId ?? item.message.id}
-              id={`message-${item.message.id}`}
-              className="scroll-mt-24"
-            >
-              <MessageBubble message={item.message} />
+          {messages.length === 0 && emptyState ? (
+            <div className="grid min-h-[38vh] place-items-center px-4 text-center">
+              <div>
+                <h2 className="font-display text-2xl">{emptyState.title}</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {emptyState.description}
+                </p>
+              </div>
             </div>
-          );
-        })}
+          ) : null}
 
-        {isRouting ? (
-          <div className="mx-auto flex max-w-[88%] items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground animate-fade-in-up">
-            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-            <span>Routing members...</span>
-          </div>
-        ) : null}
+          {renderedItems.map((item, index) => {
+            if (item.kind === "round") {
+              return (
+                <RoundSeparator
+                  key={`round-${item.roundNumber}-${index}`}
+                  roundNumber={item.roundNumber}
+                />
+              );
+            }
+            return (
+              <div
+                key={item.message.renderId ?? item.message.id}
+                id={`message-${item.message.id}`}
+                className="scroll-mt-24"
+              >
+                <MessageBubble
+                  message={item.message}
+                  canDeleteLatestTurn={
+                    item.message.role === "user" &&
+                    item.message.id === latestUserMessageId &&
+                    Boolean(onDeleteLatestTurn) &&
+                    !latestTurnActionsDisabled
+                  }
+                  canEditLatestTurn={
+                    item.message.role === "user" &&
+                    item.message.id === latestUserMessageId &&
+                    Boolean(onEditLatestTurn) &&
+                    !latestTurnActionsDisabled
+                  }
+                  onDeleteLatestTurn={onDeleteLatestTurn}
+                  onEditLatestTurn={onEditLatestTurn}
+                />
+              </div>
+            );
+          })}
 
-        {!isRouting && visibleTypingMembers.length > 0
-          ? visibleTypingMembers.map((member) => (
-              <div key={member.id} className="flex items-start gap-3 animate-fade-in-up">
-                {member.avatarUrl ? (
-                  <img
-                    src={member.avatarUrl}
-                    alt={member.name}
-                    className="mt-1 h-8 w-8 shrink-0 rounded-full border border-border object-cover"
-                  />
-                ) : (
-                  <UserCircle2
-                    className="mt-1 h-8 w-8 shrink-0 text-muted-foreground/60"
-                    aria-label={member.name}
-                  />
-                )}
-                <div className="max-w-[85%]">
-                  <p className="px-1 pb-1.5 text-xs font-semibold text-muted-foreground">
-                    {member.name}
-                  </p>
-                  <div className="inline-flex w-fit items-center gap-1 rounded-3xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-sm">
-                    <TypingDot delayMs={0} />
-                    <TypingDot delayMs={120} />
-                    <TypingDot delayMs={240} />
+          {isRouting ? (
+            <div className="mx-auto flex max-w-[88%] items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground animate-fade-in-up">
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <span>Routing members...</span>
+            </div>
+          ) : null}
+
+          {!isRouting && visibleTypingMembers.length > 0
+            ? visibleTypingMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-start gap-3 animate-fade-in-up"
+                >
+                  {member.avatarUrl ? (
+                    <img
+                      src={member.avatarUrl}
+                      alt={member.name}
+                      className="mt-1 h-8 w-8 shrink-0 rounded-full border border-border object-cover"
+                    />
+                  ) : (
+                    <UserCircle2
+                      className="mt-1 h-8 w-8 shrink-0 text-muted-foreground/60"
+                      aria-label={member.name}
+                    />
+                  )}
+                  <div className="max-w-[85%]">
+                    <p className="px-1 pb-1.5 text-xs font-semibold text-muted-foreground">
+                      {member.name}
+                    </p>
+                    <div className="inline-flex w-fit items-center gap-1 rounded-3xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-sm">
+                      <TypingDot delayMs={0} />
+                      <TypingDot delayMs={120} />
+                      <TypingDot delayMs={240} />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
-          : null}
+              ))
+            : null}
 
-        <div ref={bottomRef} />
+          <div ref={bottomRef} />
+        </div>
       </div>
+
+      {!isNearBottom ? (
+        <Button
+          type="button"
+          size="icon"
+          className="absolute bottom-4 right-4 h-10 w-10 rounded-full border border-border bg-card text-foreground shadow-lg md:bottom-6 md:right-8"
+          onClick={() => {
+            autoScrollToBottomRef.current = true;
+            setIsNearBottom(true);
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+          }}
+          title="Jump to latest messages"
+          aria-label="Jump to latest messages"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -276,7 +366,7 @@ function TypingDot({ delayMs }: { delayMs: number }) {
     <span
       className="h-2 w-2 rounded-full bg-muted-foreground/65"
       style={{
-        animation: 'typing-bounce 1.1s infinite ease-in-out',
+        animation: "typing-bounce 1.1s infinite ease-in-out",
         animationDelay: `${delayMs}ms`,
       }}
     />

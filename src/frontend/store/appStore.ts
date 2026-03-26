@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 import type {
   ChamberResponseMode,
   Conversation,
@@ -18,13 +18,13 @@ import type {
   RetrievalStrategy,
   TimeAwareReentryGapBucket,
   ThemeMode,
-} from '../types/domain';
+} from "../types/domain";
 import {
   COMPACTION_POLICY_DEFAULTS,
   type CompactionPolicy,
-} from '../constants/compactionPolicy';
-import { DEFAULT_MEMBER_VOICE } from '../constants/memberVoice';
-import { convexRepository as councilRepository } from '../repository/ConvexCouncilRepository';
+} from "../constants/compactionPolicy";
+import { DEFAULT_MEMBER_VOICE } from "../constants/memberVoice";
+import { convexRepository as councilRepository } from "../repository/ConvexCouncilRepository";
 import {
   chatWithMember,
   chatRoundtableSpeakers,
@@ -45,11 +45,14 @@ import {
   startKbDocumentProcessing,
   suggestHallTitle,
   uploadFileToConvexStorage,
-} from '../lib/aiClient';
-import { routeToMembers } from '../lib/mockRouting';
-import type { KbChunkConfig, KbDocumentLifecycle } from '../repository/CouncilRepository';
-import { DEFAULT_KB_CHUNK_CONFIG } from '../constants/kbChunking';
-import { ENABLE_PROMPT_TRACE_DEBUG } from '../../../shared/featureFlags';
+} from "../lib/aiClient";
+import { routeToMembers } from "../lib/mockRouting";
+import type {
+  KbChunkConfig,
+  KbDocumentLifecycle,
+} from "../repository/CouncilRepository";
+import { DEFAULT_KB_CHUNK_CONFIG } from "../constants/kbChunking";
+import { ENABLE_PROMPT_TRACE_DEBUG } from "../../../shared/featureFlags";
 
 interface CreateMemberPayload {
   name: string;
@@ -62,7 +65,7 @@ interface CreateMemberPayload {
   personalSourcesPermissionEnabled?: boolean;
 }
 
-type NotebookSaveState = 'idle' | 'saving' | 'saved' | 'error';
+type NotebookSaveState = "idle" | "saving" | "saved" | "error";
 
 interface AppToast {
   id: string;
@@ -71,7 +74,7 @@ interface AppToast {
 
 let initializeAppPromise: Promise<void> | null = null;
 let hydrateMemberDocumentsPromise: Promise<void> | null = null;
-const PROMPT_DEBUG_MODE_STORAGE_KEY = 'the-council.prompt-debug-mode';
+const PROMPT_DEBUG_MODE_STORAGE_KEY = "the-council.prompt-debug-mode";
 
 interface AppState {
   hydrated: boolean;
@@ -88,9 +91,21 @@ interface AppState {
   pendingReplyMemberIds: Record<string, string[]>;
   pendingReplyTicketByConversation: Record<string, string | undefined>;
   compactionCheckInFlightByConversation: Record<string, boolean>;
-  memberDocuments: Record<string, Array<{ name?: string; displayName?: string }>>;
+  memberDocuments: Record<
+    string,
+    Array<{ name?: string; displayName?: string }>
+  >;
   kbDocumentsByMember: Record<string, KbDocumentLifecycle[]>;
-  kbUploadProgressByMember: Record<string, Array<{ localId: string; fileName: string; loaded: number; total: number; progress: number }>>;
+  kbUploadProgressByMember: Record<
+    string,
+    Array<{
+      localId: string;
+      fileName: string;
+      loaded: number;
+      total: number;
+      progress: number;
+    }>
+  >;
   kbDeletingDocumentIds: Record<string, boolean>;
   kbRetryingIndexDocumentIds: Record<string, boolean>;
   kbRetryingMetadataDocumentIds: Record<string, boolean>;
@@ -121,7 +136,15 @@ interface AppState {
     }
   >;
   compactionPolicy: CompactionPolicy;
-  refiningActionByMessageId: Record<string, 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate' | undefined>;
+  refiningActionByMessageId: Record<
+    string,
+    | "think_harder"
+    | "brainstorm"
+    | "deep_dive"
+    | "shorter"
+    | "elaborate"
+    | undefined
+  >;
   retryingMessageIds: Record<string, boolean>;
   promptTraceByMessageId: Record<string, PromptTraceRecord | null | undefined>;
   promptTraceMessageIdsByConversation: Record<string, string[]>;
@@ -135,84 +158,165 @@ interface AppState {
   syncHallRoundSummaries: (conversationId: string) => Promise<void>;
   evaluateChamberCompactionOnLoad: (conversationId: string) => Promise<void>;
   createConversation: (type: ConversationType) => Promise<Conversation>;
-  setChamberResponseMode: (conversationId: string, mode: ChamberResponseMode) => Promise<void>;
-  setChamberTimeAwareReentryEnabled: (conversationId: string, enabled: boolean) => Promise<void>;
-  setChamberPersonalSourcesEnabled: (conversationId: string, enabled: boolean) => Promise<void>;
-  markChamberTimeAwareReentryNoticeSeen: (conversationId: string) => Promise<void>;
+  setChamberResponseMode: (
+    conversationId: string,
+    mode: ChamberResponseMode,
+  ) => Promise<void>;
+  setChamberTimeAwareReentryEnabled: (
+    conversationId: string,
+    enabled: boolean,
+  ) => Promise<void>;
+  setChamberPersonalSourcesEnabled: (
+    conversationId: string,
+    enabled: boolean,
+  ) => Promise<void>;
+  markChamberTimeAwareReentryNoticeSeen: (
+    conversationId: string,
+  ) => Promise<void>;
   renameConversation: (conversationId: string, title: string) => Promise<void>;
   archiveConversation: (conversationId: string) => Promise<void>;
   closeHall: (conversationId: string) => Promise<void>;
   createChamberThread: (memberId: string) => Promise<Conversation>;
   startHallFollowUpThread: (
     hallConversationId: string,
-    hallMessageId: string
+    hallMessageId: string,
   ) => Promise<Conversation>;
   listChamberThreadsForMember: (memberId: string) => Conversation[];
-  getLatestChamberThreadForMember: (memberId: string) => Conversation | undefined;
+  getLatestChamberThreadForMember: (
+    memberId: string,
+  ) => Conversation | undefined;
   sendHallDraftMessage: (
     text: string,
-    hallMode?: 'advisory' | 'roundtable',
-    routingMode?: 'auto' | 'manual',
-    manualMemberIds?: string[]
+    hallMode?: "advisory" | "roundtable",
+    routingMode?: "auto" | "manual",
+    manualMemberIds?: string[],
   ) => Promise<Conversation>;
-  sendMessageToChamberMember: (memberId: string, text: string) => Promise<Conversation>;
+  sendMessageToChamberMember: (
+    memberId: string,
+    text: string,
+  ) => Promise<Conversation>;
   sendUserMessage: (
     conversationId: string,
     text: string,
-    mentionedMemberIds?: string[]
-  ) => Promise<{ messageId: string; previousActiveMessageAt?: number } | undefined>;
+    mentionedMemberIds?: string[],
+  ) => Promise<
+    { messageId: string; previousActiveMessageAt?: number } | undefined
+  >;
+  deleteLatestUserTurn: (
+    conversationId: string,
+    messageId: string,
+  ) => Promise<void>;
+  editLatestUserTurn: (
+    conversationId: string,
+    messageId: string,
+    text: string,
+    mentionedMemberIds?: string[],
+  ) => Promise<void>;
   generateDeterministicReplies: (
     conversationId: string,
     text: string,
     mentionedMemberIds?: string[],
     previousActiveMessageAt?: number,
     routingOverride?: {
-      mode: 'auto' | 'manual';
+      mode: "auto" | "manual";
       memberIds?: string[];
-    }
+    },
   ) => Promise<void>;
   refreshRoundtableState: (conversationId: string) => Promise<void>;
   continueRoundtableRound: (conversationId: string) => Promise<void>;
-  speakNextRoundtableMember: (conversationId: string, memberId: string) => Promise<void>;
+  speakNextRoundtableMember: (
+    conversationId: string,
+    memberId: string,
+  ) => Promise<void>;
   finishRoundtableRound: (conversationId: string) => Promise<void>;
-  addMemberToConversation: (conversationId: string, memberId: string) => Promise<void>;
-  removeMemberFromConversation: (conversationId: string, memberId: string) => Promise<void>;
+  addMemberToConversation: (
+    conversationId: string,
+    memberId: string,
+  ) => Promise<void>;
+  removeMemberFromConversation: (
+    conversationId: string,
+    memberId: string,
+  ) => Promise<void>;
   clearChamberByMember: (memberId: string) => Promise<void>;
   refineLatestChamberResponse: (
     conversationId: string,
-    action: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate'
+    action:
+      | "think_harder"
+      | "brainstorm"
+      | "deep_dive"
+      | "shorter"
+      | "elaborate",
   ) => Promise<void>;
   setNotebookOpen: (open: boolean) => void;
   toggleNotebookOpen: () => void;
   setNotebookMobileSnap: (snap: 0.3 | 0.5 | 1) => void;
-  ensureNotebookLoaded: (conversationId: string, force?: boolean) => Promise<void>;
+  ensureNotebookLoaded: (
+    conversationId: string,
+    force?: boolean,
+  ) => Promise<void>;
   loadActiveNotebooks: (force?: boolean) => Promise<void>;
   setNotebookDraft: (conversationId: string, content: string) => void;
   saveNotebook: (conversationId: string) => Promise<void>;
-  appendMessageToNotebook: (conversationId: string, text: string, authorName?: string) => Promise<void>;
+  appendMessageToNotebook: (
+    conversationId: string,
+    text: string,
+    authorName?: string,
+  ) => Promise<void>;
   dismissChamberTimeAwareReentryNotice: (conversationId: string) => void;
   showToast: (message: string) => void;
   dismissToast: (toastId: string) => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   setPromptDebugMode: (enabled: boolean) => void;
   refreshPromptTraceAvailability: (conversationId: string) => Promise<void>;
-  getMessagePromptTrace: (messageId: string) => Promise<PromptTraceRecord | null>;
+  getMessagePromptTrace: (
+    messageId: string,
+  ) => Promise<PromptTraceRecord | null>;
   createMember: (payload: CreateMemberPayload) => Promise<Member>;
-  updateMember: (memberId: string, patch: Partial<CreateMemberPayload>) => Promise<Member>;
-  generateMemberGuidanceProfile: (memberId: string, force?: boolean) => Promise<{ guidanceProfilePrompt: string; model: string }>;
-  generateMemberVoicePersona: (memberId: string, force?: boolean) => Promise<{ ttsPersonaPrompt: string; model: string }>;
-  setMessageFeedback: (messageId: string, key: MessageFeedbackKey, active: boolean) => Promise<void>;
-  saveCustomGuidanceForMessage: (messageId: string, chips: CustomGuidanceChipKey[], text?: string) => Promise<void>;
+  updateMember: (
+    memberId: string,
+    patch: Partial<CreateMemberPayload>,
+  ) => Promise<Member>;
+  generateMemberGuidanceProfile: (
+    memberId: string,
+    force?: boolean,
+  ) => Promise<{ guidanceProfilePrompt: string; model: string }>;
+  generateMemberVoicePersona: (
+    memberId: string,
+    force?: boolean,
+  ) => Promise<{ ttsPersonaPrompt: string; model: string }>;
+  setMessageFeedback: (
+    messageId: string,
+    key: MessageFeedbackKey,
+    active: boolean,
+  ) => Promise<void>;
+  saveCustomGuidanceForMessage: (
+    messageId: string,
+    chips: CustomGuidanceChipKey[],
+    text?: string,
+  ) => Promise<void>;
   clearCustomGuidanceForMessage: (messageId: string) => Promise<void>;
   setMessagePinned: (messageId: string, active: boolean) => Promise<void>;
   retryFailedMessage: (messageId: string) => Promise<void>;
   archiveMember: (memberId: string) => Promise<void>;
-  uploadDocsForMember: (memberId: string, files: File[], chunkConfig?: KbChunkConfig) => Promise<void>;
+  uploadDocsForMember: (
+    memberId: string,
+    files: File[],
+    chunkConfig?: KbChunkConfig,
+  ) => Promise<void>;
   fetchDocsForMember: (memberId: string) => Promise<void>;
   hydrateMemberDocuments: () => Promise<void>;
-  deleteDocForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
-  retryKbDocumentIndexForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
-  retryKbDocumentMetadataForMember: (memberId: string, kbDocumentId: string) => Promise<{ ok: boolean; error?: string }>;
+  deleteDocForMember: (
+    memberId: string,
+    kbDocumentId: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
+  retryKbDocumentIndexForMember: (
+    memberId: string,
+    kbDocumentId: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
+  retryKbDocumentMetadataForMember: (
+    memberId: string,
+    kbDocumentId: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   reprocessKbDocumentForMember: (
     memberId: string,
     kbDocumentId: string,
@@ -220,31 +324,37 @@ interface AppState {
   ) => Promise<{ ok: boolean; error?: string }>;
 }
 
-type BuildMessageInput = Omit<Message, 'id' | 'createdAt' | 'compacted'>;
-type ConversationPatch = Partial<Conversation> | ((conversation: Conversation) => Conversation);
-type ConversationStateSlice = Pick<AppState, 'conversations'>;
+type BuildMessageInput = Omit<Message, "id" | "createdAt" | "compacted">;
+type ConversationPatch =
+  | Partial<Conversation>
+  | ((conversation: Conversation) => Conversation);
+type ConversationStateSlice = Pick<AppState, "conversations">;
 type PendingReplyStateSlice = Pick<
   AppState,
-  'pendingReplyCount' | 'pendingReplyMemberIds' | 'pendingReplyTicketByConversation'
+  | "pendingReplyCount"
+  | "pendingReplyMemberIds"
+  | "pendingReplyTicketByConversation"
 >;
 
 function mapNotebooksByConversation(notebooks: ConversationNotebook[]) {
-  return Object.fromEntries(notebooks.map((notebook) => [notebook.conversationId, notebook])) as Record<
-    string,
-    ConversationNotebook
-  >;
+  return Object.fromEntries(
+    notebooks.map((notebook) => [notebook.conversationId, notebook]),
+  ) as Record<string, ConversationNotebook>;
 }
 
 function readPromptDebugMode(): boolean {
   if (!ENABLE_PROMPT_TRACE_DEBUG) return false;
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(PROMPT_DEBUG_MODE_STORAGE_KEY) === '1';
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(PROMPT_DEBUG_MODE_STORAGE_KEY) === "1";
 }
 
 function writePromptDebugMode(enabled: boolean) {
   if (!ENABLE_PROMPT_TRACE_DEBUG) return;
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PROMPT_DEBUG_MODE_STORAGE_KEY, enabled ? '1' : '0');
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    PROMPT_DEBUG_MODE_STORAGE_KEY,
+    enabled ? "1" : "0",
+  );
 }
 
 function removeKey<T>(record: Record<string, T>, key: string) {
@@ -253,12 +363,19 @@ function removeKey<T>(record: Record<string, T>, key: string) {
   return next;
 }
 
+function removeKeys<T>(record: Record<string, T>, keys: Set<string>) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => !keys.has(key)),
+  ) as Record<string, T>;
+}
+
 function addPromptTraceMessageId(
-  state: Pick<AppState, 'promptTraceMessageIdsByConversation'>,
+  state: Pick<AppState, "promptTraceMessageIdsByConversation">,
   conversationId: string,
   messageId: string,
 ) {
-  const existing = state.promptTraceMessageIdsByConversation[conversationId] ?? [];
+  const existing =
+    state.promptTraceMessageIdsByConversation[conversationId] ?? [];
   if (existing.includes(messageId)) {
     return state.promptTraceMessageIdsByConversation;
   }
@@ -276,7 +393,7 @@ function createPendingReplyTicket() {
 
 function clearPendingReplies(
   state: PendingReplyStateSlice,
-  conversationId: string
+  conversationId: string,
 ): PendingReplyStateSlice {
   return {
     pendingReplyCount: {
@@ -287,7 +404,10 @@ function clearPendingReplies(
       ...state.pendingReplyMemberIds,
       [conversationId]: [],
     },
-    pendingReplyTicketByConversation: removeKey(state.pendingReplyTicketByConversation, conversationId),
+    pendingReplyTicketByConversation: removeKey(
+      state.pendingReplyTicketByConversation,
+      conversationId,
+    ),
   };
 }
 
@@ -295,7 +415,7 @@ function beginPendingReplies(
   state: PendingReplyStateSlice,
   conversationId: string,
   memberIds: string[],
-  ticket: string
+  ticket: string,
 ): PendingReplyStateSlice {
   if (memberIds.length === 0) {
     return clearPendingReplies(state, conversationId);
@@ -320,7 +440,7 @@ function beginPendingReplies(
 function clearPendingRepliesIfCurrent(
   state: PendingReplyStateSlice,
   conversationId: string,
-  ticket: string
+  ticket: string,
 ): Partial<PendingReplyStateSlice> {
   if (state.pendingReplyTicketByConversation[conversationId] !== ticket) {
     return {};
@@ -332,13 +452,15 @@ function removePendingReplyMemberIfCurrent(
   state: PendingReplyStateSlice,
   conversationId: string,
   memberId: string,
-  ticket: string
+  ticket: string,
 ): Partial<PendingReplyStateSlice> {
   if (state.pendingReplyTicketByConversation[conversationId] !== ticket) {
     return {};
   }
 
-  const nextMemberIds = (state.pendingReplyMemberIds[conversationId] ?? []).filter((id) => id !== memberId);
+  const nextMemberIds = (
+    state.pendingReplyMemberIds[conversationId] ?? []
+  ).filter((id) => id !== memberId);
   if (nextMemberIds.length === 0) {
     return clearPendingReplies(state, conversationId);
   }
@@ -360,7 +482,7 @@ function isVisibleMessage(message: Message) {
 }
 
 function isClosedHallConversation(conversation: Conversation | undefined) {
-  return conversation?.kind === 'hall' && Boolean(conversation.closedAt);
+  return conversation?.kind === "hall" && Boolean(conversation.closedAt);
 }
 
 function getBaseGenerationProfile(mode: ChamberResponseMode | undefined): {
@@ -368,62 +490,113 @@ function getBaseGenerationProfile(mode: ChamberResponseMode | undefined): {
   retrievalStrategy: RetrievalStrategy;
 } {
   switch (mode) {
-    case 'short':
-      return { chatProfile: 'short', retrievalStrategy: 'instant' };
-    case 'think':
-      return { chatProfile: 'think', retrievalStrategy: 'instant' };
-    case 'brainstorm':
-      return { chatProfile: 'instant', retrievalStrategy: 'brainstorm' };
-    case 'deep_dive':
-      return { chatProfile: 'think', retrievalStrategy: 'deep_dive' };
+    case "short":
+      return { chatProfile: "short", retrievalStrategy: "instant" };
+    case "think":
+      return { chatProfile: "think", retrievalStrategy: "instant" };
+    case "brainstorm":
+      return { chatProfile: "instant", retrievalStrategy: "brainstorm" };
+    case "deep_dive":
+      return { chatProfile: "think", retrievalStrategy: "deep_dive" };
     default:
-      return { chatProfile: 'instant', retrievalStrategy: 'instant' };
+      return { chatProfile: "instant", retrievalStrategy: "instant" };
   }
 }
 
-function resolveRefinementProfiles(action: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate') {
-  if (action === 'think_harder') {
-    return { chatProfile: 'think' as const, retrievalStrategy: 'instant' as const, turnDirective: undefined };
+function resolveRefinementProfiles(
+  action: "think_harder" | "brainstorm" | "deep_dive" | "shorter" | "elaborate",
+) {
+  if (action === "think_harder") {
+    return {
+      chatProfile: "think" as const,
+      retrievalStrategy: "instant" as const,
+      turnDirective: undefined,
+    };
   }
-  if (action === 'brainstorm') {
-    return { chatProfile: 'instant' as const, retrievalStrategy: 'brainstorm' as const, turnDirective: undefined };
+  if (action === "brainstorm") {
+    return {
+      chatProfile: "instant" as const,
+      retrievalStrategy: "brainstorm" as const,
+      turnDirective: undefined,
+    };
   }
-  if (action === 'deep_dive') {
-    return { chatProfile: 'think' as const, retrievalStrategy: 'deep_dive' as const, turnDirective: undefined };
+  if (action === "deep_dive") {
+    return {
+      chatProfile: "think" as const,
+      retrievalStrategy: "deep_dive" as const,
+      turnDirective: undefined,
+    };
   }
-  if (action === 'shorter') {
-    return { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const, turnDirective: 'shorter' as const };
+  if (action === "shorter") {
+    return {
+      chatProfile: "instant" as const,
+      retrievalStrategy: "instant" as const,
+      turnDirective: "shorter" as const,
+    };
   }
-  return { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const, turnDirective: 'elaborate' as const };
+  return {
+    chatProfile: "instant" as const,
+    retrievalStrategy: "instant" as const,
+    turnDirective: "elaborate" as const,
+  };
 }
 
 function getRefinementGenerationProfile(
-  action: 'think_harder' | 'brainstorm' | 'deep_dive' | 'shorter' | 'elaborate'
+  action: "think_harder" | "brainstorm" | "deep_dive" | "shorter" | "elaborate",
 ): ChamberResponseMode {
   switch (action) {
-    case 'think_harder':
-      return 'think';
-    case 'brainstorm':
-      return 'brainstorm';
-    case 'deep_dive':
-      return 'deep_dive';
-    case 'shorter':
-      return 'short';
+    case "think_harder":
+      return "think";
+    case "brainstorm":
+      return "brainstorm";
+    case "deep_dive":
+      return "deep_dive";
+    case "shorter":
+      return "short";
     default:
-      return 'instant';
+      return "instant";
   }
 }
 
-function getLatestVisibleChamberMemberMessage(messages: Message[], conversationId: string): Message | undefined {
+function getLatestVisibleChamberMemberMessage(
+  messages: Message[],
+  conversationId: string,
+): Message | undefined {
   return messages
     .filter(
       (message) =>
         message.conversationId === conversationId &&
-        message.role === 'member' &&
-        message.status === 'sent' &&
-        isVisibleMessage(message)
+        message.role === "member" &&
+        message.status === "sent" &&
+        isVisibleMessage(message),
     )
     .sort((a, b) => b.createdAt - a.createdAt)[0];
+}
+
+function getLatestVisibleUserTurn(messages: Message[], conversationId: string) {
+  const visibleMessages = messages
+    .filter(
+      (message) =>
+        message.conversationId === conversationId && isVisibleMessage(message),
+    )
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  let latestUserIndex = -1;
+  for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+    if (visibleMessages[index]?.role === "user") {
+      latestUserIndex = index;
+      break;
+    }
+  }
+
+  if (latestUserIndex < 0) {
+    return null;
+  }
+
+  return {
+    latestUserMessage: visibleMessages[latestUserIndex]!,
+    affectedMessages: visibleMessages.slice(latestUserIndex),
+  };
 }
 
 const TIME_AWARE_REENTRY_MIN_GAP_MS = 60 * 60 * 1000;
@@ -441,16 +614,16 @@ const EXPLICIT_CONTINUATION_PATTERNS = [
 ];
 
 const FEEDBACK_LABELS: Record<MessageFeedbackKey, string> = {
-  like: 'Liked',
-  dislike: 'Not helpful',
-  helpful: 'Helpful',
-  not_helpful: 'Not helpful',
-  shorter: 'Shorter replies',
-  longer: 'Longer replies',
-  clearer: 'Clearer replies',
-  more_direct: 'More direct replies',
-  softer: 'Softer replies',
-  harder: 'Harder replies',
+  like: "Liked",
+  dislike: "Not helpful",
+  helpful: "Helpful",
+  not_helpful: "Not helpful",
+  shorter: "Shorter replies",
+  longer: "Longer replies",
+  clearer: "Clearer replies",
+  more_direct: "More direct replies",
+  softer: "Softer replies",
+  harder: "Harder replies",
 };
 
 function feedbackToastMessage(key: MessageFeedbackKey, active: boolean) {
@@ -458,7 +631,9 @@ function feedbackToastMessage(key: MessageFeedbackKey, active: boolean) {
   return active ? `${label} activated` : `${label} removed`;
 }
 
-function mapFeedbackRows(rows: Array<{ messageId: string; key: MessageFeedbackKey }>) {
+function mapFeedbackRows(
+  rows: Array<{ messageId: string; key: MessageFeedbackKey }>,
+) {
   const grouped: Record<string, MessageFeedbackKey[]> = {};
   for (const row of rows) {
     grouped[row.messageId] = [...(grouped[row.messageId] ?? []), row.key];
@@ -470,16 +645,21 @@ function mapCustomGuidanceRows(
   rows: Array<{
     id: string;
     triggerMessageId?: string;
-    source: 'background_reflection' | 'feedback' | 'system_rule';
-    feedbackKind?: 'quick' | 'custom';
+    source: "background_reflection" | "feedback" | "system_rule";
+    feedbackKind?: "quick" | "custom";
     feedbackChips?: CustomGuidanceChipKey[];
     feedbackText?: string;
     note: string;
-  }>
+  }>,
 ) {
   const grouped: Record<string, MessageCustomGuidance> = {};
   for (const row of rows) {
-    if (row.source !== 'feedback' || row.feedbackKind !== 'custom' || !row.triggerMessageId) continue;
+    if (
+      row.source !== "feedback" ||
+      row.feedbackKind !== "custom" ||
+      !row.triggerMessageId
+    )
+      continue;
     if (grouped[row.triggerMessageId]) continue;
     grouped[row.triggerMessageId] = {
       directiveId: row.id,
@@ -494,11 +674,11 @@ function mapCustomGuidanceRows(
 function replaceMessageScopedRecord<T>(
   current: Record<string, T>,
   messageIds: string[],
-  nextEntries: Record<string, T>
+  nextEntries: Record<string, T>,
 ) {
   const scopedIds = new Set(messageIds);
   const retained = Object.fromEntries(
-    Object.entries(current).filter(([messageId]) => !scopedIds.has(messageId))
+    Object.entries(current).filter(([messageId]) => !scopedIds.has(messageId)),
   ) as Record<string, T>;
   return {
     ...retained,
@@ -506,48 +686,57 @@ function replaceMessageScopedRecord<T>(
   };
 }
 
-function findRetrySourceUserMessage(messages: Message[], failedMessage: Message): Message | undefined {
+function findRetrySourceUserMessage(
+  messages: Message[],
+  failedMessage: Message,
+): Message | undefined {
   return messages
-    .filter((message) =>
-      message.conversationId === failedMessage.conversationId &&
-      message.role === 'user' &&
-      message.status === 'sent' &&
-      isVisibleMessage(message) &&
-      message.createdAt <= failedMessage.createdAt
+    .filter(
+      (message) =>
+        message.conversationId === failedMessage.conversationId &&
+        message.role === "user" &&
+        message.status === "sent" &&
+        isVisibleMessage(message) &&
+        message.createdAt <= failedMessage.createdAt,
     )
     .sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
-function getLatestActiveNonSystemMessageAt(messages: Message[], conversationId: string): number | undefined {
+function getLatestActiveNonSystemMessageAt(
+  messages: Message[],
+  conversationId: string,
+): number | undefined {
   let latest = 0;
   for (const message of messages) {
     if (message.conversationId !== conversationId) continue;
-    if (message.role === 'system') continue;
-    if (message.status === 'error') continue;
+    if (message.role === "system") continue;
+    if (message.status === "error") continue;
     if (!isVisibleMessage(message)) continue;
     latest = Math.max(latest, message.createdAt);
   }
   return latest > 0 ? latest : undefined;
 }
 
-function classifyTimeAwareReentryGap(gapMs: number): TimeAwareReentryGapBucket | undefined {
+function classifyTimeAwareReentryGap(
+  gapMs: number,
+): TimeAwareReentryGapBucket | undefined {
   if (gapMs < TIME_AWARE_REENTRY_MIN_GAP_MS) return undefined;
-  if (gapMs < TIME_AWARE_REENTRY_MEDIUM_GAP_MS) return 'mild';
-  if (gapMs < TIME_AWARE_REENTRY_STRONG_GAP_MS) return 'medium';
-  if (gapMs < TIME_AWARE_REENTRY_VERY_STRONG_GAP_MS) return 'strong';
-  return 'very_strong';
+  if (gapMs < TIME_AWARE_REENTRY_MEDIUM_GAP_MS) return "mild";
+  if (gapMs < TIME_AWARE_REENTRY_STRONG_GAP_MS) return "medium";
+  if (gapMs < TIME_AWARE_REENTRY_VERY_STRONG_GAP_MS) return "strong";
+  return "very_strong";
 }
 
 function demoteTimeAwareReentryGap(
-  bucket: TimeAwareReentryGapBucket
+  bucket: TimeAwareReentryGapBucket,
 ): TimeAwareReentryGapBucket | undefined {
   switch (bucket) {
-    case 'very_strong':
-      return 'strong';
-    case 'strong':
-      return 'medium';
-    case 'medium':
-      return 'mild';
+    case "very_strong":
+      return "strong";
+    case "strong":
+      return "medium";
+    case "medium":
+      return "mild";
     default:
       return undefined;
   }
@@ -571,7 +760,7 @@ function buildMessage(input: BuildMessageInput): Message {
 function replaceOptimisticMessages(
   messages: Message[],
   optimisticMessages: Message[],
-  persistedMessages: Message[]
+  persistedMessages: Message[],
 ): Message[] {
   const replacements = new Map<string, Message>();
   optimisticMessages.forEach((message, index) => {
@@ -592,11 +781,11 @@ function replaceOptimisticMessages(
 function patchConversationEverywhere(
   state: ConversationStateSlice,
   conversationId: string,
-  patch: ConversationPatch
+  patch: ConversationPatch,
 ): ConversationStateSlice {
   const conversations = state.conversations.map((item) => {
     if (item.id !== conversationId) return item;
-    return typeof patch === 'function' ? patch(item) : { ...item, ...patch };
+    return typeof patch === "function" ? patch(item) : { ...item, ...patch };
   });
   return { conversations };
 }
@@ -604,7 +793,7 @@ function patchConversationEverywhere(
 function updateConversationStamp(
   state: ConversationStateSlice,
   conversationId: string,
-  includeMessageActivity = false
+  includeMessageActivity = false,
 ): ConversationStateSlice {
   const now = Date.now();
   return patchConversationEverywhere(state, conversationId, {
@@ -615,21 +804,21 @@ function updateConversationStamp(
 
 function listChamberThreadsForMember(
   conversations: Conversation[],
-  memberId: string
+  memberId: string,
 ): Conversation[] {
   return conversations
     .filter(
       (conversation) =>
-        conversation.kind === 'chamber' &&
+        conversation.kind === "chamber" &&
         conversation.chamberMemberId === memberId &&
-        !conversation.deletedAt
+        !conversation.deletedAt,
     )
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 function getLatestChamberThreadForMember(
   conversations: Conversation[],
-  memberId: string
+  memberId: string,
 ): Conversation | undefined {
   return listChamberThreadsForMember(conversations, memberId)[0];
 }
@@ -638,47 +827,45 @@ function buildMemberContextWindow(
   messages: Message[],
   conversationId: string,
   memberId: string,
-  conversationKind: Conversation['kind'],
-  membersById: Map<string, Member>
-): Array<{ role: 'user' | 'assistant'; content: string }> {
-  const filtered = messages
-    .filter((msg) => {
-      if (msg.conversationId !== conversationId) return false;
-      if (!isVisibleMessage(msg)) return false;
-      if (msg.role === 'system') return false;
-      if (msg.status === 'error') return false;
-      if (msg.role === 'user') return true;
-      if (msg.role === 'member') {
-        return true;
-      }
-      return false;
-    });
+  conversationKind: Conversation["kind"],
+  membersById: Map<string, Member>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  const filtered = messages.filter((msg) => {
+    if (msg.conversationId !== conversationId) return false;
+    if (!isVisibleMessage(msg)) return false;
+    if (msg.role === "system") return false;
+    if (msg.status === "error") return false;
+    if (msg.role === "user") return true;
+    if (msg.role === "member") {
+      return true;
+    }
+    return false;
+  });
 
-  const scoped = conversationKind === 'hall' ? filtered : filtered.slice(-12);
+  const scoped = conversationKind === "hall" ? filtered : filtered.slice(-12);
 
-  return scoped
-    .map((msg) => {
-      if (msg.role === 'user') {
-        return {
-          role: 'user' as const,
-          content: msg.content,
-        };
-      }
-      if (conversationKind === 'hall') {
-        const authorName = msg.authorMemberId
-          ? (membersById.get(msg.authorMemberId)?.name ?? 'Member')
-          : 'Member';
-        const selfTag = msg.authorMemberId === memberId ? ' (you)' : '';
-        return {
-          role: 'assistant' as const,
-          content: `${authorName}${selfTag}: ${msg.content}`,
-        };
-      }
+  return scoped.map((msg) => {
+    if (msg.role === "user") {
       return {
-        role: 'assistant' as const,
+        role: "user" as const,
         content: msg.content,
       };
-    });
+    }
+    if (conversationKind === "hall") {
+      const authorName = msg.authorMemberId
+        ? (membersById.get(msg.authorMemberId)?.name ?? "Member")
+        : "Member";
+      const selfTag = msg.authorMemberId === memberId ? " (you)" : "";
+      return {
+        role: "assistant" as const,
+        content: `${authorName}${selfTag}: ${msg.content}`,
+      };
+    }
+    return {
+      role: "assistant" as const,
+      content: msg.content,
+    };
+  });
 }
 
 function buildHallSystemContext(
@@ -686,60 +873,65 @@ function buildHallSystemContext(
   activeParticipants: Member[],
   rawMessages: Message[],
   roundSummaries: string[],
-  hallMode: 'advisory' | 'roundtable',
+  hallMode: "advisory" | "roundtable",
   conversationId: string,
 ): string {
   const presentMemberNames = activeParticipants.map((m) => m.name);
-  const otherNames = activeParticipants.filter((m) => m.id !== member.id).map((m) => m.name);
+  const otherNames = activeParticipants
+    .filter((m) => m.id !== member.id)
+    .map((m) => m.name);
 
   const latestInteractions = rawMessages
     .filter(
       (msg) =>
         msg.conversationId === conversationId &&
         isVisibleMessage(msg) &&
-        msg.role !== 'system' &&
-        msg.status !== 'error'
+        msg.role !== "system" &&
+        msg.status !== "error",
     )
     .slice(-10)
     .map((msg) => {
       const author =
-        msg.role === 'user'
-          ? 'User'
-          : (activeParticipants.find((m) => m.id === msg.authorMemberId)?.name ?? 'Member');
+        msg.role === "user"
+          ? "User"
+          : (activeParticipants.find((m) => m.id === msg.authorMemberId)
+              ?.name ?? "Member");
       return `${author}: ${msg.content}`;
     });
 
   const modeLine =
-    hallMode === 'roundtable'
-      ? 'Mode: roundtable (selected speakers contribute each round).'
-      : 'Mode: advisory (multiple members respond to the same user turn).';
+    hallMode === "roundtable"
+      ? "Mode: roundtable (selected speakers contribute each round)."
+      : "Mode: advisory (multiple members respond to the same user turn).";
 
   return [
-    '[Hall Deliberation Context]',
-    'You are participating in a live council discussion.',
+    "[Hall Deliberation Context]",
+    "You are participating in a live council discussion.",
     modeLine,
-    `Participants: ${presentMemberNames.join(', ') || member.name}.`,
-    `Other members currently present: ${otherNames.join(', ') || 'none'}.`,
-    '',
-    '[Completed Round Summaries]',
-    roundSummaries.length > 0 ? roundSummaries.join('\n\n') : '(none yet)',
-    '',
-    '[Latest Interactions]',
-    latestInteractions.length > 0 ? latestInteractions.join('\n') : '(none yet)',
-    '',
-    '[Response Rules]',
-    'Use the context above to stay grounded in the ongoing discussion without collapsing into consensus.',
+    `Participants: ${presentMemberNames.join(", ") || member.name}.`,
+    `Other members currently present: ${otherNames.join(", ") || "none"}.`,
+    "",
+    "[Completed Round Summaries]",
+    roundSummaries.length > 0 ? roundSummaries.join("\n\n") : "(none yet)",
+    "",
+    "[Latest Interactions]",
+    latestInteractions.length > 0
+      ? latestInteractions.join("\n")
+      : "(none yet)",
+    "",
+    "[Response Rules]",
+    "Use the context above to stay grounded in the ongoing discussion without collapsing into consensus.",
     "Do not prefix your reply with your name or any speaker label (for example, do not write 'Name:').",
-    'Give one concise contribution for this turn unless the user explicitly asks for detailed elaboration.',
-    'You may genuinely agree, disagree, partially agree, or change your mind when the discussion earns it.',
-    'Do not smooth over differences just to sound collaborative.',
-    'If another member already covered your exact point, add only what is materially different.',
-  ].join('\n');
+    "Give one concise contribution for this turn unless the user explicitly asks for detailed elaboration.",
+    "You may genuinely agree, disagree, partially agree, or change your mind when the discussion earns it.",
+    "Do not smooth over differences just to sound collaborative.",
+    "If another member already covered your exact point, add only what is materially different.",
+  ].join("\n");
 }
 
 function stripLeadingSpeakerLabel(text: string, memberName: string): string {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const first = (lines[0] ?? '').trim();
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const first = (lines[0] ?? "").trim();
   const normalized = memberName.trim().toLowerCase();
   const firstLower = first.toLowerCase();
   if (
@@ -748,33 +940,47 @@ function stripLeadingSpeakerLabel(text: string, memberName: string): string {
       firstLower === `${normalized} -` ||
       firstLower === `${normalized} —`)
   ) {
-    const rest = lines.slice(1).join('\n').trim();
+    const rest = lines.slice(1).join("\n").trim();
     return rest || text;
   }
   return text;
 }
 
-function formatResponseModelFallbackToast(memberName: string, attemptedSpec?: string): string {
-  const modelLabel = attemptedSpec?.trim() || 'the assigned response model';
+function formatResponseModelFallbackToast(
+  memberName: string,
+  attemptedSpec?: string,
+): string {
+  const modelLabel = attemptedSpec?.trim() || "the assigned response model";
   return `Model fallback: ${memberName} used the default response model after ${modelLabel} failed.`;
 }
 
 function formatHallResponseModelFallbackToast(
-  events: Array<{ memberName: string; attemptedSpec?: string }>
+  events: Array<{ memberName: string; attemptedSpec?: string }>,
 ): string {
-  const names = Array.from(new Set(events.map((event) => event.memberName))).join(', ');
+  const names = Array.from(
+    new Set(events.map((event) => event.memberName)),
+  ).join(", ");
   const attemptedSpecs = Array.from(
-    new Set(events.map((event) => event.attemptedSpec?.trim()).filter((value): value is string => Boolean(value)))
+    new Set(
+      events
+        .map((event) => event.attemptedSpec?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
   );
   if (attemptedSpecs.length === 0) {
     return `Model fallback: ${names} used the default response model after their assigned models failed.`;
   }
-  return `Model fallback: ${names} used the default response model after assigned models failed (${attemptedSpecs.join(', ')}).`;
+  return `Model fallback: ${names} used the default response model after assigned models failed (${attemptedSpecs.join(", ")}).`;
 }
 
-function selectOpeningRoundMembers(candidates: RoundtableState['candidates']): string[] {
+function selectOpeningRoundMembers(
+  candidates: RoundtableState["candidates"],
+): string[] {
   const shortlisted = candidates
-    .filter((candidate) => candidate.status === 'shortlisted' || candidate.status === 'speaking')
+    .filter(
+      (candidate) =>
+        candidate.status === "shortlisted" || candidate.status === "speaking",
+    )
     .sort((left, right) => left.rank - right.rank)
     .map((candidate) => candidate.memberId);
   if (shortlisted.length > 0) return shortlisted;
@@ -784,24 +990,29 @@ function selectOpeningRoundMembers(candidates: RoundtableState['candidates']): s
 function buildHallRoundAssignments(
   messages: Message[],
   conversationId: string,
-  hallMode?: 'advisory' | 'roundtable'
+  hallMode?: "advisory" | "roundtable",
 ): Map<string, number> {
   const ordered = messages
-    .filter((msg) => msg.conversationId === conversationId && isVisibleMessage(msg) && msg.status !== 'error')
+    .filter(
+      (msg) =>
+        msg.conversationId === conversationId &&
+        isVisibleMessage(msg) &&
+        msg.status !== "error",
+    )
     .sort((a, b) => a.createdAt - b.createdAt);
 
-  if (hallMode === 'roundtable') {
+  if (hallMode === "roundtable") {
     const assignments = new Map<string, number>();
     let fallbackRound = 0;
 
     for (const msg of ordered) {
-      if (msg.role === 'system') continue;
-      if (typeof msg.roundNumber === 'number') {
+      if (msg.role === "system") continue;
+      if (typeof msg.roundNumber === "number") {
         assignments.set(msg.id, msg.roundNumber);
         fallbackRound = Math.max(fallbackRound, msg.roundNumber);
         continue;
       }
-      if (msg.role === 'user') {
+      if (msg.role === "user") {
         fallbackRound += 1;
         assignments.set(msg.id, Math.max(1, fallbackRound));
         continue;
@@ -815,14 +1026,15 @@ function buildHallRoundAssignments(
   const assignments = new Map<string, number>();
   let currentUserRound = 0;
   for (const msg of ordered) {
-    if (msg.role === 'system') continue;
-    if (msg.role === 'user') {
+    if (msg.role === "system") continue;
+    if (msg.role === "user") {
       currentUserRound += 1;
       assignments.set(msg.id, currentUserRound);
       continue;
     }
 
-    const explicitRound = typeof msg.roundNumber === 'number' ? msg.roundNumber : undefined;
+    const explicitRound =
+      typeof msg.roundNumber === "number" ? msg.roundNumber : undefined;
     const fallbackRound = currentUserRound > 0 ? currentUserRound : 1;
     assignments.set(msg.id, explicitRound ?? fallbackRound);
   }
@@ -835,22 +1047,39 @@ function buildHallRoundAwareContext(options: {
   conversationId: string;
   hallMemoryLogs: ConversationMemoryLog[];
   rawRoundTail: number;
-  hallMode?: 'advisory' | 'roundtable';
+  hallMode?: "advisory" | "roundtable";
 }) {
-  const assignments = buildHallRoundAssignments(options.messages, options.conversationId, options.hallMode);
+  const assignments = buildHallRoundAssignments(
+    options.messages,
+    options.conversationId,
+    options.hallMode,
+  );
   const maxRound = Math.max(0, ...Array.from(assignments.values()));
-  const firstRawRound = Math.max(1, maxRound - Math.max(1, options.rawRoundTail) + 1);
+  const firstRawRound = Math.max(
+    1,
+    maxRound - Math.max(1, options.rawRoundTail) + 1,
+  );
 
   const rawMessages = options.messages.filter((msg) => {
     if (msg.conversationId !== options.conversationId) return false;
-    if (!isVisibleMessage(msg) || msg.status === 'error' || msg.role === 'system') return false;
+    if (
+      !isVisibleMessage(msg) ||
+      msg.status === "error" ||
+      msg.role === "system"
+    )
+      return false;
     const round = assignments.get(msg.id);
-    if (typeof round !== 'number') return true;
+    if (typeof round !== "number") return true;
     return round >= firstRawRound;
   });
 
   const roundSummaries = options.hallMemoryLogs
-    .filter((row) => row.scope === 'hall' && typeof row.roundNumber === 'number' && row.roundNumber < firstRawRound)
+    .filter(
+      (row) =>
+        row.scope === "hall" &&
+        typeof row.roundNumber === "number" &&
+        row.roundNumber < firstRawRound,
+    )
     .sort((a, b) => (a.roundNumber ?? 0) - (b.roundNumber ?? 0))
     .map((row) => row.memory?.trim())
     .filter((row): row is string => Boolean(row));
@@ -872,9 +1101,9 @@ async function maybeCompact(
   memoryContext?: {
     memberName: string;
     memberSpecialties: string[];
-  }
+  },
 ): Promise<{ summary: string; activeMessages: Message[] } | null> {
-  if (conversation.kind !== 'chamber') {
+  if (conversation.kind !== "chamber") {
     return null;
   }
   void compactionPolicy;
@@ -885,18 +1114,135 @@ async function maybeCompact(
     councilRepository.listMessages(conversationId),
   ]);
   return {
-    summary: latestLog?.memory ?? '',
+    summary: latestLog?.memory ?? "",
     activeMessages,
   };
 }
 
-function lifecycleToMemberDocuments(rows: KbDocumentLifecycle[]): Array<{ name?: string; displayName?: string }> {
+function lifecycleToMemberDocuments(
+  rows: KbDocumentLifecycle[],
+): Array<{ name?: string; displayName?: string }> {
   return rows
-    .filter((row) => row.indexingStatus === 'completed')
+    .filter((row) => row.indexingStatus === "completed")
     .map((row) => ({
       name: row.kbDocumentName,
       displayName: row.displayName,
     }));
+}
+
+async function deleteLatestTurnFromConversation(
+  set: any,
+  get: () => AppState,
+  conversationId: string,
+  messageId: string,
+  options: {
+    refreshRoundtableAfter?: boolean;
+  } = {},
+) {
+  const state = get();
+  const conversation = state.conversations.find(
+    (item) => item.id === conversationId,
+  );
+  if (!conversation) {
+    throw new Error("Conversation not found.");
+  }
+  if (
+    (state.pendingReplyCount[conversationId] ?? 0) > 0 ||
+    (state.isRouting && state.routingConversationId === conversationId) ||
+    state.closingConversationId === conversationId
+  ) {
+    throw new Error(
+      "Wait for the current reply to finish before changing the latest turn.",
+    );
+  }
+
+  const latestTurn = getLatestVisibleUserTurn(state.messages, conversationId);
+  if (!latestTurn || latestTurn.latestUserMessage.id !== messageId) {
+    throw new Error("Only the latest user turn can be changed.");
+  }
+
+  const result = await councilRepository.deleteLatestTurn({
+    conversationId,
+    expectedLatestUserMessageId: messageId,
+  });
+  const deletedMessageIdSet = new Set(result.deletedMessageIds);
+
+  set((current) => ({
+    conversations: current.conversations.map((item) =>
+      item.id === conversationId
+        ? {
+            ...item,
+            updatedAt: result.updatedAt,
+            lastMessageAt: result.lastMessageAt,
+            guidanceLastReflectedUserTurnCount:
+              item.kind === "chamber"
+                ? result.guidanceLastReflectedUserTurnCount
+                : item.guidanceLastReflectedUserTurnCount,
+            ...(item.kind === "chamber"
+              ? {
+                  timeAwareReentryState: undefined,
+                  timeAwareReentryNoticeSeenAt: undefined,
+                }
+              : {}),
+          }
+        : item,
+    ),
+    messages: current.messages.filter(
+      (message) => !deletedMessageIdSet.has(message.id),
+    ),
+    messageFeedbackByMessageId: removeKeys(
+      current.messageFeedbackByMessageId,
+      deletedMessageIdSet,
+    ),
+    customGuidanceByMessageId: removeKeys(
+      current.customGuidanceByMessageId,
+      deletedMessageIdSet,
+    ),
+    retryingMessageIds: removeKeys(
+      current.retryingMessageIds,
+      deletedMessageIdSet,
+    ),
+    refiningActionByMessageId: removeKeys(
+      current.refiningActionByMessageId,
+      deletedMessageIdSet,
+    ),
+    promptTraceByMessageId: removeKeys(
+      current.promptTraceByMessageId,
+      deletedMessageIdSet,
+    ),
+    promptTraceMessageIdsByConversation: {
+      ...current.promptTraceMessageIdsByConversation,
+      [conversationId]: (
+        current.promptTraceMessageIdsByConversation[conversationId] ?? []
+      ).filter((id) => !deletedMessageIdSet.has(id)),
+    },
+    timeAwareReentryNoticePendingByConversation: removeKey(
+      current.timeAwareReentryNoticePendingByConversation,
+      conversationId,
+    ),
+    roundtableStateByConversation:
+      conversation.kind === "hall" && conversation.hallMode === "roundtable"
+        ? {
+            ...current.roundtableStateByConversation,
+            [conversationId]: null,
+          }
+        : current.roundtableStateByConversation,
+  }));
+
+  if (
+    options.refreshRoundtableAfter &&
+    conversation.kind === "hall" &&
+    conversation.hallMode === "roundtable" &&
+    !conversation.closedAt
+  ) {
+    void get().refreshRoundtableState(conversationId);
+  }
+
+  return {
+    conversation,
+    latestUserMessage: latestTurn.latestUserMessage,
+    deletedMessageIds: result.deletedMessageIds,
+  };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -904,12 +1250,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   isRouting: false,
   routingConversationId: undefined,
   closingConversationId: undefined,
-  themeMode: 'system',
+  themeMode: "system",
   promptDebugMode: readPromptDebugMode(),
   members: [],
   conversations: [],
   messages: [],
-  selectedConversationId: '',
+  selectedConversationId: "",
   pendingReplyCount: {},
   pendingReplyMemberIds: {},
   pendingReplyTicketByConversation: {},
@@ -968,7 +1314,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    const notebook = await councilRepository.getConversationNotebook(conversationId);
+    const notebook =
+      await councilRepository.getConversationNotebook(conversationId);
     set((state) => ({
       conversationNotebooksByConversation: notebook
         ? {
@@ -980,12 +1327,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         force || !(conversationId in state.notebookDraftByConversation)
           ? {
               ...state.notebookDraftByConversation,
-              [conversationId]: notebook?.content ?? '',
+              [conversationId]: notebook?.content ?? "",
             }
           : state.notebookDraftByConversation,
       notebookSaveStateByConversation: {
         ...state.notebookSaveStateByConversation,
-        [conversationId]: 'idle',
+        [conversationId]: "idle",
       },
       notebookErrorByConversation: {
         ...state.notebookErrorByConversation,
@@ -1012,13 +1359,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...Object.fromEntries(
           Object.entries(byConversation).map(([conversationId, notebook]) => [
             conversationId,
-            state.notebookDraftByConversation[conversationId] ?? notebook.content,
-          ])
+            state.notebookDraftByConversation[conversationId] ??
+              notebook.content,
+          ]),
         ),
       },
       notebookLoadedByConversation: {
         ...state.notebookLoadedByConversation,
-        ...Object.fromEntries(notebooks.map((notebook) => [notebook.conversationId, true])),
+        ...Object.fromEntries(
+          notebooks.map((notebook) => [notebook.conversationId, true]),
+        ),
       },
       notebookListLoaded: true,
     }));
@@ -1032,7 +1382,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
       notebookSaveStateByConversation: {
         ...state.notebookSaveStateByConversation,
-        [conversationId]: 'idle',
+        [conversationId]: "idle",
       },
       notebookErrorByConversation: {
         ...state.notebookErrorByConversation,
@@ -1042,11 +1392,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   saveNotebook: async (conversationId) => {
-    const content = get().notebookDraftByConversation[conversationId] ?? '';
+    const content = get().notebookDraftByConversation[conversationId] ?? "";
     set((state) => ({
       notebookSaveStateByConversation: {
         ...state.notebookSaveStateByConversation,
-        [conversationId]: 'saving',
+        [conversationId]: "saving",
       },
       notebookErrorByConversation: {
         ...state.notebookErrorByConversation,
@@ -1055,21 +1405,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const notebook = await councilRepository.saveConversationNotebook(conversationId, content);
+      const notebook = await councilRepository.saveConversationNotebook(
+        conversationId,
+        content,
+      );
       set((state) => ({
         conversationNotebooksByConversation: notebook
           ? {
               ...state.conversationNotebooksByConversation,
               [conversationId]: notebook,
             }
-          : removeKey(state.conversationNotebooksByConversation, conversationId),
+          : removeKey(
+              state.conversationNotebooksByConversation,
+              conversationId,
+            ),
         notebookDraftByConversation: {
           ...state.notebookDraftByConversation,
-          [conversationId]: notebook?.content ?? '',
+          [conversationId]: notebook?.content ?? "",
         },
         notebookSaveStateByConversation: {
           ...state.notebookSaveStateByConversation,
-          [conversationId]: 'saved',
+          [conversationId]: "saved",
         },
         notebookErrorByConversation: {
           ...state.notebookErrorByConversation,
@@ -1084,11 +1440,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => ({
         notebookSaveStateByConversation: {
           ...state.notebookSaveStateByConversation,
-          [conversationId]: 'error',
+          [conversationId]: "error",
         },
         notebookErrorByConversation: {
           ...state.notebookErrorByConversation,
-          [conversationId]: error instanceof Error ? error.message : 'Could not save notebook.',
+          [conversationId]:
+            error instanceof Error ? error.message : "Could not save notebook.",
         },
       }));
       throw error;
@@ -1097,11 +1454,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   appendMessageToNotebook: async (conversationId, text, authorName) => {
     await get().ensureNotebookLoaded(conversationId);
-    const current = get().notebookDraftByConversation[conversationId] ?? '';
+    const current = get().notebookDraftByConversation[conversationId] ?? "";
     const block = authorName ? `${authorName}\n${text}` : text;
-    const appended = current.trim().length > 0 ? `${current}\n\n${block}` : block;
+    const appended =
+      current.trim().length > 0 ? `${current}\n\n${block}` : block;
     get().setNotebookDraft(conversationId, appended);
-    get().showToast('Added to Notebook');
+    get().showToast("Added to Notebook");
     void get().saveNotebook(conversationId);
   },
 
@@ -1109,7 +1467,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       timeAwareReentryNoticePendingByConversation: removeKey(
         state.timeAwareReentryNoticePendingByConversation,
-        conversationId
+        conversationId,
       ),
     }));
   },
@@ -1139,8 +1497,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ promptDebugMode: enabled });
     get().showToast(
       enabled
-        ? 'Prompt debug enabled. New member replies will capture traces.'
-        : 'Prompt debug disabled.'
+        ? "Prompt debug enabled. New member replies will capture traces."
+        : "Prompt debug disabled.",
     );
     const conversationId = get().selectedConversationId;
     if (enabled && conversationId) {
@@ -1150,7 +1508,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   refreshPromptTraceAvailability: async (conversationId) => {
     if (!ENABLE_PROMPT_TRACE_DEBUG) return;
-    const ids = await councilRepository.listPromptTraceMessageIds(conversationId);
+    const ids =
+      await councilRepository.listPromptTraceMessageIds(conversationId);
     set((state) => ({
       promptTraceMessageIdsByConversation: {
         ...state.promptTraceMessageIdsByConversation,
@@ -1193,7 +1552,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         .filter((item) => !item.deletedAt)
         .sort((a, b) => b.updatedAt - a.updatedAt);
 
-      const firstHall = conversations.find((item) => item.kind === 'hall');
+      const firstHall = conversations.find((item) => item.kind === "hall");
 
       set({
         hydrated: true,
@@ -1204,15 +1563,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         roundtableStateByConversation: {},
         roundtablePreparingByConversation: {},
         compactionPolicy: policy,
-        selectedConversationId: firstHall?.id ?? '',
+        selectedConversationId: firstHall?.id ?? "",
       });
 
-      const hallIds = conversations.filter((item) => item.kind === 'hall').map((item) => item.id);
-      await Promise.all(hallIds.map((conversationId) => get().refreshHallParticipants(conversationId)));
+      const hallIds = conversations
+        .filter((item) => item.kind === "hall")
+        .map((item) => item.id);
+      await Promise.all(
+        hallIds.map((conversationId) =>
+          get().refreshHallParticipants(conversationId),
+        ),
+      );
       await Promise.all(
         conversations
-          .filter((item) => item.kind === 'hall' && item.hallMode === 'roundtable')
-          .map((item) => get().refreshRoundtableState(item.id))
+          .filter(
+            (item) => item.kind === "hall" && item.hallMode === "roundtable",
+          )
+          .map((item) => get().refreshRoundtableState(item.id)),
       );
 
       if (firstHall) {
@@ -1229,9 +1596,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectConversation: (conversationId) => {
     set({ selectedConversationId: conversationId });
-    const already = get().messages.some((m) => m.conversationId === conversationId);
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (conversation?.kind === 'hall' && conversation.hallMode === 'roundtable') {
+    const already = get().messages.some(
+      (m) => m.conversationId === conversationId,
+    );
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (
+      conversation?.kind === "hall" &&
+      conversation.hallMode === "roundtable"
+    ) {
       void get().refreshRoundtableState(conversationId);
     }
     if (!already) {
@@ -1265,12 +1639,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       messageFeedbackByMessageId: replaceMessageScopedRecord(
         state.messageFeedbackByMessageId,
         messageIds,
-        mapFeedbackRows(feedbackRows.filter((row) => messageIds.includes(row.messageId)))
+        mapFeedbackRows(
+          feedbackRows.filter((row) => messageIds.includes(row.messageId)),
+        ),
       ),
       customGuidanceByMessageId: replaceMessageScopedRecord(
         state.customGuidanceByMessageId,
         messageIds,
-        mapCustomGuidanceRows(guidanceRows.filter((row) => row.triggerMessageId && messageIds.includes(row.triggerMessageId)))
+        mapCustomGuidanceRows(
+          guidanceRows.filter(
+            (row) =>
+              row.triggerMessageId && messageIds.includes(row.triggerMessageId),
+          ),
+        ),
       ),
     }));
     void get().evaluateChamberCompactionOnLoad(conversationId);
@@ -1282,7 +1663,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadOlderMessages: async (conversationId) => {
     const pagination = get().messagePaginationByConversation[conversationId];
-    if (!pagination || pagination.isLoadingOlder || !pagination.hasOlder || !pagination.continueCursor) {
+    if (
+      !pagination ||
+      pagination.isLoadingOlder ||
+      !pagination.hasOlder ||
+      !pagination.continueCursor
+    ) {
       return;
     }
 
@@ -1307,10 +1693,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       ]);
 
       set((state) => {
-        const existing = state.messages.filter((m) => m.conversationId === conversationId);
-        const keepOther = state.messages.filter((m) => m.conversationId !== conversationId);
-        const combined = [...page.messages, ...existing].sort((a, b) => a.createdAt - b.createdAt);
-        const deduped = combined.filter((message, index, list) => list.findIndex((m) => m.id === message.id) === index);
+        const existing = state.messages.filter(
+          (m) => m.conversationId === conversationId,
+        );
+        const keepOther = state.messages.filter(
+          (m) => m.conversationId !== conversationId,
+        );
+        const combined = [...page.messages, ...existing].sort(
+          (a, b) => a.createdAt - b.createdAt,
+        );
+        const deduped = combined.filter(
+          (message, index, list) =>
+            list.findIndex((m) => m.id === message.id) === index,
+        );
         const dedupedMessageIds = deduped.map((message) => message.id);
         return {
           messages: [...keepOther, ...deduped],
@@ -1325,14 +1720,22 @@ export const useAppStore = create<AppState>((set, get) => ({
           messageFeedbackByMessageId: replaceMessageScopedRecord(
             state.messageFeedbackByMessageId,
             dedupedMessageIds,
-            mapFeedbackRows(feedbackRows.filter((row) => dedupedMessageIds.includes(row.messageId)))
+            mapFeedbackRows(
+              feedbackRows.filter((row) =>
+                dedupedMessageIds.includes(row.messageId),
+              ),
+            ),
           ),
           customGuidanceByMessageId: replaceMessageScopedRecord(
             state.customGuidanceByMessageId,
             dedupedMessageIds,
             mapCustomGuidanceRows(
-              guidanceRows.filter((row) => row.triggerMessageId && dedupedMessageIds.includes(row.triggerMessageId))
-            )
+              guidanceRows.filter(
+                (row) =>
+                  row.triggerMessageId &&
+                  dedupedMessageIds.includes(row.triggerMessageId),
+              ),
+            ),
           ),
         };
       });
@@ -1353,8 +1756,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   evaluateChamberCompactionOnLoad: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "chamber") return;
     if (get().compactionCheckInFlightByConversation[conversationId]) return;
 
     set((state) => ({
@@ -1372,13 +1777,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       ]);
       set({ compactionPolicy: policy });
       set((state) => ({
-        ...patchConversationEverywhere(state, conversationId, { updatedAt: Date.now() }),
+        ...patchConversationEverywhere(state, conversationId, {
+          updatedAt: Date.now(),
+        }),
         chamberMemoryByConversation: {
           ...state.chamberMemoryByConversation,
-          [conversationId]: latestLog?.memory ?? '',
+          [conversationId]: latestLog?.memory ?? "",
         },
         messages: [
-          ...state.messages.filter((item) => item.conversationId !== conversationId),
+          ...state.messages.filter(
+            (item) => item.conversationId !== conversationId,
+          ),
           ...activeMessages,
         ],
       }));
@@ -1395,8 +1804,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   refreshRoundtableState: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (
+      !conversation ||
+      conversation.kind !== "hall" ||
+      conversation.hallMode !== "roundtable" ||
+      conversation.closedAt
+    ) {
       return;
     }
 
@@ -1410,12 +1826,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   continueRoundtableRound: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (
+      !conversation ||
+      conversation.kind !== "hall" ||
+      conversation.hallMode !== "roundtable" ||
+      conversation.closedAt
+    ) {
       return;
     }
     const snapshot = get().roundtableStateByConversation[conversationId];
-    if (snapshot && (snapshot.round.status === 'awaiting_user' || snapshot.round.status === 'in_progress')) {
+    if (
+      snapshot &&
+      (snapshot.round.status === "awaiting_user" ||
+        snapshot.round.status === "in_progress")
+    ) {
       return;
     }
 
@@ -1429,7 +1856,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const next = await prepareRoundtableRound({
         conversationId,
-        trigger: 'continue',
+        trigger: "continue",
       });
 
       set((state) => ({
@@ -1449,13 +1876,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   speakNextRoundtableMember: async (conversationId, memberId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (
+      !conversation ||
+      conversation.kind !== "hall" ||
+      conversation.hallMode !== "roundtable" ||
+      conversation.closedAt
+    ) {
       return;
     }
 
     const snapshot = get().roundtableStateByConversation[conversationId];
-    if (!snapshot || snapshot.round.status !== 'awaiting_user') {
+    if (!snapshot || snapshot.round.status !== "awaiting_user") {
       return;
     }
 
@@ -1463,11 +1897,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (snapshot.spokenMemberIds.includes(memberId)) {
       return;
     }
-    const candidate = snapshot.candidates.find((item) => item.memberId === memberId);
+    const candidate = snapshot.candidates.find(
+      (item) => item.memberId === memberId,
+    );
     if (!candidate) {
       return;
     }
-    const ready = candidate.status === 'shortlisted' || candidate.status === 'speaking';
+    const ready =
+      candidate.status === "shortlisted" || candidate.status === "speaking";
     const force = !ready;
     const pendingTicket = createPendingReplyTicket();
 
@@ -1475,7 +1912,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       conversationId,
       roundNumber,
       speakingMemberId: memberId,
-      selectedBy: force ? 'user_manual_fallback' : candidate.selectedBy,
+      selectedBy: force ? "user_manual_fallback" : candidate.selectedBy,
     });
 
     set((state) => ({
@@ -1487,8 +1924,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
 
     try {
-      const membersById = new Map(get().members.map((member) => [member.id, member]));
-      const memberName = membersById.get(memberId)?.name ?? 'Member';
+      const membersById = new Map(
+        get().members.map((member) => [member.id, member]),
+      );
+      const memberName = membersById.get(memberId)?.name ?? "Member";
       let reply: Message;
       let replyPromptTraceDraft: PromptTraceDraft | undefined;
 
@@ -1501,27 +1940,33 @@ export const useAppStore = create<AppState>((set, get) => ({
           debugPromptTrace: get().promptDebugMode,
         });
         if (result.fallbackUsed) {
-          get().showToast(formatResponseModelFallbackToast(memberName, result.attemptedResponseModelSpec));
+          get().showToast(
+            formatResponseModelFallbackToast(
+              memberName,
+              result.attemptedResponseModelSpec,
+            ),
+          );
         }
         replyPromptTraceDraft = result.promptTraceDraft;
         reply = buildMessage({
           conversationId,
-          role: 'member',
+          role: "member",
           authorMemberId: memberId,
           content: stripLeadingSpeakerLabel(result.answer, memberName),
-          status: 'sent',
+          status: "sent",
           roundNumber,
           roundIntent: result.intent,
           roundTargetMemberId: result.targetMemberId,
         });
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Request failed';
+        const errorMessage =
+          error instanceof Error ? error.message : "Request failed";
         reply = buildMessage({
           conversationId,
-          role: 'member',
+          role: "member",
           authorMemberId: memberId,
           content: `${memberName} could not speak in this round.`,
-          status: 'error',
+          status: "error",
           roundNumber,
           error: errorMessage,
         });
@@ -1537,10 +1982,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         messages: [{ ...reply, promptTraceDraft: replyPromptTraceDraft }],
       });
       set((state) => ({
-        messages: replaceOptimisticMessages(state.messages, [reply], persistedReplies),
+        messages: replaceOptimisticMessages(
+          state.messages,
+          [reply],
+          persistedReplies,
+        ),
         promptTraceMessageIdsByConversation:
           replyPromptTraceDraft && persistedReplies[0]
-            ? addPromptTraceMessageId(state, conversationId, persistedReplies[0].id)
+            ? addPromptTraceMessageId(
+                state,
+                conversationId,
+                persistedReplies[0].id,
+              )
             : state.promptTraceMessageIdsByConversation,
       }));
 
@@ -1556,7 +2009,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
       }));
 
-      if (refreshed.round.status === 'completed') {
+      if (refreshed.round.status === "completed") {
         void get().syncHallRoundSummaries(conversationId);
       }
     } catch (error) {
@@ -1569,13 +2022,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   finishRoundtableRound: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.hallMode !== 'roundtable' || conversation.closedAt) {
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (
+      !conversation ||
+      conversation.kind !== "hall" ||
+      conversation.hallMode !== "roundtable" ||
+      conversation.closedAt
+    ) {
       return;
     }
 
     const snapshot = get().roundtableStateByConversation[conversationId];
-    if (!snapshot || (snapshot.round.status !== 'awaiting_user' && snapshot.round.status !== 'in_progress')) {
+    if (
+      !snapshot ||
+      (snapshot.round.status !== "awaiting_user" &&
+        snapshot.round.status !== "in_progress")
+    ) {
       return;
     }
 
@@ -1596,18 +2060,23 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   refreshHallParticipants: async (conversationId) => {
     await councilRepository.ensureHallParticipantResponseSlots(conversationId);
-    const participants = await councilRepository.listParticipants(conversationId);
+    const participants =
+      await councilRepository.listParticipants(conversationId);
     set((state) => ({
       hallParticipantsByConversation: {
         ...state.hallParticipantsByConversation,
-        [conversationId]: participants.map((participant) => participant.memberId),
+        [conversationId]: participants.map(
+          (participant) => participant.memberId,
+        ),
       },
     }));
   },
 
   syncHallRoundSummaries: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall') return;
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "hall") return;
 
     const state = get();
     const sourceMessages = state.messages
@@ -1615,8 +2084,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         (message) =>
           message.conversationId === conversationId &&
           isVisibleMessage(message) &&
-          message.status !== 'error' &&
-          message.role !== 'system'
+          message.status !== "error" &&
+          message.role !== "system",
       )
       .sort((a, b) => a.createdAt - b.createdAt);
     if (sourceMessages.length === 0) return;
@@ -1624,7 +2093,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const assignments = buildHallRoundAssignments(
       sourceMessages,
       conversationId,
-      conversation.hallMode ?? 'advisory'
+      conversation.hallMode ?? "advisory",
     );
     const maxRound = Math.max(0, ...Array.from(assignments.values()));
     const rawTail = Math.max(1, state.compactionPolicy.hallRawRoundTail);
@@ -1632,29 +2101,39 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (summarizeUntilRound <= 0) return;
 
     const [existingLogs, counts] = await Promise.all([
-      councilRepository.listMemoryLogsByScope(conversationId, 'hall'),
+      councilRepository.listMemoryLogsByScope(conversationId, "hall"),
       councilRepository.getMessageCounts(conversationId),
     ]);
 
     const existingRounds = new Set(
       existingLogs
-        .filter((row) => typeof row.roundNumber === 'number' && row.memory)
-        .map((row) => row.roundNumber as number)
+        .filter((row) => typeof row.roundNumber === "number" && row.memory)
+        .map((row) => row.roundNumber as number),
     );
-    const membersById = new Map(get().members.map((member) => [member.id, member]));
+    const membersById = new Map(
+      get().members.map((member) => [member.id, member]),
+    );
 
-    for (let roundNumber = 1; roundNumber <= summarizeUntilRound; roundNumber += 1) {
+    for (
+      let roundNumber = 1;
+      roundNumber <= summarizeUntilRound;
+      roundNumber += 1
+    ) {
       if (existingRounds.has(roundNumber)) continue;
 
-      const roundMessages = sourceMessages.filter((message) => assignments.get(message.id) === roundNumber);
-      const speakerMessages = roundMessages.filter((message) => message.role === 'member');
+      const roundMessages = sourceMessages.filter(
+        (message) => assignments.get(message.id) === roundNumber,
+      );
+      const speakerMessages = roundMessages.filter(
+        (message) => message.role === "member",
+      );
       if (speakerMessages.length === 0) continue;
 
       const transcript = roundMessages.map((message) => ({
         author:
-          message.role === 'user'
-            ? 'User'
-            : (membersById.get(message.authorMemberId ?? '')?.name ?? 'Member'),
+          message.role === "user"
+            ? "User"
+            : (membersById.get(message.authorMemberId ?? "")?.name ?? "Member"),
         content: message.content,
       }));
 
@@ -1679,7 +2158,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           hallSummaryFailureCountByConversation: {
             ...current.hallSummaryFailureCountByConversation,
-            [conversationId]: (current.hallSummaryFailureCountByConversation[conversationId] ?? 0) + 1,
+            [conversationId]:
+              (current.hallSummaryFailureCountByConversation[conversationId] ??
+                0) + 1,
           },
         }));
       }
@@ -1687,12 +2168,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createConversation: async (type) => {
-    if (type !== 'hall') {
-      throw new Error('Use createChamberThread for chamber conversations');
+    if (type !== "hall") {
+      throw new Error("Use createChamberThread for chamber conversations");
     }
 
     const created = await councilRepository.createHall({
-      title: 'New Hall',
+      title: "New Hall",
       memberIds: [],
     });
 
@@ -1709,44 +2190,75 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setChamberResponseMode: async (conversationId, mode) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
-    const updated = await councilRepository.setChamberResponseMode(conversationId, mode);
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "chamber") return;
+    const updated = await councilRepository.setChamberResponseMode(
+      conversationId,
+      mode,
+    );
     set((state) => ({
-      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      conversations: state.conversations.map((item) =>
+        item.id === conversationId ? updated : item,
+      ),
     }));
   },
 
   setChamberTimeAwareReentryEnabled: async (conversationId, enabled) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
-    const updated = await councilRepository.setChamberTimeAwareReentryEnabled(conversationId, enabled);
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "chamber") return;
+    const updated = await councilRepository.setChamberTimeAwareReentryEnabled(
+      conversationId,
+      enabled,
+    );
     set((state) => ({
-      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      conversations: state.conversations.map((item) =>
+        item.id === conversationId ? updated : item,
+      ),
       timeAwareReentryNoticePendingByConversation: enabled
         ? state.timeAwareReentryNoticePendingByConversation
-        : removeKey(state.timeAwareReentryNoticePendingByConversation, conversationId),
+        : removeKey(
+            state.timeAwareReentryNoticePendingByConversation,
+            conversationId,
+          ),
     }));
   },
 
   setChamberPersonalSourcesEnabled: async (conversationId, enabled) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
-    const updated = await councilRepository.setChamberPersonalSourcesEnabled(conversationId, enabled);
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "chamber") return;
+    const updated = await councilRepository.setChamberPersonalSourcesEnabled(
+      conversationId,
+      enabled,
+    );
     set((state) => ({
-      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      conversations: state.conversations.map((item) =>
+        item.id === conversationId ? updated : item,
+      ),
     }));
   },
 
   markChamberTimeAwareReentryNoticeSeen: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
-    const updated = await councilRepository.markChamberTimeAwareReentryNoticeSeen(conversationId);
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "chamber") return;
+    const updated =
+      await councilRepository.markChamberTimeAwareReentryNoticeSeen(
+        conversationId,
+      );
     set((state) => ({
-      conversations: state.conversations.map((item) => (item.id === conversationId ? updated : item)),
+      conversations: state.conversations.map((item) =>
+        item.id === conversationId ? updated : item,
+      ),
       timeAwareReentryNoticePendingByConversation: removeKey(
         state.timeAwareReentryNoticePendingByConversation,
-        conversationId
+        conversationId,
       ),
     }));
   },
@@ -1754,10 +2266,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   renameConversation: async (conversationId, title) => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const updated = await councilRepository.renameConversation(conversationId, trimmed);
+    const updated = await councilRepository.renameConversation(
+      conversationId,
+      trimmed,
+    );
     set((state) => ({
       conversations: state.conversations.map((item) =>
-        item.id === conversationId ? updated : item
+        item.id === conversationId ? updated : item,
       ),
     }));
   },
@@ -1768,17 +2283,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       const conversationMessageIds = new Set(
         state.messages
           .filter((message) => message.conversationId === conversationId)
-          .map((message) => message.id)
+          .map((message) => message.id),
       );
-      const nextConversations = state.conversations.filter((item) => item.id !== conversationId);
-      const { [conversationId]: _removed, ...nextParticipants } = state.hallParticipantsByConversation;
-      const { [conversationId]: _removedRoundtable, ...nextRoundtable } = state.roundtableStateByConversation;
-      const { [conversationId]: _removedPreparing, ...nextPreparing } = state.roundtablePreparingByConversation;
+      const nextConversations = state.conversations.filter(
+        (item) => item.id !== conversationId,
+      );
+      const { [conversationId]: _removed, ...nextParticipants } =
+        state.hallParticipantsByConversation;
+      const { [conversationId]: _removedRoundtable, ...nextRoundtable } =
+        state.roundtableStateByConversation;
+      const { [conversationId]: _removedPreparing, ...nextPreparing } =
+        state.roundtablePreparingByConversation;
       const nextFeedback = Object.fromEntries(
-        Object.entries(state.messageFeedbackByMessageId).filter(([messageId]) => !conversationMessageIds.has(messageId))
+        Object.entries(state.messageFeedbackByMessageId).filter(
+          ([messageId]) => !conversationMessageIds.has(messageId),
+        ),
       );
       const nextCustomGuidance = Object.fromEntries(
-        Object.entries(state.customGuidanceByMessageId).filter(([messageId]) => !conversationMessageIds.has(messageId))
+        Object.entries(state.customGuidanceByMessageId).filter(
+          ([messageId]) => !conversationMessageIds.has(messageId),
+        ),
       );
       return {
         conversations: nextConversations,
@@ -1786,24 +2310,45 @@ export const useAppStore = create<AppState>((set, get) => ({
         hallParticipantsByConversation: nextParticipants,
         roundtableStateByConversation: nextRoundtable,
         roundtablePreparingByConversation: nextPreparing,
-        conversationNotebooksByConversation: removeKey(state.conversationNotebooksByConversation, conversationId),
-        notebookDraftByConversation: removeKey(state.notebookDraftByConversation, conversationId),
-        notebookSaveStateByConversation: removeKey(state.notebookSaveStateByConversation, conversationId),
-        notebookErrorByConversation: removeKey(state.notebookErrorByConversation, conversationId),
-        notebookLoadedByConversation: removeKey(state.notebookLoadedByConversation, conversationId),
+        conversationNotebooksByConversation: removeKey(
+          state.conversationNotebooksByConversation,
+          conversationId,
+        ),
+        notebookDraftByConversation: removeKey(
+          state.notebookDraftByConversation,
+          conversationId,
+        ),
+        notebookSaveStateByConversation: removeKey(
+          state.notebookSaveStateByConversation,
+          conversationId,
+        ),
+        notebookErrorByConversation: removeKey(
+          state.notebookErrorByConversation,
+          conversationId,
+        ),
+        notebookLoadedByConversation: removeKey(
+          state.notebookLoadedByConversation,
+          conversationId,
+        ),
         messageFeedbackByMessageId: nextFeedback,
         customGuidanceByMessageId: nextCustomGuidance,
         selectedConversationId:
           state.selectedConversationId === conversationId
-            ? (nextConversations[0]?.id ?? '')
+            ? (nextConversations[0]?.id ?? "")
             : state.selectedConversationId,
       };
     });
   },
 
   closeHall: async (conversationId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall' || conversation.closedAt) {
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (
+      !conversation ||
+      conversation.kind !== "hall" ||
+      conversation.closedAt
+    ) {
       return;
     }
 
@@ -1811,13 +2356,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const result = await councilRepository.closeHall(conversationId);
       set((state) => ({
-        ...patchConversationEverywhere(state, conversationId, result.conversation),
+        ...patchConversationEverywhere(
+          state,
+          conversationId,
+          result.conversation,
+        ),
         messages: [...state.messages, result.closingMessage],
         closingConversationId: undefined,
         isRouting:
-          state.routingConversationId === conversationId ? false : state.isRouting,
+          state.routingConversationId === conversationId
+            ? false
+            : state.isRouting,
         routingConversationId:
-          state.routingConversationId === conversationId ? undefined : state.routingConversationId,
+          state.routingConversationId === conversationId
+            ? undefined
+            : state.routingConversationId,
         ...clearPendingReplies(state, conversationId),
         roundtableStateByConversation: {
           ...state.roundtableStateByConversation,
@@ -1830,7 +2383,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     } catch (error) {
       set({ closingConversationId: undefined });
-      get().showToast(error instanceof Error ? error.message : 'Could not close this table.');
+      get().showToast(
+        error instanceof Error ? error.message : "Could not close this table.",
+      );
       throw error;
     }
   },
@@ -1842,7 +2397,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const exists = state.conversations.some((item) => item.id === created.id);
       return {
         conversations: exists
-          ? state.conversations.map((item) => (item.id === created.id ? created : item))
+          ? state.conversations.map((item) =>
+              item.id === created.id ? created : item,
+            )
           : [created, ...state.conversations],
         selectedConversationId: created.id,
       };
@@ -1859,13 +2416,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set((state) => {
       const conversation = result.conversation;
-      const exists = state.conversations.some((item) => item.id === conversation.id);
+      const exists = state.conversations.some(
+        (item) => item.id === conversation.id,
+      );
       return {
         conversations: exists
-          ? state.conversations.map((item) => (item.id === conversation.id ? conversation : item))
+          ? state.conversations.map((item) =>
+              item.id === conversation.id ? conversation : item,
+            )
           : [conversation, ...state.conversations],
         messages: [
-          ...state.messages.filter((message) => message.conversationId !== conversation.id),
+          ...state.messages.filter(
+            (message) => message.conversationId !== conversation.id,
+          ),
           ...result.messages,
         ],
         chamberMemoryByConversation: {
@@ -1886,12 +2449,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   sendHallDraftMessage: async (
     text,
-    hallMode = 'advisory',
-    routingMode: 'auto' | 'manual' = 'auto',
-    manualMemberIds: string[] = []
+    hallMode = "advisory",
+    routingMode: "auto" | "manual" = "auto",
+    manualMemberIds: string[] = [],
   ) => {
     const created = await councilRepository.createHall({
-      title: 'New Hall',
+      title: "New Hall",
       memberIds: [],
       hallMode,
     });
@@ -1907,15 +2470,21 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const sendResult = await get().sendUserMessage(created.id, text, []);
     // Generate member replies in background so navigation + first bubble feel immediate.
-    void get().generateDeterministicReplies(created.id, text, [], sendResult?.previousActiveMessageAt, {
-      mode: routingMode,
-      memberIds: manualMemberIds,
-    });
+    void get().generateDeterministicReplies(
+      created.id,
+      text,
+      [],
+      sendResult?.previousActiveMessageAt,
+      {
+        mode: routingMode,
+        memberIds: manualMemberIds,
+      },
+    );
     // Generate a smarter hall title from the first user message without blocking UX.
     void suggestHallTitle({ message: text })
       .then((result) => {
         const nextTitle = result.title?.trim();
-        if (!nextTitle || nextTitle.toLowerCase() === 'new hall') return;
+        if (!nextTitle || nextTitle.toLowerCase() === "new hall") return;
         return get().renameConversation(created.id, nextTitle);
       })
       .catch(() => undefined);
@@ -1924,14 +2493,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   sendMessageToChamberMember: async (memberId, text) => {
-    let conversation = getLatestChamberThreadForMember(get().conversations, memberId);
+    let conversation = getLatestChamberThreadForMember(
+      get().conversations,
+      memberId,
+    );
     if (!conversation) {
       conversation = await councilRepository.createChamberThread(memberId);
       set((state) => {
-        const exists = state.conversations.some((item) => item.id === conversation!.id);
+        const exists = state.conversations.some(
+          (item) => item.id === conversation!.id,
+        );
         return {
           conversations: exists
-            ? state.conversations.map((item) => (item.id === conversation!.id ? conversation! : item))
+            ? state.conversations.map((item) =>
+                item.id === conversation!.id ? conversation! : item,
+              )
             : [conversation!, ...state.conversations],
           selectedConversationId: conversation!.id,
         };
@@ -1943,7 +2519,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       conversation.id,
       text,
       [],
-      sendResult?.previousActiveMessageAt
+      sendResult?.previousActiveMessageAt,
     );
 
     return conversation;
@@ -1951,33 +2527,35 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   sendUserMessage: async (conversationId, text, mentionedMemberIds = []) => {
     const state = get();
-    const conversation = state.conversations.find((item) => item.id === conversationId);
+    const conversation = state.conversations.find(
+      (item) => item.id === conversationId,
+    );
     if (!conversation) return undefined;
     if (isClosedHallConversation(conversation)) {
-      get().showToast('This table is closed.');
+      get().showToast("This table is closed.");
       return undefined;
     }
     const previousActiveMessageAt =
-      conversation.kind === 'chamber'
+      conversation.kind === "chamber"
         ? getLatestActiveNonSystemMessageAt(state.messages, conversationId)
         : undefined;
     const hasUserMessages = state.messages.some(
       (message) =>
         message.conversationId === conversationId &&
-        message.role === 'user' &&
-        !message.deletedAt
+        message.role === "user" &&
+        !message.deletedAt,
     );
     const shouldAutoTitle =
-      conversation.kind === 'chamber' &&
-      conversation.title.trim().toLowerCase() === 'new thread' &&
+      conversation.kind === "chamber" &&
+      conversation.title.trim().toLowerCase() === "new thread" &&
       !hasUserMessages;
     const nextAdvisoryUserRound =
       state.messages.filter(
         (msg) =>
           msg.conversationId === conversationId &&
-          msg.role === 'user' &&
-          msg.status !== 'error' &&
-          isVisibleMessage(msg)
+          msg.role === "user" &&
+          msg.status !== "error" &&
+          isVisibleMessage(msg),
       ).length + 1;
     const maxExplicitRound = Math.max(
       0,
@@ -1985,24 +2563,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         .filter(
           (msg) =>
             msg.conversationId === conversationId &&
-            msg.status !== 'error' &&
+            msg.status !== "error" &&
             isVisibleMessage(msg) &&
-            typeof msg.roundNumber === 'number'
+            typeof msg.roundNumber === "number",
         )
-        .map((msg) => msg.roundNumber as number)
+        .map((msg) => msg.roundNumber as number),
     );
-    const snapshotRound = state.roundtableStateByConversation[conversationId]?.round.roundNumber ?? 0;
+    const snapshotRound =
+      state.roundtableStateByConversation[conversationId]?.round.roundNumber ??
+      0;
     const hallRoundNumber =
-      conversation.kind === 'hall'
-        ? conversation.hallMode === 'roundtable'
+      conversation.kind === "hall"
+        ? conversation.hallMode === "roundtable"
           ? Math.max(0, maxExplicitRound, snapshotRound) + 1
           : Math.max(1, nextAdvisoryUserRound)
         : undefined;
     const message = buildMessage({
       conversationId,
-      role: 'user',
+      role: "user",
       content: text,
-      status: 'sent',
+      status: "sent",
       roundNumber: hallRoundNumber,
     });
 
@@ -2016,23 +2596,70 @@ export const useAppStore = create<AppState>((set, get) => ({
       messages: [message],
     });
     set((state) => ({
-      messages: replaceOptimisticMessages(state.messages, [message], persistedMessages),
+      messages: replaceOptimisticMessages(
+        state.messages,
+        [message],
+        persistedMessages,
+      ),
     }));
 
     if (shouldAutoTitle) {
       void suggestChamberTitle({ message: text })
         .then((result) => {
           const nextTitle = result.title?.trim();
-          if (!nextTitle || nextTitle.toLowerCase() === 'new thread') return;
-          const latest = get().conversations.find((item) => item.id === conversationId);
-          if (!latest || latest.kind !== 'chamber' || latest.deletedAt) return;
-          if (latest.title.trim().toLowerCase() !== 'new thread') return;
+          if (!nextTitle || nextTitle.toLowerCase() === "new thread") return;
+          const latest = get().conversations.find(
+            (item) => item.id === conversationId,
+          );
+          if (!latest || latest.kind !== "chamber" || latest.deletedAt) return;
+          if (latest.title.trim().toLowerCase() !== "new thread") return;
           return get().renameConversation(conversationId, nextTitle);
         })
         .catch(() => undefined);
     }
 
-    return { messageId: persistedMessages[0]?.id ?? message.id, previousActiveMessageAt };
+    return {
+      messageId: persistedMessages[0]?.id ?? message.id,
+      previousActiveMessageAt,
+    };
+  },
+
+  deleteLatestUserTurn: async (conversationId, messageId) => {
+    await deleteLatestTurnFromConversation(
+      set,
+      get,
+      conversationId,
+      messageId,
+      {
+        refreshRoundtableAfter: true,
+      },
+    );
+    get().showToast("Latest turn deleted.");
+  },
+
+  editLatestUserTurn: async (
+    conversationId,
+    messageId,
+    text,
+    mentionedMemberIds = [],
+  ) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error("Message cannot be empty.");
+    }
+
+    await deleteLatestTurnFromConversation(set, get, conversationId, messageId);
+    const sendResult = await get().sendUserMessage(
+      conversationId,
+      trimmed,
+      mentionedMemberIds,
+    );
+    void get().generateDeterministicReplies(
+      conversationId,
+      trimmed,
+      mentionedMemberIds,
+      sendResult?.previousActiveMessageAt,
+    );
   },
 
   generateDeterministicReplies: async (
@@ -2040,34 +2667,42 @@ export const useAppStore = create<AppState>((set, get) => ({
     text,
     mentionedMemberIds = [],
     previousActiveMessageAt,
-    routingOverride = { mode: 'auto' as const, memberIds: [] }
+    routingOverride = { mode: "auto" as const, memberIds: [] },
   ) => {
     const state = get();
     const pendingTicket = createPendingReplyTicket();
-    let conversation = state.conversations.find((item) => item.id === conversationId);
+    let conversation = state.conversations.find(
+      (item) => item.id === conversationId,
+    );
     if (!conversation) return;
     if (isClosedHallConversation(conversation)) {
       return;
     }
     let activeTimeAwareReentryState =
-      conversation.kind === 'chamber' ? conversation.timeAwareReentryState : undefined;
+      conversation.kind === "chamber"
+        ? conversation.timeAwareReentryState
+        : undefined;
     const currentHallRoundNumber =
-      conversation.kind === 'hall'
+      conversation.kind === "hall"
         ? Math.max(
-          1,
-          state.messages.filter(
-            (message) =>
-              message.conversationId === conversationId &&
-              message.role === 'user' &&
-              message.status !== 'error' &&
-              isVisibleMessage(message)
-          ).length
-        )
+            1,
+            state.messages.filter(
+              (message) =>
+                message.conversationId === conversationId &&
+                message.role === "user" &&
+                message.status !== "error" &&
+                isVisibleMessage(message),
+            ).length,
+          )
         : undefined;
 
-    if (conversation.kind === 'hall' && conversation.hallMode === 'roundtable') {
+    if (
+      conversation.kind === "hall" &&
+      conversation.hallMode === "roundtable"
+    ) {
       const membersMap = new Map(state.members.map((m) => [m.id, m]));
-      const participantIds = state.hallParticipantsByConversation[conversationId] ?? [];
+      const participantIds =
+        state.hallParticipantsByConversation[conversationId] ?? [];
       let activeParticipantIds = participantIds.filter((memberId) => {
         const member = membersMap.get(memberId);
         return Boolean(member && !member.deletedAt);
@@ -2077,15 +2712,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (isOpeningRound) {
         const candidates = state.members.filter((member) => !member.deletedAt);
         let routedIds: string[] = [];
-        let routingSource: MessageRouting['source'] = 'fallback';
+        let routingSource: MessageRouting["source"] = "fallback";
 
-        if (routingOverride.mode === 'manual') {
+        if (routingOverride.mode === "manual") {
           const allowed = new Set(candidates.map((member) => member.id));
-          routedIds = (routingOverride.memberIds ?? []).filter((memberId) => allowed.has(memberId));
+          routedIds = (routingOverride.memberIds ?? []).filter((memberId) =>
+            allowed.has(memberId),
+          );
         } else {
           set({ isRouting: true, routingConversationId: conversationId });
           try {
-            const dynamicMaxSelections = Math.max(1, Math.min(8, Math.ceil(candidates.length * 0.5)));
+            const dynamicMaxSelections = Math.max(
+              1,
+              Math.min(8, Math.ceil(candidates.length * 0.5)),
+            );
             const routed = await routeHallMembers({
               message: text,
               conversationId,
@@ -2094,14 +2734,18 @@ export const useAppStore = create<AppState>((set, get) => ({
             routedIds = routed.chosenMemberIds;
             routingSource = routed.source;
           } catch {
-            routedIds = routeToMembers(text, candidates.map((c) => c.id), conversationId);
-            routingSource = 'fallback';
+            routedIds = routeToMembers(
+              text,
+              candidates.map((c) => c.id),
+              conversationId,
+            );
+            routingSource = "fallback";
           } finally {
             set({ isRouting: false, routingConversationId: undefined });
           }
         }
 
-        if (routedIds.length === 0 && routingOverride.mode === 'manual') {
+        if (routedIds.length === 0 && routingOverride.mode === "manual") {
           set((current) => ({
             ...clearPendingReplies(current, conversationId),
           }));
@@ -2111,13 +2755,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (routedIds.length === 0) {
           routedIds = routeToMembers(
             text,
-            state.members.filter((member) => !member.deletedAt).map((member) => member.id),
-            conversationId
+            state.members
+              .filter((member) => !member.deletedAt)
+              .map((member) => member.id),
+            conversationId,
           );
-          routingSource = 'fallback';
+          routingSource = "fallback";
         }
 
-        await Promise.all(routedIds.map((memberId) => councilRepository.addHallParticipant(conversationId, memberId)));
+        await Promise.all(
+          routedIds.map((memberId) =>
+            councilRepository.addHallParticipant(conversationId, memberId),
+          ),
+        );
 
         activeParticipantIds = routedIds;
         set((current) => ({
@@ -2129,12 +2779,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         const routeMessage = buildMessage({
           conversationId,
-          role: 'system',
+          role: "system",
           content:
-            routingOverride.mode === 'manual'
-              ? `Manually routed to ${routedIds.map((id) => membersMap.get(id)?.name ?? id).join(', ')}`
-              : `Routed to ${routedIds.map((id) => membersMap.get(id)?.name ?? id).join(', ')}`,
-          status: 'sent',
+            routingOverride.mode === "manual"
+              ? `Manually routed to ${routedIds.map((id) => membersMap.get(id)?.name ?? id).join(", ")}`
+              : `Routed to ${routedIds.map((id) => membersMap.get(id)?.name ?? id).join(", ")}`,
+          status: "sent",
           routing: { memberIds: routedIds, source: routingSource },
         });
 
@@ -2148,7 +2798,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           messages: [routeMessage],
         });
         set((current) => ({
-          messages: replaceOptimisticMessages(current.messages, [routeMessage], persistedRouteMessages),
+          messages: replaceOptimisticMessages(
+            current.messages,
+            [routeMessage],
+            persistedRouteMessages,
+          ),
         }));
       }
 
@@ -2169,8 +2823,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       try {
         const nextRound = await prepareRoundtableRound({
           conversationId,
-          trigger: 'user_message',
-          mentionedMemberIds: mentionedMemberIds.filter((memberId) => activeParticipantIds.includes(memberId)),
+          trigger: "user_message",
+          mentionedMemberIds: mentionedMemberIds.filter((memberId) =>
+            activeParticipantIds.includes(memberId),
+          ),
         });
 
         set((current) => ({
@@ -2180,8 +2836,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           },
         }));
 
-        if (isOpeningRound && nextRound.round.status === 'awaiting_user') {
-          const openingSpeakerIds = selectOpeningRoundMembers(nextRound.candidates);
+        if (isOpeningRound && nextRound.round.status === "awaiting_user") {
+          const openingSpeakerIds = selectOpeningRoundMembers(
+            nextRound.candidates,
+          );
           if (openingSpeakerIds.length > 0) {
             const inProgress = await markRoundtableInProgress({
               conversationId,
@@ -2193,20 +2851,32 @@ export const useAppStore = create<AppState>((set, get) => ({
                 ...current.roundtableStateByConversation,
                 [conversationId]: inProgress,
               },
-              ...beginPendingReplies(current, conversationId, openingSpeakerIds, pendingTicket),
+              ...beginPendingReplies(
+                current,
+                conversationId,
+                openingSpeakerIds,
+                pendingTicket,
+              ),
             }));
 
-            const membersById = new Map(get().members.map((member) => [member.id, member]));
+            const membersById = new Map(
+              get().members.map((member) => [member.id, member]),
+            );
             const openingMessages = get().messages.filter(
               (message) =>
                 message.conversationId === conversationId &&
                 isVisibleMessage(message) &&
-                message.status !== 'error'
+                message.status !== "error",
             );
             try {
               const openingSourceUserMessage = [...openingMessages]
                 .reverse()
-                .find((message) => message.role === 'user' && message.status !== 'error' && isVisibleMessage(message));
+                .find(
+                  (message) =>
+                    message.role === "user" &&
+                    message.status !== "error" &&
+                    isVisibleMessage(message),
+                );
               const openingResults = await chatRoundtableSpeakers({
                 conversationId,
                 roundNumber: nextRound.round.roundNumber,
@@ -2215,40 +2885,45 @@ export const useAppStore = create<AppState>((set, get) => ({
               const openingFallbackEvents = openingResults
                 .filter((result) => result.fallbackUsed)
                 .map((result) => ({
-                  memberName: membersById.get(result.memberId)?.name ?? 'Member',
+                  memberName:
+                    membersById.get(result.memberId)?.name ?? "Member",
                   attemptedSpec: result.attemptedResponseModelSpec,
                 }));
               if (openingFallbackEvents.length > 0) {
-                get().showToast(formatHallResponseModelFallbackToast(openingFallbackEvents));
+                get().showToast(
+                  formatHallResponseModelFallbackToast(openingFallbackEvents),
+                );
               }
-              const resultsByMemberId = new Map(openingResults.map((result) => [result.memberId, result]));
+              const resultsByMemberId = new Map(
+                openingResults.map((result) => [result.memberId, result]),
+              );
               const traceByMemberId = new Map(
                 openingResults
                   .filter((result) => Boolean(result.promptTraceDraft))
-                  .map((result) => [result.memberId, result.promptTraceDraft])
+                  .map((result) => [result.memberId, result.promptTraceDraft]),
               );
               const openingReplies = openingSpeakerIds.map((memberId) => {
-                const memberName = membersById.get(memberId)?.name ?? 'Member';
+                const memberName = membersById.get(memberId)?.name ?? "Member";
                 const result = resultsByMemberId.get(memberId);
-                if (!result || result.status === 'error') {
+                if (!result || result.status === "error") {
                   return buildMessage({
                     conversationId,
-                    role: 'member',
+                    role: "member",
                     authorMemberId: memberId,
                     content: `${memberName} could not speak in this round.`,
-                    status: 'error',
+                    status: "error",
                     roundNumber: nextRound.round.roundNumber,
-                    error: result?.error ?? 'Request failed',
+                    error: result?.error ?? "Request failed",
                     inReplyToMessageId: openingSourceUserMessage?.id,
                   });
                 }
 
                 return buildMessage({
                   conversationId,
-                  role: 'member',
+                  role: "member",
                   authorMemberId: memberId,
                   content: stripLeadingSpeakerLabel(result.answer, memberName),
-                  status: 'sent',
+                  status: "sent",
                   roundNumber: nextRound.round.roundNumber,
                   roundIntent: result.intent,
                   roundTargetMemberId: result.targetMemberId,
@@ -2265,14 +2940,23 @@ export const useAppStore = create<AppState>((set, get) => ({
                 conversationId,
                 messages: openingReplies.map((reply) => ({
                   ...reply,
-                  promptTraceDraft: reply.authorMemberId ? traceByMemberId.get(reply.authorMemberId) : undefined,
+                  promptTraceDraft: reply.authorMemberId
+                    ? traceByMemberId.get(reply.authorMemberId)
+                    : undefined,
                 })),
               });
               set((current) => ({
-                messages: replaceOptimisticMessages(current.messages, openingReplies, persistedReplies),
+                messages: replaceOptimisticMessages(
+                  current.messages,
+                  openingReplies,
+                  persistedReplies,
+                ),
                 promptTraceMessageIdsByConversation: persistedReplies.reduce(
                   (next, persistedReply) => {
-                    if (!persistedReply.authorMemberId || !traceByMemberId.get(persistedReply.authorMemberId)) {
+                    if (
+                      !persistedReply.authorMemberId ||
+                      !traceByMemberId.get(persistedReply.authorMemberId)
+                    ) {
                       return next;
                     }
                     const existing = next[conversationId] ?? [];
@@ -2302,7 +2986,11 @@ export const useAppStore = create<AppState>((set, get) => ({
               void get().syncHallRoundSummaries(conversationId);
             } finally {
               set((current) => ({
-                ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
+                ...clearPendingRepliesIfCurrent(
+                  current,
+                  conversationId,
+                  pendingTicket,
+                ),
               }));
             }
           }
@@ -2323,11 +3011,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const membersMap = new Map(state.members.map((m) => [m.id, m]));
     let chamberMemory =
-      conversation.kind === 'chamber'
+      conversation.kind === "chamber"
         ? state.chamberMemoryByConversation[conversationId]
         : undefined;
-    if (conversation.kind === 'chamber' && !chamberMemory) {
-      const latestLog = await councilRepository.getLatestChamberMemoryLog(conversationId);
+    if (conversation.kind === "chamber" && !chamberMemory) {
+      const latestLog =
+        await councilRepository.getLatestChamberMemoryLog(conversationId);
       chamberMemory = latestLog?.memory;
       const latestMemory = latestLog?.memory;
       if (latestMemory) {
@@ -2341,30 +3030,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     let memberIds: string[] = [];
-    let routingSource: MessageRouting['source'] = 'chamber-fixed';
+    let routingSource: MessageRouting["source"] = "chamber-fixed";
 
-    if (conversation.kind === 'chamber') {
-      memberIds = conversation.chamberMemberId ? [conversation.chamberMemberId] : [];
+    if (conversation.kind === "chamber") {
+      memberIds = conversation.chamberMemberId
+        ? [conversation.chamberMemberId]
+        : [];
     } else {
-      const participantIds = state.hallParticipantsByConversation[conversationId] ?? [];
+      const participantIds =
+        state.hallParticipantsByConversation[conversationId] ?? [];
       const hasRoutedOnce = state.messages.some(
         (message) =>
           message.conversationId === conversationId &&
-          message.role === 'system' &&
-          Boolean(message.routing)
+          message.role === "system" &&
+          Boolean(message.routing),
       );
 
       if (!hasRoutedOnce) {
         const candidates = state.members.filter((member) => !member.deletedAt);
-        if (routingOverride.mode === 'manual') {
+        if (routingOverride.mode === "manual") {
           const allowed = new Set(candidates.map((member) => member.id));
-          memberIds = (routingOverride.memberIds ?? []).filter((memberId) => allowed.has(memberId));
+          memberIds = (routingOverride.memberIds ?? []).filter((memberId) =>
+            allowed.has(memberId),
+          );
         } else {
           set({ isRouting: true, routingConversationId: conversationId });
           try {
             const dynamicMaxSelections = Math.max(
               1,
-              Math.min(8, Math.ceil(candidates.length * 0.5))
+              Math.min(8, Math.ceil(candidates.length * 0.5)),
             );
             const routed = await routeHallMembers({
               message: text,
@@ -2374,14 +3068,18 @@ export const useAppStore = create<AppState>((set, get) => ({
             memberIds = routed.chosenMemberIds;
             routingSource = routed.source;
           } catch {
-            memberIds = routeToMembers(text, candidates.map((c) => c.id), conversationId);
-            routingSource = 'fallback';
+            memberIds = routeToMembers(
+              text,
+              candidates.map((c) => c.id),
+              conversationId,
+            );
+            routingSource = "fallback";
           } finally {
             set({ isRouting: false, routingConversationId: undefined });
           }
         }
 
-        if (memberIds.length === 0 && routingOverride.mode === 'manual') {
+        if (memberIds.length === 0 && routingOverride.mode === "manual") {
           set((current) => ({
             ...clearPendingReplies(current, conversationId),
           }));
@@ -2389,16 +3087,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
 
         if (memberIds.length === 0) {
-          memberIds = routeToMembers(text, state.members.filter((m) => !m.deletedAt).map((m) => m.id), conversationId);
-          routingSource = 'fallback';
+          memberIds = routeToMembers(
+            text,
+            state.members.filter((m) => !m.deletedAt).map((m) => m.id),
+            conversationId,
+          );
+          routingSource = "fallback";
         }
 
         const chosenSet = new Set(memberIds);
-        const toAdd = memberIds.filter((memberId) => !participantIds.includes(memberId));
-        const toRemove = participantIds.filter((memberId) => !chosenSet.has(memberId));
+        const toAdd = memberIds.filter(
+          (memberId) => !participantIds.includes(memberId),
+        );
+        const toRemove = participantIds.filter(
+          (memberId) => !chosenSet.has(memberId),
+        );
         await Promise.all([
-          ...toAdd.map((memberId) => councilRepository.addHallParticipant(conversationId, memberId)),
-          ...toRemove.map((memberId) => councilRepository.removeHallParticipant(conversationId, memberId)),
+          ...toAdd.map((memberId) =>
+            councilRepository.addHallParticipant(conversationId, memberId),
+          ),
+          ...toRemove.map((memberId) =>
+            councilRepository.removeHallParticipant(conversationId, memberId),
+          ),
         ]);
 
         set((current) => ({
@@ -2410,12 +3120,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         const routeMessage = buildMessage({
           conversationId,
-          role: 'system',
+          role: "system",
           content:
-            routingOverride.mode === 'manual'
-              ? `Manually routed to ${memberIds.map((id) => membersMap.get(id)?.name ?? id).join(', ')}`
-              : `Routed to ${memberIds.map((id) => membersMap.get(id)?.name ?? id).join(', ')}`,
-          status: 'sent',
+            routingOverride.mode === "manual"
+              ? `Manually routed to ${memberIds.map((id) => membersMap.get(id)?.name ?? id).join(", ")}`
+              : `Routed to ${memberIds.map((id) => membersMap.get(id)?.name ?? id).join(", ")}`,
+          status: "sent",
           routing: { memberIds, source: routingSource },
         });
 
@@ -2428,24 +3138,40 @@ export const useAppStore = create<AppState>((set, get) => ({
           messages: [routeMessage],
         });
         set((current) => ({
-          messages: replaceOptimisticMessages(current.messages, [routeMessage], persistedRouteMessages),
+          messages: replaceOptimisticMessages(
+            current.messages,
+            [routeMessage],
+            persistedRouteMessages,
+          ),
         }));
-      } else if (routingOverride.mode === 'manual') {
+      } else if (routingOverride.mode === "manual") {
         const allowed = new Set(
-          state.members.filter((member) => !member.deletedAt).map((member) => member.id)
+          state.members
+            .filter((member) => !member.deletedAt)
+            .map((member) => member.id),
         );
-        memberIds = (routingOverride.memberIds ?? []).filter((memberId) => allowed.has(memberId));
+        memberIds = (routingOverride.memberIds ?? []).filter((memberId) =>
+          allowed.has(memberId),
+        );
         const participantSet = new Set(participantIds);
-        const toAdd = memberIds.filter((memberId) => !participantSet.has(memberId));
+        const toAdd = memberIds.filter(
+          (memberId) => !participantSet.has(memberId),
+        );
         if (toAdd.length > 0) {
           await Promise.all(
-            toAdd.map((memberId) => councilRepository.addHallParticipant(conversationId, memberId))
+            toAdd.map((memberId) =>
+              councilRepository.addHallParticipant(conversationId, memberId),
+            ),
           );
           set((current) => ({
             hallParticipantsByConversation: {
               ...current.hallParticipantsByConversation,
               [conversationId]: Array.from(
-                new Set([...(current.hallParticipantsByConversation[conversationId] ?? []), ...toAdd])
+                new Set([
+                  ...(current.hallParticipantsByConversation[conversationId] ??
+                    []),
+                  ...toAdd,
+                ]),
               ),
             },
           }));
@@ -2457,7 +3183,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
       }
 
-      if (conversation.hallMode !== 'roundtable' && mentionedMemberIds.length > 0) {
+      if (
+        conversation.hallMode !== "roundtable" &&
+        mentionedMemberIds.length > 0
+      ) {
         const mentionedSet = new Set(mentionedMemberIds);
         memberIds = memberIds.filter((memberId) => mentionedSet.has(memberId));
       }
@@ -2471,36 +3200,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (
-      conversation.kind === 'chamber' &&
+      conversation.kind === "chamber" &&
       (conversation.timeAwareReentryEnabled ?? true) &&
       !activeTimeAwareReentryState &&
       (state.pendingReplyCount[conversationId] ?? 0) === 0 &&
-      typeof previousActiveMessageAt === 'number'
+      typeof previousActiveMessageAt === "number"
     ) {
-      const bucket = classifyTimeAwareReentryGap(Date.now() - previousActiveMessageAt);
+      const bucket = classifyTimeAwareReentryGap(
+        Date.now() - previousActiveMessageAt,
+      );
       if (bucket) {
         const explicitContinuation = isExplicitContinuation(text);
-        const effectiveBucket = explicitContinuation ? demoteTimeAwareReentryGap(bucket) : bucket;
+        const effectiveBucket = explicitContinuation
+          ? demoteTimeAwareReentryGap(bucket)
+          : bucket;
         if (effectiveBucket) {
-          const updatedConversation = await councilRepository.setChamberTimeAwareReentryState({
-            conversationId,
-            state: {
-              gapBucket: effectiveBucket,
-              repliesRemaining: 2,
-              explicitContinuation,
-              activatedAt: Date.now(),
-            },
-          });
+          const updatedConversation =
+            await councilRepository.setChamberTimeAwareReentryState({
+              conversationId,
+              state: {
+                gapBucket: effectiveBucket,
+                repliesRemaining: 2,
+                explicitContinuation,
+                activatedAt: Date.now(),
+              },
+            });
           conversation = updatedConversation;
-          activeTimeAwareReentryState = updatedConversation.timeAwareReentryState;
-          void councilRepository.upsertTimeAwareReentryGuidance({
-            conversationId,
-            gapBucket: effectiveBucket,
-            explicitContinuation,
-          }).catch(() => undefined);
+          activeTimeAwareReentryState =
+            updatedConversation.timeAwareReentryState;
+          void councilRepository
+            .upsertTimeAwareReentryGuidance({
+              conversationId,
+              gapBucket: effectiveBucket,
+              explicitContinuation,
+            })
+            .catch(() => undefined);
           set((current) => ({
             conversations: current.conversations.map((item) =>
-              item.id === conversationId ? updatedConversation : item
+              item.id === conversationId ? updatedConversation : item,
             ),
             timeAwareReentryNoticePendingByConversation:
               updatedConversation.timeAwareReentryNoticeSeenAt
@@ -2517,35 +3254,48 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((current) => ({
       ...beginPendingReplies(current, conversationId, memberIds, pendingTicket),
     }));
-    const hallParticipants = conversation.kind === 'hall'
-      ? (state.hallParticipantsByConversation[conversationId] ?? [])
-          .map((id) => membersMap.get(id))
-          .filter((member): member is Member => Boolean(member && !member.deletedAt))
-      : [];
+    const hallParticipants =
+      conversation.kind === "hall"
+        ? (state.hallParticipantsByConversation[conversationId] ?? [])
+            .map((id) => membersMap.get(id))
+            .filter((member): member is Member =>
+              Boolean(member && !member.deletedAt),
+            )
+        : [];
     const hallContextBundle =
-      conversation.kind === 'hall'
-      ? buildHallRoundAwareContext({
-          messages: get().messages,
-          conversationId,
-          hallMemoryLogs: await councilRepository.listMemoryLogsByScope(conversationId, 'hall'),
-          rawRoundTail: get().compactionPolicy.hallRawRoundTail,
-          hallMode: conversation.hallMode ?? 'advisory',
-        })
+      conversation.kind === "hall"
+        ? buildHallRoundAwareContext({
+            messages: get().messages,
+            conversationId,
+            hallMemoryLogs: await councilRepository.listMemoryLogsByScope(
+              conversationId,
+              "hall",
+            ),
+            rawRoundTail: get().compactionPolicy.hallRawRoundTail,
+            hallMode: conversation.hallMode ?? "advisory",
+          })
         : null;
     const chamberGeneration =
-      conversation.kind === 'chamber'
+      conversation.kind === "chamber"
         ? getBaseGenerationProfile(conversation.chamberResponseMode)
-        : { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const };
-    const hallFallbackEvents: Array<{ memberName: string; attemptedSpec?: string }> = [];
+        : {
+            chatProfile: "instant" as const,
+            retrievalStrategy: "instant" as const,
+          };
+    const hallFallbackEvents: Array<{
+      memberName: string;
+      attemptedSpec?: string;
+    }> = [];
     const replyTasks = memberIds.map(async (memberId) => {
       const member = membersMap.get(memberId);
       const sourceUserMessage = [...get().messages]
         .reverse()
-        .find((message) =>
-          message.conversationId === conversationId &&
-          message.role === 'user' &&
-          message.status !== 'error' &&
-          isVisibleMessage(message)
+        .find(
+          (message) =>
+            message.conversationId === conversationId &&
+            message.role === "user" &&
+            message.status !== "error" &&
+            isVisibleMessage(message),
         );
       let reply: Message;
       let replyPromptTraceDraft: PromptTraceDraft | undefined;
@@ -2553,11 +3303,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!member) {
         reply = buildMessage({
           conversationId,
-          role: 'member',
+          role: "member",
           authorMemberId: memberId,
-          content: 'Member unavailable.',
-          status: 'error',
-          error: 'Member not found',
+          content: "Member unavailable.",
+          status: "error",
+          error: "Member not found",
         });
       } else {
         try {
@@ -2565,64 +3315,81 @@ export const useAppStore = create<AppState>((set, get) => ({
             message: text,
             memberId: member.id,
             conversationId,
-            previousSummary: conversation.kind === 'chamber' ? chamberMemory : undefined,
+            previousSummary:
+              conversation.kind === "chamber" ? chamberMemory : undefined,
             contextMessages: buildMemberContextWindow(
-              conversation.kind === 'hall' ? (hallContextBundle?.rawMessages ?? get().messages) : get().messages,
+              conversation.kind === "hall"
+                ? (hallContextBundle?.rawMessages ?? get().messages)
+                : get().messages,
               conversationId,
               member.id,
               conversation.kind,
-              membersMap
+              membersMap,
             ),
             hallContext:
-              conversation.kind === 'hall'
+              conversation.kind === "hall"
                 ? buildHallSystemContext(
-                  member,
-                  hallParticipants,
-                  hallContextBundle?.rawMessages ?? [],
-                  hallContextBundle?.roundSummaries ?? [],
-                  conversation.hallMode ?? 'advisory',
-                  conversationId,
-                )
+                    member,
+                    hallParticipants,
+                    hallContextBundle?.rawMessages ?? [],
+                    hallContextBundle?.roundSummaries ?? [],
+                    conversation.hallMode ?? "advisory",
+                    conversationId,
+                  )
                 : undefined,
-            chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
-            retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
+            chatProfile:
+              conversation.kind === "chamber"
+                ? chamberGeneration.chatProfile
+                : undefined,
+            retrievalStrategy:
+              conversation.kind === "chamber"
+                ? chamberGeneration.retrievalStrategy
+                : undefined,
             debugPromptTrace: get().promptDebugMode,
           });
           if (result.fallbackUsed) {
-            if (conversation.kind === 'hall') {
+            if (conversation.kind === "hall") {
               hallFallbackEvents.push({
                 memberName: member.name,
                 attemptedSpec: result.attemptedResponseModelSpec,
               });
             } else {
-              get().showToast(formatResponseModelFallbackToast(member.name, result.attemptedResponseModelSpec));
+              get().showToast(
+                formatResponseModelFallbackToast(
+                  member.name,
+                  result.attemptedResponseModelSpec,
+                ),
+              );
             }
           }
           replyPromptTraceDraft = result.promptTraceDraft;
 
           reply = buildMessage({
             conversationId,
-            role: 'member',
+            role: "member",
             authorMemberId: memberId,
-            content: conversation.kind === 'hall'
-              ? stripLeadingSpeakerLabel(result.answer, member.name)
-              : result.answer,
-            status: 'sent',
+            content:
+              conversation.kind === "hall"
+                ? stripLeadingSpeakerLabel(result.answer, member.name)
+                : result.answer,
+            status: "sent",
             roundNumber: currentHallRoundNumber,
             generationProfile:
-              conversation.kind === 'chamber'
-                ? conversation.chamberResponseMode ?? chamberGeneration.chatProfile
+              conversation.kind === "chamber"
+                ? (conversation.chamberResponseMode ??
+                  chamberGeneration.chatProfile)
                 : undefined,
             inReplyToMessageId: sourceUserMessage?.id,
           });
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Request failed';
+          const errorMessage =
+            error instanceof Error ? error.message : "Request failed";
           reply = buildMessage({
             conversationId,
-            role: 'member',
+            role: "member",
             authorMemberId: memberId,
-            content: 'Could not generate a response right now.',
-            status: 'error',
+            content: "Could not generate a response right now.",
+            status: "error",
             error: errorMessage,
             inReplyToMessageId: sourceUserMessage?.id,
           });
@@ -2632,7 +3399,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((current) => ({
         messages: [...current.messages, reply],
         ...updateConversationStamp(current, conversationId, true),
-        ...removePendingReplyMemberIfCurrent(current, conversationId, memberId, pendingTicket),
+        ...removePendingReplyMemberIfCurrent(
+          current,
+          conversationId,
+          memberId,
+          pendingTicket,
+        ),
       }));
 
       const persistedReplies = await councilRepository.appendMessages({
@@ -2640,14 +3412,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         messages: [{ ...reply, promptTraceDraft: replyPromptTraceDraft }],
       });
       set((current) => ({
-        messages: replaceOptimisticMessages(current.messages, [reply], persistedReplies),
+        messages: replaceOptimisticMessages(
+          current.messages,
+          [reply],
+          persistedReplies,
+        ),
         promptTraceMessageIdsByConversation:
           replyPromptTraceDraft && persistedReplies[0]
-            ? addPromptTraceMessageId(current, conversationId, persistedReplies[0].id)
+            ? addPromptTraceMessageId(
+                current,
+                conversationId,
+                persistedReplies[0].id,
+              )
             : current.promptTraceMessageIdsByConversation,
       }));
 
-      if (conversation.kind === 'chamber' && reply.status === 'sent' && activeTimeAwareReentryState) {
+      if (
+        conversation.kind === "chamber" &&
+        reply.status === "sent" &&
+        activeTimeAwareReentryState
+      ) {
         const nextGapBucket =
           activeTimeAwareReentryState.repliesRemaining === 2
             ? demoteTimeAwareReentryGap(activeTimeAwareReentryState.gapBucket)
@@ -2660,57 +3444,67 @@ export const useAppStore = create<AppState>((set, get) => ({
                 repliesRemaining: 1 as const,
               }
             : undefined;
-        const updatedConversation = await councilRepository.setChamberTimeAwareReentryState({
-          conversationId,
-          state: nextState,
-        });
+        const updatedConversation =
+          await councilRepository.setChamberTimeAwareReentryState({
+            conversationId,
+            state: nextState,
+          });
         conversation = updatedConversation;
         activeTimeAwareReentryState = updatedConversation.timeAwareReentryState;
         set((current) => ({
           conversations: current.conversations.map((item) =>
-            item.id === conversationId ? updatedConversation : item
+            item.id === conversationId ? updatedConversation : item,
           ),
         }));
       }
     });
 
     await Promise.all(replyTasks);
-    if (conversation.kind === 'hall' && hallFallbackEvents.length > 0) {
+    if (conversation.kind === "hall" && hallFallbackEvents.length > 0) {
       get().showToast(formatHallResponseModelFallbackToast(hallFallbackEvents));
     }
-    if (conversation.kind === 'chamber') {
-      void councilRepository.reflectChamberGuidance({
-        conversationId,
-        trigger: 'interval',
-      }).catch(() => undefined);
+    if (conversation.kind === "chamber") {
+      void councilRepository
+        .reflectChamberGuidance({
+          conversationId,
+          trigger: "interval",
+        })
+        .catch(() => undefined);
     }
-    if (conversation.kind === 'hall') {
+    if (conversation.kind === "hall") {
       await get().syncHallRoundSummaries(conversationId);
     }
 
     try {
-      const chamberMemoryContext = conversation.kind === 'chamber' && conversation.chamberMemberId
-        ? {
-          memberName: membersMap.get(conversation.chamberMemberId)?.name ?? 'Member',
-          memberSpecialties: membersMap.get(conversation.chamberMemberId)?.specialties ?? [],
-        }
-        : undefined;
+      const chamberMemoryContext =
+        conversation.kind === "chamber" && conversation.chamberMemberId
+          ? {
+              memberName:
+                membersMap.get(conversation.chamberMemberId)?.name ?? "Member",
+              memberSpecialties:
+                membersMap.get(conversation.chamberMemberId)?.specialties ?? [],
+            }
+          : undefined;
       const compacted = await maybeCompact(
         conversationId,
         conversation,
         compactionPolicy,
         chamberMemory,
-        chamberMemoryContext
+        chamberMemoryContext,
       );
       if (compacted) {
         set((current) => ({
-          ...patchConversationEverywhere(current, conversationId, { updatedAt: Date.now() }),
+          ...patchConversationEverywhere(current, conversationId, {
+            updatedAt: Date.now(),
+          }),
           chamberMemoryByConversation: {
             ...current.chamberMemoryByConversation,
             [conversationId]: compacted.summary,
           },
           messages: [
-            ...current.messages.filter((item) => item.conversationId !== conversationId),
+            ...current.messages.filter(
+              (item) => item.conversationId !== conversationId,
+            ),
             ...compacted.activeMessages,
           ],
         }));
@@ -2721,8 +3515,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addMemberToConversation: async (conversationId, memberId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall') return;
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "hall") return;
 
     await councilRepository.addHallParticipant(conversationId, memberId);
     await get().refreshHallParticipants(conversationId);
@@ -2733,9 +3529,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeMemberFromConversation: async (conversationId, memberId) => {
-    const conversation = get().conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'hall') return;
-    const currentParticipants = get().hallParticipantsByConversation[conversationId] ?? [];
+    const conversation = get().conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "hall") return;
+    const currentParticipants =
+      get().hallParticipantsByConversation[conversationId] ?? [];
     if (currentParticipants.length <= 1) return;
 
     await councilRepository.removeHallParticipant(conversationId, memberId);
@@ -2747,22 +3546,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   clearChamberByMember: async (memberId) => {
-    const targetIds = listChamberThreadsForMember(get().conversations, memberId).map((conversation) => conversation.id);
+    const targetIds = listChamberThreadsForMember(
+      get().conversations,
+      memberId,
+    ).map((conversation) => conversation.id);
     if (targetIds.length === 0) return;
 
     await councilRepository.clearChamberByMember(memberId);
     const targetSet = new Set(targetIds);
 
     set((state) => {
-      const nextConversations = state.conversations.filter((conversation) => !targetSet.has(conversation.id));
+      const nextConversations = state.conversations.filter(
+        (conversation) => !targetSet.has(conversation.id),
+      );
       const nextPendingReplyCount = { ...state.pendingReplyCount };
       const nextPendingReplyMemberIds = { ...state.pendingReplyMemberIds };
-      const nextPendingReplyTickets = { ...state.pendingReplyTicketByConversation };
-      const nextCompactionInFlight = { ...state.compactionCheckInFlightByConversation };
+      const nextPendingReplyTickets = {
+        ...state.pendingReplyTicketByConversation,
+      };
+      const nextCompactionInFlight = {
+        ...state.compactionCheckInFlightByConversation,
+      };
       const nextPagination = { ...state.messagePaginationByConversation };
       const nextNotebooks = { ...state.conversationNotebooksByConversation };
       const nextNotebookDrafts = { ...state.notebookDraftByConversation };
-      const nextNotebookSaveStates = { ...state.notebookSaveStateByConversation };
+      const nextNotebookSaveStates = {
+        ...state.notebookSaveStateByConversation,
+      };
       const nextNotebookErrors = { ...state.notebookErrorByConversation };
       const nextNotebookLoaded = { ...state.notebookLoadedByConversation };
 
@@ -2780,18 +3590,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const targetMessageIds = new Set(
-        state.messages.filter((message) => targetSet.has(message.conversationId)).map((message) => message.id)
+        state.messages
+          .filter((message) => targetSet.has(message.conversationId))
+          .map((message) => message.id),
       );
 
       return {
         conversations: nextConversations,
-        messages: state.messages.filter((message) => !targetSet.has(message.conversationId)),
+        messages: state.messages.filter(
+          (message) => !targetSet.has(message.conversationId),
+        ),
         pendingReplyCount: nextPendingReplyCount,
         pendingReplyMemberIds: nextPendingReplyMemberIds,
         pendingReplyTicketByConversation: nextPendingReplyTickets,
         compactionCheckInFlightByConversation: nextCompactionInFlight,
         chamberMemoryByConversation: Object.fromEntries(
-          Object.entries(state.chamberMemoryByConversation).filter(([id]) => !targetSet.has(id))
+          Object.entries(state.chamberMemoryByConversation).filter(
+            ([id]) => !targetSet.has(id),
+          ),
         ),
         conversationNotebooksByConversation: nextNotebooks,
         notebookDraftByConversation: nextNotebookDrafts,
@@ -2800,13 +3616,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         notebookLoadedByConversation: nextNotebookLoaded,
         messagePaginationByConversation: nextPagination,
         messageFeedbackByMessageId: Object.fromEntries(
-          Object.entries(state.messageFeedbackByMessageId).filter(([messageId]) => !targetMessageIds.has(messageId))
+          Object.entries(state.messageFeedbackByMessageId).filter(
+            ([messageId]) => !targetMessageIds.has(messageId),
+          ),
         ),
         customGuidanceByMessageId: Object.fromEntries(
-          Object.entries(state.customGuidanceByMessageId).filter(([messageId]) => !targetMessageIds.has(messageId))
+          Object.entries(state.customGuidanceByMessageId).filter(
+            ([messageId]) => !targetMessageIds.has(messageId),
+          ),
         ),
         selectedConversationId: targetSet.has(state.selectedConversationId)
-          ? (nextConversations[0]?.id ?? '')
+          ? (nextConversations[0]?.id ?? "")
           : state.selectedConversationId,
       };
     });
@@ -2815,29 +3635,45 @@ export const useAppStore = create<AppState>((set, get) => ({
   refineLatestChamberResponse: async (conversationId, action) => {
     await get().loadMessages(conversationId);
     const state = get();
-    const conversation = state.conversations.find((item) => item.id === conversationId);
-    if (!conversation || conversation.kind !== 'chamber') return;
+    const conversation = state.conversations.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation || conversation.kind !== "chamber") return;
 
-    const target = getLatestVisibleChamberMemberMessage(state.messages, conversationId);
-    if (!target?.authorMemberId || state.refiningActionByMessageId[target.id]) return;
+    const target = getLatestVisibleChamberMemberMessage(
+      state.messages,
+      conversationId,
+    );
+    if (!target?.authorMemberId || state.refiningActionByMessageId[target.id])
+      return;
 
     const visibleMessages = state.messages
-      .filter((message) => message.conversationId === conversationId && isVisibleMessage(message))
+      .filter(
+        (message) =>
+          message.conversationId === conversationId &&
+          isVisibleMessage(message),
+      )
       .sort((a, b) => a.createdAt - b.createdAt);
-    const targetIndex = visibleMessages.findIndex((message) => message.id === target.id);
+    const targetIndex = visibleMessages.findIndex(
+      (message) => message.id === target.id,
+    );
     if (targetIndex <= 0) return;
 
     const promptMessage = [...visibleMessages.slice(0, targetIndex)]
       .reverse()
-      .find((message) => message.role === 'user' && message.status !== 'error');
+      .find((message) => message.role === "user" && message.status !== "error");
     if (!promptMessage) return;
 
-    const membersMap = new Map(state.members.map((member) => [member.id, member]));
+    const membersMap = new Map(
+      state.members.map((member) => [member.id, member]),
+    );
     const member = membersMap.get(target.authorMemberId);
     if (!member) return;
 
-    const previousSummary = state.chamberMemoryByConversation[conversationId]
-      ?? (await councilRepository.getLatestChamberMemoryLog(conversationId))?.memory;
+    const previousSummary =
+      state.chamberMemoryByConversation[conversationId] ??
+      (await councilRepository.getLatestChamberMemoryLog(conversationId))
+        ?.memory;
     const refinementProfiles = resolveRefinementProfiles(action);
     const refinementGenerationProfile = getRefinementGenerationProfile(action);
     const pendingTicket = createPendingReplyTicket();
@@ -2845,8 +3681,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       visibleMessages.filter((message) => message.id !== target.id),
       conversationId,
       member.id,
-      'chamber',
-      membersMap
+      "chamber",
+      membersMap,
     );
 
     set((current) => ({
@@ -2854,7 +3690,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...current.refiningActionByMessageId,
         [target.id]: action,
       },
-      ...beginPendingReplies(current, conversationId, [member.id], pendingTicket),
+      ...beginPendingReplies(
+        current,
+        conversationId,
+        [member.id],
+        pendingTicket,
+      ),
     }));
 
     try {
@@ -2870,17 +3711,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         debugPromptTrace: get().promptDebugMode,
       });
 
-      if (action === 'elaborate') {
+      if (action === "elaborate") {
         const appended = await councilRepository.appendElaborationReply({
           targetMessageId: target.id,
           reply: {
             conversationId,
-            role: 'member',
+            role: "member",
             authorMemberId: member.id,
             content: result.answer,
-            status: 'sent',
+            status: "sent",
             inReplyToMessageId: target.id,
-            revisionKind: 'elaborate',
+            revisionKind: "elaborate",
             generationProfile: refinementGenerationProfile,
             promptTraceDraft: result.promptTraceDraft,
           },
@@ -2889,12 +3730,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((current) => ({
           messages: [...current.messages, appended],
           ...updateConversationStamp(current, conversationId, true),
-          refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
-          ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
-          promptTraceMessageIdsByConversation:
-            result.promptTraceDraft
-              ? addPromptTraceMessageId(current, conversationId, appended.id)
-              : current.promptTraceMessageIdsByConversation,
+          refiningActionByMessageId: removeKey(
+            current.refiningActionByMessageId,
+            target.id,
+          ),
+          ...clearPendingRepliesIfCurrent(
+            current,
+            conversationId,
+            pendingTicket,
+          ),
+          promptTraceMessageIdsByConversation: result.promptTraceDraft
+            ? addPromptTraceMessageId(current, conversationId, appended.id)
+            : current.promptTraceMessageIdsByConversation,
         }));
         const [activeMessages, latestLog] = await Promise.all([
           councilRepository.listMessages(conversationId),
@@ -2902,12 +3749,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         ]);
         set((current) => ({
           messages: [
-            ...current.messages.filter((message) => message.conversationId !== conversationId),
+            ...current.messages.filter(
+              (message) => message.conversationId !== conversationId,
+            ),
             ...activeMessages,
           ],
           chamberMemoryByConversation: {
             ...current.chamberMemoryByConversation,
-            [conversationId]: latestLog?.memory ?? current.chamberMemoryByConversation[conversationId],
+            [conversationId]:
+              latestLog?.memory ??
+              current.chamberMemoryByConversation[conversationId],
           },
         }));
         return;
@@ -2917,10 +3768,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         targetMessageId: target.id,
         replacement: {
           conversationId,
-          role: 'member',
+          role: "member",
           authorMemberId: member.id,
           content: result.answer,
-          status: 'sent',
+          status: "sent",
           inReplyToMessageId: promptMessage.id,
           revisionKind: action,
           generationProfile: refinementGenerationProfile,
@@ -2930,16 +3781,26 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       set((current) => ({
         messages: current.messages
-          .map((message) => (message.id === replaced.superseded.id ? replaced.superseded : message))
+          .map((message) =>
+            message.id === replaced.superseded.id
+              ? replaced.superseded
+              : message,
+          )
           .concat(replaced.replacement)
           .sort((a, b) => a.createdAt - b.createdAt),
         ...updateConversationStamp(current, conversationId, true),
-        refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
+        refiningActionByMessageId: removeKey(
+          current.refiningActionByMessageId,
+          target.id,
+        ),
         ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
-        promptTraceMessageIdsByConversation:
-          result.promptTraceDraft
-            ? addPromptTraceMessageId(current, conversationId, replaced.replacement.id)
-            : current.promptTraceMessageIdsByConversation,
+        promptTraceMessageIdsByConversation: result.promptTraceDraft
+          ? addPromptTraceMessageId(
+              current,
+              conversationId,
+              replaced.replacement.id,
+            )
+          : current.promptTraceMessageIdsByConversation,
       }));
       const [activeMessages, latestLog] = await Promise.all([
         councilRepository.listMessages(conversationId),
@@ -2947,20 +3808,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       ]);
       set((current) => ({
         messages: [
-          ...current.messages.filter((message) => message.conversationId !== conversationId),
+          ...current.messages.filter(
+            (message) => message.conversationId !== conversationId,
+          ),
           ...activeMessages,
         ],
         chamberMemoryByConversation: {
           ...current.chamberMemoryByConversation,
-          [conversationId]: latestLog?.memory ?? current.chamberMemoryByConversation[conversationId],
+          [conversationId]:
+            latestLog?.memory ??
+            current.chamberMemoryByConversation[conversationId],
         },
       }));
     } catch (error) {
       set((current) => ({
-        refiningActionByMessageId: removeKey(current.refiningActionByMessageId, target.id),
+        refiningActionByMessageId: removeKey(
+          current.refiningActionByMessageId,
+          target.id,
+        ),
         ...clearPendingRepliesIfCurrent(current, conversationId, pendingTicket),
       }));
-      get().showToast(error instanceof Error ? error.message : 'Could not refine the reply.');
+      get().showToast(
+        error instanceof Error ? error.message : "Could not refine the reply.",
+      );
     }
   },
 
@@ -2990,7 +3860,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         : Promise.resolve(null),
     ]);
 
-    if (guidanceResult.status === 'fulfilled' && guidanceResult.value) {
+    if (guidanceResult.status === "fulfilled" && guidanceResult.value) {
       nextMember = {
         ...nextMember,
         guidanceProfilePrompt: guidanceResult.value.guidanceProfilePrompt,
@@ -2998,7 +3868,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         guidanceProfileUpdatedAt: Date.now(),
       };
     }
-    if (voiceResult.status === 'fulfilled' && voiceResult.value) {
+    if (voiceResult.status === "fulfilled" && voiceResult.value) {
       nextMember = {
         ...nextMember,
         ttsPersonaPrompt: voiceResult.value.ttsPersonaPrompt,
@@ -3006,7 +3876,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         ttsPersonaUpdatedAt: Date.now(),
       };
     }
-    set((state) => ({ members: [nextMember, ...state.members.filter((member) => member.id !== created.id)] }));
+    set((state) => ({
+      members: [
+        nextMember,
+        ...state.members.filter((member) => member.id !== created.id),
+      ],
+    }));
     return nextMember;
   },
 
@@ -3015,11 +3890,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     let nextMember = updated;
     if (!updated.guidanceProfilePrompt?.trim()) {
       try {
-        const generated = await councilRepository.generateMemberGuidanceProfile({
-          memberId,
-          systemPrompt: updated.systemPrompt,
-          specialties: updated.specialties,
-        });
+        const generated = await councilRepository.generateMemberGuidanceProfile(
+          {
+            memberId,
+            systemPrompt: updated.systemPrompt,
+            specialties: updated.specialties,
+          },
+        );
         nextMember = {
           ...updated,
           guidanceProfilePrompt: generated.guidanceProfilePrompt,
@@ -3039,7 +3916,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   generateMemberGuidanceProfile: async (memberId, force = true) => {
     const member = get().members.find((item) => item.id === memberId);
     if (!member) {
-      throw new Error('Member not found');
+      throw new Error("Member not found");
     }
     const generated = await councilRepository.generateMemberGuidanceProfile({
       memberId,
@@ -3056,7 +3933,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               guidanceProfileGeneratedAt: Date.now(),
               guidanceProfileUpdatedAt: Date.now(),
             }
-          : item
+          : item,
       ),
     }));
     return generated;
@@ -3065,7 +3942,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   generateMemberVoicePersona: async (memberId, force = true) => {
     const member = get().members.find((item) => item.id === memberId);
     if (!member) {
-      throw new Error('Member not found');
+      throw new Error("Member not found");
     }
     const generated = await councilRepository.generateMemberVoicePersona({
       memberId,
@@ -3083,7 +3960,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               ttsPersonaGeneratedAt: Date.now(),
               ttsPersonaUpdatedAt: Date.now(),
             }
-          : item
+          : item,
       ),
     }));
     return generated;
@@ -3092,15 +3969,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setMessageFeedback: async (messageId, key, active) => {
     const message = get().messages.find((item) => item.id === messageId);
     if (!message) return;
-    const feedbackRows = await councilRepository.setMessageFeedback({ messageId, key, active });
+    const feedbackRows = await councilRepository.setMessageFeedback({
+      messageId,
+      key,
+      active,
+    });
     const feedbackByMessage = mapFeedbackRows(
-      feedbackRows.filter((row) => row.messageId === messageId)
+      feedbackRows.filter((row) => row.messageId === messageId),
     );
     set((state) => ({
       messageFeedbackByMessageId: replaceMessageScopedRecord(
         state.messageFeedbackByMessageId,
         [messageId],
-        feedbackByMessage
+        feedbackByMessage,
       ),
     }));
     await councilRepository.syncFeedbackGuidanceDirectives({ messageId });
@@ -3108,47 +3989,74 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   saveCustomGuidanceForMessage: async (messageId, chips, text) => {
-    const saved = await councilRepository.upsertCustomFeedbackGuidance({ messageId, chips, text });
+    const saved = await councilRepository.upsertCustomFeedbackGuidance({
+      messageId,
+      chips,
+      text,
+    });
     set((state) => ({
       customGuidanceByMessageId: {
         ...state.customGuidanceByMessageId,
         [messageId]: saved,
       },
     }));
-    get().showToast('Custom guidance saved.');
+    get().showToast("Custom guidance saved.");
   },
 
   clearCustomGuidanceForMessage: async (messageId) => {
     await councilRepository.clearCustomFeedbackGuidance(messageId);
     set((state) => ({
-      customGuidanceByMessageId: removeKey(state.customGuidanceByMessageId, messageId),
+      customGuidanceByMessageId: removeKey(
+        state.customGuidanceByMessageId,
+        messageId,
+      ),
     }));
-    get().showToast('Custom guidance cleared.');
+    get().showToast("Custom guidance cleared.");
   },
 
   setMessagePinned: async (messageId, active) => {
-    const updated = await councilRepository.setMessagePinned({ messageId, active });
+    const updated = await councilRepository.setMessagePinned({
+      messageId,
+      active,
+    });
     if (!updated) return;
     set((state) => ({
-      messages: state.messages.map((message) => (message.id === messageId ? { ...message, pinnedAt: updated.pinnedAt } : message)),
+      messages: state.messages.map((message) =>
+        message.id === messageId
+          ? { ...message, pinnedAt: updated.pinnedAt }
+          : message,
+      ),
     }));
-    get().showToast(active ? 'Pinned to thread context.' : 'Removed from pinned thread context.');
+    get().showToast(
+      active
+        ? "Pinned to thread context."
+        : "Removed from pinned thread context.",
+    );
   },
 
   retryFailedMessage: async (messageId) => {
     const state = get();
-    const failedMessage = state.messages.find((message) => message.id === messageId);
+    const failedMessage = state.messages.find(
+      (message) => message.id === messageId,
+    );
     if (!failedMessage) return;
-    if (failedMessage.role !== 'member' || failedMessage.status !== 'error' || failedMessage.deletedAt || failedMessage.supersededAt) {
-      throw new Error('Only active failed member replies can be retried.');
+    if (
+      failedMessage.role !== "member" ||
+      failedMessage.status !== "error" ||
+      failedMessage.deletedAt ||
+      failedMessage.supersededAt
+    ) {
+      throw new Error("Only active failed member replies can be retried.");
     }
     if (!failedMessage.authorMemberId) {
-      throw new Error('Retry target is missing a member.');
+      throw new Error("Retry target is missing a member.");
     }
 
-    const conversation = state.conversations.find((item) => item.id === failedMessage.conversationId);
+    const conversation = state.conversations.find(
+      (item) => item.id === failedMessage.conversationId,
+    );
     if (!conversation) {
-      throw new Error('Conversation not found.');
+      throw new Error("Conversation not found.");
     }
 
     set((current) => ({
@@ -3163,7 +4071,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (discarded) {
         set((current) => ({
           messages: current.messages.map((message) =>
-            message.id === messageId ? { ...message, deletedAt: discarded.deletedAt } : message
+            message.id === messageId
+              ? { ...message, deletedAt: discarded.deletedAt }
+              : message,
           ),
         }));
       }
@@ -3171,9 +4081,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       let retriedReply: Message;
       let retriedPromptTraceDraft: PromptTraceDraft | undefined;
 
-      if (conversation.kind === 'hall' && conversation.hallMode === 'roundtable') {
-        const member = get().members.find((item) => item.id === failedMessage.authorMemberId);
-        const memberName = member?.name ?? 'Member';
+      if (
+        conversation.kind === "hall" &&
+        conversation.hallMode === "roundtable"
+      ) {
+        const member = get().members.find(
+          (item) => item.id === failedMessage.authorMemberId,
+        );
+        const memberName = member?.name ?? "Member";
         try {
           const result = await chatRoundtableSpeaker({
             conversationId: failedMessage.conversationId,
@@ -3183,133 +4098,192 @@ export const useAppStore = create<AppState>((set, get) => ({
             debugPromptTrace: get().promptDebugMode,
           });
           if (result.fallbackUsed) {
-            get().showToast(formatResponseModelFallbackToast(memberName, result.attemptedResponseModelSpec));
+            get().showToast(
+              formatResponseModelFallbackToast(
+                memberName,
+                result.attemptedResponseModelSpec,
+              ),
+            );
           }
           retriedPromptTraceDraft = result.promptTraceDraft;
           retriedReply = buildMessage({
             conversationId: failedMessage.conversationId,
-            role: 'member',
+            role: "member",
             authorMemberId: failedMessage.authorMemberId,
             content: stripLeadingSpeakerLabel(result.answer, memberName),
-            status: 'sent',
+            status: "sent",
             roundNumber: failedMessage.roundNumber,
             roundIntent: result.intent,
             roundTargetMemberId: result.targetMemberId,
-            inReplyToMessageId: findRetrySourceUserMessage(get().messages, failedMessage)?.id,
+            inReplyToMessageId: findRetrySourceUserMessage(
+              get().messages,
+              failedMessage,
+            )?.id,
           });
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Request failed';
+          const errorMessage =
+            error instanceof Error ? error.message : "Request failed";
           retriedReply = buildMessage({
             conversationId: failedMessage.conversationId,
-            role: 'member',
+            role: "member",
             authorMemberId: failedMessage.authorMemberId,
             content: `${memberName} could not speak in this round.`,
-            status: 'error',
+            status: "error",
             roundNumber: failedMessage.roundNumber,
             error: errorMessage,
-            inReplyToMessageId: findRetrySourceUserMessage(get().messages, failedMessage)?.id,
+            inReplyToMessageId: findRetrySourceUserMessage(
+              get().messages,
+              failedMessage,
+            )?.id,
           });
         }
       } else {
         const currentState = get();
-        const member = currentState.members.find((item) => item.id === failedMessage.authorMemberId);
+        const member = currentState.members.find(
+          (item) => item.id === failedMessage.authorMemberId,
+        );
         if (!member) {
-          throw new Error('Member not found.');
+          throw new Error("Member not found.");
         }
 
-        const sourceUserMessage = findRetrySourceUserMessage(currentState.messages, failedMessage);
+        const sourceUserMessage = findRetrySourceUserMessage(
+          currentState.messages,
+          failedMessage,
+        );
         if (!sourceUserMessage) {
-          throw new Error('Could not find the user message that this reply should retry.');
+          throw new Error(
+            "Could not find the user message that this reply should retry.",
+          );
         }
 
-        const membersMap = new Map(currentState.members.map((item) => [item.id, item]));
+        const membersMap = new Map(
+          currentState.members.map((item) => [item.id, item]),
+        );
         const chamberMemory =
-          conversation.kind === 'chamber'
-            ? currentState.chamberMemoryByConversation[conversation.id] ?? (await councilRepository.getLatestChamberMemoryLog(conversation.id))?.memory
+          conversation.kind === "chamber"
+            ? (currentState.chamberMemoryByConversation[conversation.id] ??
+              (
+                await councilRepository.getLatestChamberMemoryLog(
+                  conversation.id,
+                )
+              )?.memory)
             : undefined;
-        const hallParticipants = conversation.kind === 'hall'
-          ? (currentState.hallParticipantsByConversation[conversation.id] ?? [])
-              .map((id) => membersMap.get(id))
-              .filter((item): item is Member => Boolean(item && !item.deletedAt))
-          : [];
-        const hallContextBundle = conversation.kind === 'hall'
-          ? buildHallRoundAwareContext({
-              messages: currentState.messages,
-              conversationId: conversation.id,
-              hallMemoryLogs: await councilRepository.listMemoryLogsByScope(conversation.id, 'hall'),
-              rawRoundTail: currentState.compactionPolicy.hallRawRoundTail,
-              hallMode: conversation.hallMode ?? 'advisory',
-            })
-          : null;
+        const hallParticipants =
+          conversation.kind === "hall"
+            ? (
+                currentState.hallParticipantsByConversation[conversation.id] ??
+                []
+              )
+                .map((id) => membersMap.get(id))
+                .filter((item): item is Member =>
+                  Boolean(item && !item.deletedAt),
+                )
+            : [];
+        const hallContextBundle =
+          conversation.kind === "hall"
+            ? buildHallRoundAwareContext({
+                messages: currentState.messages,
+                conversationId: conversation.id,
+                hallMemoryLogs: await councilRepository.listMemoryLogsByScope(
+                  conversation.id,
+                  "hall",
+                ),
+                rawRoundTail: currentState.compactionPolicy.hallRawRoundTail,
+                hallMode: conversation.hallMode ?? "advisory",
+              })
+            : null;
         const chamberGeneration =
-          conversation.kind === 'chamber'
+          conversation.kind === "chamber"
             ? getBaseGenerationProfile(conversation.chamberResponseMode)
-            : { chatProfile: 'instant' as const, retrievalStrategy: 'instant' as const };
+            : {
+                chatProfile: "instant" as const,
+                retrievalStrategy: "instant" as const,
+              };
 
         try {
           const result = await chatWithMember({
             message: sourceUserMessage.content,
             memberId: member.id,
             conversationId: conversation.id,
-            previousSummary: conversation.kind === 'chamber' ? chamberMemory : undefined,
+            previousSummary:
+              conversation.kind === "chamber" ? chamberMemory : undefined,
             contextMessages: buildMemberContextWindow(
-              conversation.kind === 'hall' ? (hallContextBundle?.rawMessages ?? currentState.messages) : currentState.messages,
+              conversation.kind === "hall"
+                ? (hallContextBundle?.rawMessages ?? currentState.messages)
+                : currentState.messages,
               conversation.id,
               member.id,
               conversation.kind,
-              membersMap
+              membersMap,
             ),
             hallContext:
-              conversation.kind === 'hall'
+              conversation.kind === "hall"
                 ? buildHallSystemContext(
                     member,
                     hallParticipants,
                     hallContextBundle?.rawMessages ?? [],
                     hallContextBundle?.roundSummaries ?? [],
-                    conversation.hallMode ?? 'advisory',
+                    conversation.hallMode ?? "advisory",
                     conversation.id,
                   )
                 : undefined,
-            chatProfile: conversation.kind === 'chamber' ? chamberGeneration.chatProfile : undefined,
-            retrievalStrategy: conversation.kind === 'chamber' ? chamberGeneration.retrievalStrategy : undefined,
+            chatProfile:
+              conversation.kind === "chamber"
+                ? chamberGeneration.chatProfile
+                : undefined,
+            retrievalStrategy:
+              conversation.kind === "chamber"
+                ? chamberGeneration.retrievalStrategy
+                : undefined,
             debugPromptTrace: currentState.promptDebugMode,
           });
           if (result.fallbackUsed) {
-            if (conversation.kind === 'hall') {
+            if (conversation.kind === "hall") {
               get().showToast(
                 formatHallResponseModelFallbackToast([
-                  { memberName: member.name, attemptedSpec: result.attemptedResponseModelSpec },
-                ])
+                  {
+                    memberName: member.name,
+                    attemptedSpec: result.attemptedResponseModelSpec,
+                  },
+                ]),
               );
             } else {
-              get().showToast(formatResponseModelFallbackToast(member.name, result.attemptedResponseModelSpec));
+              get().showToast(
+                formatResponseModelFallbackToast(
+                  member.name,
+                  result.attemptedResponseModelSpec,
+                ),
+              );
             }
           }
           retriedPromptTraceDraft = result.promptTraceDraft;
 
           retriedReply = buildMessage({
             conversationId: conversation.id,
-            role: 'member',
+            role: "member",
             authorMemberId: member.id,
-            content: conversation.kind === 'hall'
-              ? stripLeadingSpeakerLabel(result.answer, member.name)
-              : result.answer,
-            status: 'sent',
+            content:
+              conversation.kind === "hall"
+                ? stripLeadingSpeakerLabel(result.answer, member.name)
+                : result.answer,
+            status: "sent",
             roundNumber: failedMessage.roundNumber,
             generationProfile:
-              conversation.kind === 'chamber'
-                ? conversation.chamberResponseMode ?? chamberGeneration.chatProfile
+              conversation.kind === "chamber"
+                ? (conversation.chamberResponseMode ??
+                  chamberGeneration.chatProfile)
                 : undefined,
             inReplyToMessageId: sourceUserMessage.id,
           });
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Request failed';
+          const errorMessage =
+            error instanceof Error ? error.message : "Request failed";
           retriedReply = buildMessage({
             conversationId: conversation.id,
-            role: 'member',
+            role: "member",
             authorMemberId: member.id,
-            content: 'Could not generate a response right now.',
-            status: 'error',
+            content: "Could not generate a response right now.",
+            status: "error",
             error: errorMessage,
             roundNumber: failedMessage.roundNumber,
             inReplyToMessageId: sourceUserMessage.id,
@@ -3324,13 +4298,23 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const persistedReplies = await councilRepository.appendMessages({
         conversationId: failedMessage.conversationId,
-        messages: [{ ...retriedReply, promptTraceDraft: retriedPromptTraceDraft }],
+        messages: [
+          { ...retriedReply, promptTraceDraft: retriedPromptTraceDraft },
+        ],
       });
       set((current) => ({
-        messages: replaceOptimisticMessages(current.messages, [retriedReply], persistedReplies),
+        messages: replaceOptimisticMessages(
+          current.messages,
+          [retriedReply],
+          persistedReplies,
+        ),
         promptTraceMessageIdsByConversation:
           retriedPromptTraceDraft && persistedReplies[0]
-            ? addPromptTraceMessageId(current, failedMessage.conversationId, persistedReplies[0].id)
+            ? addPromptTraceMessageId(
+                current,
+                failedMessage.conversationId,
+                persistedReplies[0].id,
+              )
             : current.promptTraceMessageIdsByConversation,
       }));
     } finally {
@@ -3344,12 +4328,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     await councilRepository.archiveMember(memberId);
     set((state) => ({
       members: state.members.map((m) =>
-        m.id === memberId ? { ...m, deletedAt: Date.now(), updatedAt: Date.now() } : m
+        m.id === memberId
+          ? { ...m, deletedAt: Date.now(), updatedAt: Date.now() }
+          : m,
       ),
     }));
   },
 
-  uploadDocsForMember: async (memberId, files, chunkConfig = DEFAULT_KB_CHUNK_CONFIG) => {
+  uploadDocsForMember: async (
+    memberId,
+    files,
+    chunkConfig = DEFAULT_KB_CHUNK_CONFIG,
+  ) => {
     const member = get().members.find((item) => item.id === memberId);
     if (!member || files.length === 0) return;
 
@@ -3360,29 +4350,40 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...state.kbUploadProgressByMember,
           [memberId]: [
             ...(state.kbUploadProgressByMember[memberId] ?? []),
-            { localId, fileName: file.name, loaded: 0, total: Math.max(file.size, 1), progress: 0 },
+            {
+              localId,
+              fileName: file.name,
+              loaded: 0,
+              total: Math.max(file.size, 1),
+              progress: 0,
+            },
           ],
         },
       }));
 
       try {
-        const staged = await uploadFileToConvexStorage(file, ({ loaded, total, progress }) => {
-          set((state) => ({
-            kbUploadProgressByMember: {
-              ...state.kbUploadProgressByMember,
-              [memberId]: (state.kbUploadProgressByMember[memberId] ?? []).map((entry) =>
-                entry.localId === localId
-                  ? {
-                      ...entry,
-                      loaded,
-                      total: Math.max(total, 1),
-                      progress,
-                    }
-                  : entry
-              ),
-            },
-          }));
-        });
+        const staged = await uploadFileToConvexStorage(
+          file,
+          ({ loaded, total, progress }) => {
+            set((state) => ({
+              kbUploadProgressByMember: {
+                ...state.kbUploadProgressByMember,
+                [memberId]: (
+                  state.kbUploadProgressByMember[memberId] ?? []
+                ).map((entry) =>
+                  entry.localId === localId
+                    ? {
+                        ...entry,
+                        loaded,
+                        total: Math.max(total, 1),
+                        progress,
+                      }
+                    : entry,
+                ),
+              },
+            }));
+          },
+        );
 
         const created = await createKbDocumentRecord({
           memberId,
@@ -3392,13 +4393,21 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         set((state) => {
           const current = state.kbDocumentsByMember[memberId] ?? [];
-          const deduped = current.filter((row) => row.id !== created.document.id);
-          const nextRows = [created.document, ...deduped].sort((a, b) => b.updatedAt - a.updatedAt);
+          const deduped = current.filter(
+            (row) => row.id !== created.document.id,
+          );
+          const nextRows = [created.document, ...deduped].sort(
+            (a, b) => b.updatedAt - a.updatedAt,
+          );
           return {
             members: state.members.map((item) =>
               item.id === memberId
-                ? { ...item, kbStoreName: created.document.kbStoreName, updatedAt: Date.now() }
-                : item
+                ? {
+                    ...item,
+                    kbStoreName: created.document.kbStoreName,
+                    updatedAt: Date.now(),
+                  }
+                : item,
             ),
             kbDocumentsByMember: {
               ...state.kbDocumentsByMember,
@@ -3415,20 +4424,21 @@ export const useAppStore = create<AppState>((set, get) => ({
           .then(() => get().fetchDocsForMember(memberId))
           .catch(() => get().fetchDocsForMember(memberId));
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Upload failed';
+        const message =
+          error instanceof Error ? error.message : "Upload failed";
         const failedRow: KbDocumentLifecycle = {
           id: `upload-failed-${localId}`,
           memberId,
-          storageId: '',
+          storageId: "",
           displayName: file.name,
           mimeType: file.type || undefined,
           sizeBytes: file.size,
-          kbStoreName: member.kbStoreName ?? '',
-          kbDocumentName: '',
-          uploadStatus: 'failed',
-          chunkingStatus: 'failed',
-          indexingStatus: 'failed',
-          metadataStatus: 'failed',
+          kbStoreName: member.kbStoreName ?? "",
+          kbDocumentName: "",
+          uploadStatus: "failed",
+          chunkingStatus: "failed",
+          indexingStatus: "failed",
+          metadataStatus: "failed",
           chunkConfig,
           ingestErrorChunking: message,
           ingestErrorIndexing: message,
@@ -3440,14 +4450,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => ({
           kbDocumentsByMember: {
             ...state.kbDocumentsByMember,
-            [memberId]: [failedRow, ...(state.kbDocumentsByMember[memberId] ?? [])],
+            [memberId]: [
+              failedRow,
+              ...(state.kbDocumentsByMember[memberId] ?? []),
+            ],
           },
         }));
       } finally {
         set((state) => ({
           kbUploadProgressByMember: {
             ...state.kbUploadProgressByMember,
-            [memberId]: (state.kbUploadProgressByMember[memberId] ?? []).filter((entry) => entry.localId !== localId),
+            [memberId]: (state.kbUploadProgressByMember[memberId] ?? []).filter(
+              (entry) => entry.localId !== localId,
+            ),
           },
         }));
       }
@@ -3477,7 +4492,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const missingMembers = get().members.filter(
-      (member) => !member.deletedAt && get().kbDocumentsByMember[member.id] === undefined
+      (member) =>
+        !member.deletedAt && get().kbDocumentsByMember[member.id] === undefined,
     );
     if (missingMembers.length === 0) return;
 
@@ -3490,17 +4506,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           } catch {
             return { memberId: member.id, docs: [] as KbDocumentLifecycle[] };
           }
-        })
+        }),
       );
 
       set((state) => ({
         kbDocumentsByMember: {
           ...state.kbDocumentsByMember,
-          ...Object.fromEntries(results.map((result) => [result.memberId, result.docs])),
+          ...Object.fromEntries(
+            results.map((result) => [result.memberId, result.docs]),
+          ),
         },
         memberDocuments: {
           ...state.memberDocuments,
-          ...Object.fromEntries(results.map((result) => [result.memberId, lifecycleToMemberDocuments(result.docs)])),
+          ...Object.fromEntries(
+            results.map((result) => [
+              result.memberId,
+              lifecycleToMemberDocuments(result.docs),
+            ]),
+          ),
         },
       }));
     })();
@@ -3514,7 +4537,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteDocForMember: async (memberId, kbDocumentId) => {
     const member = get().members.find((item) => item.id === memberId);
-    if (!member || !kbDocumentId) return { ok: false, error: 'Member or document not found' };
+    if (!member || !kbDocumentId)
+      return { ok: false, error: "Member or document not found" };
 
     set((state) => ({
       kbDeletingDocumentIds: {
@@ -3527,18 +4551,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await deleteKbDocument({ kbDocumentId });
       await get().fetchDocsForMember(memberId);
       if (!result.ok) {
-        return { ok: false, error: result.error ?? 'Delete failed' };
+        return { ok: false, error: result.error ?? "Delete failed" };
       }
       if (result.clearedStoreName) {
         set((state) => ({
           members: state.members.map((item) =>
-            item.id === memberId ? { ...item, kbStoreName: undefined, updatedAt: Date.now() } : item
+            item.id === memberId
+              ? { ...item, kbStoreName: undefined, updatedAt: Date.now() }
+              : item,
           ),
         }));
       }
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Delete failed' };
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Delete failed",
+      };
     } finally {
       set((state) => ({
         kbDeletingDocumentIds: {
@@ -3562,7 +4591,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchDocsForMember(memberId);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Retry indexing failed' };
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Retry indexing failed",
+      };
     } finally {
       set((state) => ({
         kbRetryingIndexDocumentIds: {
@@ -3586,7 +4618,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchDocsForMember(memberId);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Retry metadata failed' };
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Retry metadata failed",
+      };
     } finally {
       set((state) => ({
         kbRetryingMetadataDocumentIds: {
@@ -3610,7 +4645,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().fetchDocsForMember(memberId);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Reprocess failed' };
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Reprocess failed",
+      };
     } finally {
       set((state) => ({
         kbReprocessingDocumentIds: {

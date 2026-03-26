@@ -1,25 +1,54 @@
-import { useEffect, useRef, useState } from 'react';
-import { AlignJustify, Brain, Check, ChevronDown, Loader2, Mic, Search, SendHorizontal, Square, Zap } from 'lucide-react';
-import { Button } from '../../components/ui/button';
-import { Textarea } from '../../components/ui/textarea';
-import { cn } from '../../lib/utils';
-import { transcribeRecordedAudio } from '../../lib/aiClient';
-import { appendTranscriptToDraft } from './audio';
-import { LiveWaveform } from './LiveWaveform';
-import { useAudioRecorder } from './useAudioRecorder';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
-import type { ChamberResponseMode } from '../../types/domain';
+import { useEffect, useRef, useState } from "react";
+import {
+  AlignJustify,
+  Brain,
+  Check,
+  ChevronDown,
+  Loader2,
+  Mic,
+  Search,
+  SendHorizontal,
+  Square,
+  Zap,
+} from "lucide-react";
+import { Button } from "../../components/ui/button";
+import { Textarea } from "../../components/ui/textarea";
+import { cn } from "../../lib/utils";
+import { transcribeRecordedAudio } from "../../lib/aiClient";
+import { appendTranscriptToDraft } from "./audio";
+import { LiveWaveform } from "./LiveWaveform";
+import { useAudioRecorder } from "./useAudioRecorder";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
+import type { ChamberResponseMode } from "../../types/domain";
+import type { Dispatch, SetStateAction } from "react";
 
 interface ComposerProps {
-  onSend: (payload: { text: string; mentionedMemberIds?: string[] }) => void | Promise<void>;
+  onSend: (payload: {
+    text: string;
+    mentionedMemberIds?: string[];
+  }) => void | Promise<void>;
   placeholder?: string;
   sendDisabled?: boolean;
   mentionOptions?: Array<{ id: string; name: string }>;
   mentionError?: string;
+  value: string;
+  onValueChange: Dispatch<SetStateAction<string>>;
+  selectedMentionIds: string[];
+  onSelectedMentionIdsChange: Dispatch<SetStateAction<string[]>>;
   chamberResponseMode?: ChamberResponseMode;
-  onChamberResponseModeChange?: (mode: ChamberResponseMode) => void | Promise<void>;
+  onChamberResponseModeChange?: (
+    mode: ChamberResponseMode,
+  ) => void | Promise<void>;
   timeAwareReentryEnabled?: boolean;
   onTimeAwareReentryEnabledChange?: (enabled: boolean) => void | Promise<void>;
+  sendLabel?: string;
+  focusNonce?: number;
 }
 
 const CHAMBER_MODE_OPTIONS: Array<{
@@ -28,31 +57,60 @@ const CHAMBER_MODE_OPTIONS: Array<{
   description: string;
   Icon: typeof Zap;
 }> = [
-  { value: 'instant', label: 'Instant', description: 'Fast default reply', Icon: Zap },
-  { value: 'short', label: 'Short', description: 'Concise default reply', Icon: AlignJustify },
-  { value: 'think', label: 'Think', description: 'Reason more before replying', Icon: Brain },
-  { value: 'brainstorm', label: 'Brainstorm', description: 'Wider, more surprising angles', Icon: Search },
-  { value: 'deep_dive', label: 'Deep Dive', description: 'Explore broadly, then dig into the best paths', Icon: Search },
+  {
+    value: "instant",
+    label: "Instant",
+    description: "Fast default reply",
+    Icon: Zap,
+  },
+  {
+    value: "short",
+    label: "Short",
+    description: "Concise default reply",
+    Icon: AlignJustify,
+  },
+  {
+    value: "think",
+    label: "Think",
+    description: "Reason more before replying",
+    Icon: Brain,
+  },
+  {
+    value: "brainstorm",
+    label: "Brainstorm",
+    description: "Wider, more surprising angles",
+    Icon: Search,
+  },
+  {
+    value: "deep_dive",
+    label: "Deep Dive",
+    description: "Explore broadly, then dig into the best paths",
+    Icon: Search,
+  },
 ];
 
 export function Composer({
   onSend,
-  placeholder = 'Ask your council something...',
+  placeholder = "Ask your council something...",
   sendDisabled = false,
   mentionOptions = [],
   mentionError,
+  value,
+  onValueChange,
+  selectedMentionIds,
+  onSelectedMentionIdsChange,
   chamberResponseMode,
   onChamberResponseModeChange,
   timeAwareReentryEnabled,
   onTimeAwareReentryEnabledChange,
+  sendLabel = "Send",
+  focusNonce,
 }: ComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([]);
   const {
     isRecording,
     audioStream,
@@ -64,22 +122,32 @@ export function Composer({
     clearError: clearRecorderError,
   } = useAudioRecorder();
 
-  const hasText = inputValue.trim().length > 0;
+  const hasText = value.trim().length > 0;
   const isLocked = sendDisabled || isSubmitting || isVoiceProcessing;
 
   useEffect(() => {
     const mentionSet = new Set(mentionOptions.map((item) => item.id));
-    setSelectedMentionIds((current) => current.filter((id) => mentionSet.has(id)));
-  }, [mentionOptions]);
+    onSelectedMentionIdsChange((current) => {
+      const filtered = current.filter((id) => mentionSet.has(id));
+      return filtered.length === current.length ? current : filtered;
+    });
+  }, [mentionOptions, onSelectedMentionIdsChange]);
 
   useEffect(() => {
     if (!inputRef.current) return;
-    inputRef.current.style.height = 'auto';
+    inputRef.current.style.height = "auto";
     inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 176)}px`;
-  }, [inputValue, isRecording]);
+  }, [isRecording, value]);
+
+  useEffect(() => {
+    if (!focusNonce) return;
+    inputRef.current?.focus();
+    const length = inputRef.current?.value.length ?? 0;
+    inputRef.current?.setSelectionRange(length, length);
+  }, [focusNonce]);
 
   const toggleMention = (memberId: string) => {
-    setSelectedMentionIds((current) => {
+    onSelectedMentionIdsChange((current) => {
       if (current.includes(memberId)) {
         return current.filter((id) => id !== memberId);
       }
@@ -89,19 +157,24 @@ export function Composer({
 
   const submit = async () => {
     if (isLocked || isRecording) return;
-    const text = inputValue.trim();
+    const text = value.trim();
     if (!text) return;
     setSendError(null);
     setIsSubmitting(true);
     try {
       await onSend({
         text,
-        mentionedMemberIds: selectedMentionIds.length > 0 ? selectedMentionIds : undefined,
+        mentionedMemberIds:
+          selectedMentionIds.length > 0 ? selectedMentionIds : undefined,
       });
-      setInputValue('');
-      setSelectedMentionIds([]);
+      onValueChange("");
+      onSelectedMentionIdsChange([]);
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : 'Could not send message right now.');
+      setSendError(
+        error instanceof Error
+          ? error.message
+          : "Could not send message right now.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -121,17 +194,28 @@ export function Composer({
     try {
       const blob = await stopRecording();
       if (!blob) return;
-      const response = await transcribeRecordedAudio(blob, blob.type || undefined);
-      setInputValue((current) => appendTranscriptToDraft(current, response.transcript));
+      const response = await transcribeRecordedAudio(
+        blob,
+        blob.type || undefined,
+      );
+      onValueChange((current) =>
+        appendTranscriptToDraft(current, response.transcript),
+      );
     } catch (error) {
-      setVoiceError(error instanceof Error ? error.message : 'Could not transcribe audio right now.');
+      setVoiceError(
+        error instanceof Error
+          ? error.message
+          : "Could not transcribe audio right now.",
+      );
     } finally {
       setIsVoiceProcessing(false);
     }
   };
 
   const currentVoiceError = voiceError ?? recorderError;
-  const activeMode = CHAMBER_MODE_OPTIONS.find((option) => option.value === chamberResponseMode);
+  const activeMode = CHAMBER_MODE_OPTIONS.find(
+    (option) => option.value === chamberResponseMode,
+  );
   const ActiveModeIcon = activeMode?.Icon ?? Zap;
 
   return (
@@ -146,10 +230,10 @@ export function Composer({
                   key={member.id}
                   type="button"
                   className={cn(
-                    'shrink-0 rounded-md border px-3 py-1 font-mono text-xs transition',
+                    "shrink-0 rounded-md border px-3 py-1 font-mono text-xs transition",
                     active
-                      ? 'border-foreground bg-foreground text-background'
-                      : 'border-border bg-transparent text-muted-foreground hover:border-foreground hover:text-foreground'
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-transparent text-muted-foreground hover:border-foreground hover:text-foreground",
                   )}
                   onClick={() => toggleMention(member.id)}
                   disabled={isLocked}
@@ -170,46 +254,58 @@ export function Composer({
                   size="sm"
                   className="h-8 shrink-0 gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground"
                   disabled={isLocked}
-                  aria-label={`Response mode: ${activeMode?.label ?? 'Instant'}`}
+                  aria-label={`Response mode: ${activeMode?.label ?? "Instant"}`}
                 >
                   <ActiveModeIcon className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{activeMode?.label ?? 'Instant'}</span>
+                  <span className="hidden sm:inline">
+                    {activeMode?.label ?? "Instant"}
+                  </span>
                   <ChevronDown className="h-3 w-3 opacity-70" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-52">
                 <DropdownMenuLabel>Response Mode</DropdownMenuLabel>
-                {CHAMBER_MODE_OPTIONS.map(({ value, label, description, Icon }) => (
-                  <DropdownMenuItem
-                    key={value}
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      void onChamberResponseModeChange(value);
-                    }}
-                    className={cn(
-                      'gap-2',
-                      chamberResponseMode === value && 'bg-muted text-foreground'
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    <div className="min-w-0">
-                      <p className="text-sm">{label}</p>
-                      <p className="text-[11px] text-muted-foreground">{description}</p>
-                    </div>
-                  </DropdownMenuItem>
-                ))}
-                {typeof timeAwareReentryEnabled === 'boolean' && onTimeAwareReentryEnabledChange ? (
+                {CHAMBER_MODE_OPTIONS.map(
+                  ({ value, label, description, Icon }) => (
+                    <DropdownMenuItem
+                      key={value}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        void onChamberResponseModeChange(value);
+                      }}
+                      className={cn(
+                        "gap-2",
+                        chamberResponseMode === value &&
+                          "bg-muted text-foreground",
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm">{label}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {description}
+                        </p>
+                      </div>
+                    </DropdownMenuItem>
+                  ),
+                )}
+                {typeof timeAwareReentryEnabled === "boolean" &&
+                onTimeAwareReentryEnabledChange ? (
                   <>
                     <DropdownMenuLabel>Thread Behavior</DropdownMenuLabel>
                     <DropdownMenuItem
                       onSelect={(event) => {
                         event.preventDefault();
-                        void onTimeAwareReentryEnabledChange(!timeAwareReentryEnabled);
+                        void onTimeAwareReentryEnabledChange(
+                          !timeAwareReentryEnabled,
+                        );
                       }}
                       className="gap-2"
                     >
                       <div className="flex h-3.5 w-3.5 items-center justify-center">
-                        {timeAwareReentryEnabled ? <Check className="h-3.5 w-3.5" /> : null}
+                        {timeAwareReentryEnabled ? (
+                          <Check className="h-3.5 w-3.5" />
+                        ) : null}
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm">Time-Aware Re-entry</p>
@@ -234,9 +330,8 @@ export function Composer({
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {Math.floor(durationSec / 60)
                       .toString()
-                      .padStart(2, '0')}
-                    :
-                    {(durationSec % 60).toString().padStart(2, '0')}
+                      .padStart(2, "0")}
+                    :{(durationSec % 60).toString().padStart(2, "0")}
                   </span>
                 </div>
                 <LiveWaveform audioStream={audioStream} />
@@ -246,14 +341,14 @@ export function Composer({
                 ref={inputRef}
                 placeholder={placeholder}
                 rows={1}
-                value={inputValue}
+                value={value}
                 className="max-h-44 min-h-[1.75rem] resize-none border-0 bg-transparent px-3 py-1.5 leading-[1.4] focus-visible:ring-0"
                 onChange={(event) => {
                   setSendError(null);
-                  setInputValue(event.currentTarget.value);
+                  onValueChange(event.currentTarget.value);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
+                  if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     if (!isLocked) {
                       void submit();
@@ -269,8 +364,10 @@ export function Composer({
               variant="ghost"
               size="icon"
               className={cn(
-                'h-8 w-8 rounded-md text-muted-foreground hover:text-foreground',
-                isRecording ? 'bg-destructive/15 text-destructive hover:text-destructive' : ''
+                "h-8 w-8 rounded-md text-muted-foreground hover:text-foreground",
+                isRecording
+                  ? "bg-destructive/15 text-destructive hover:text-destructive"
+                  : "",
               )}
               onClick={() => {
                 void handleMicClick();
@@ -288,24 +385,32 @@ export function Composer({
             <Button
               size="icon"
               className={cn(
-                'h-8 w-8 rounded-md transition-colors',
+                "h-8 w-8 rounded-md transition-colors",
                 hasText && !isLocked && !isRecording
-                  ? 'bg-foreground text-background hover:bg-foreground/90'
-                  : 'bg-muted text-muted-foreground hover:bg-muted'
+                  ? "bg-foreground text-background hover:bg-foreground/90"
+                  : "bg-muted text-muted-foreground hover:bg-muted",
               )}
               onClick={() => {
                 void submit();
               }}
               disabled={!hasText || isLocked || isRecording}
+              title={sendLabel}
+              aria-label={sendLabel}
             >
               <SendHorizontal className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
-        {mentionError ? <p className="px-2 text-xs text-destructive">{mentionError}</p> : null}
-        {sendError ? <p className="px-2 text-xs text-destructive">{sendError}</p> : null}
-        {currentVoiceError ? <p className="px-2 text-xs text-destructive">{currentVoiceError}</p> : null}
+        {mentionError ? (
+          <p className="px-2 text-xs text-destructive">{mentionError}</p>
+        ) : null}
+        {sendError ? (
+          <p className="px-2 text-xs text-destructive">{sendError}</p>
+        ) : null}
+        {currentVoiceError ? (
+          <p className="px-2 text-xs text-destructive">{currentVoiceError}</p>
+        ) : null}
         {isRecording ? (
           <div className="px-2 text-[11px] text-muted-foreground">
             <button

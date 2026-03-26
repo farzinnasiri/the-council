@@ -25,8 +25,8 @@ import type {
   PromptTraceRecord,
   ThemeMode,
   User,
-} from '../types/domain';
-import type { CompactionPolicy as CompactionPolicyConfig } from '../constants/compactionPolicy';
+} from "../types/domain";
+import type { CompactionPolicy as CompactionPolicyConfig } from "../constants/compactionPolicy";
 
 export interface CreateMemberInput {
   name: string;
@@ -62,7 +62,11 @@ export interface CreateHallInput {
 
 export interface AppendMessagesInput {
   conversationId: string;
-  messages: Array<Omit<Message, 'id' | 'createdAt' | 'compacted'> & { promptTraceDraft?: PromptTraceDraft }>;
+  messages: Array<
+    Omit<Message, "id" | "createdAt" | "compacted"> & {
+      promptTraceDraft?: PromptTraceDraft;
+    }
+  >;
 }
 
 export interface CouncilSnapshot {
@@ -74,7 +78,7 @@ export interface CouncilSnapshot {
 export interface RouteResult {
   chosenMemberIds: string[];
   model: string;
-  source: 'llm' | 'fallback';
+  source: "llm" | "fallback";
 }
 
 export interface HallTitleResult {
@@ -152,10 +156,10 @@ export interface KbDocumentLifecycle {
   sizeBytes?: number;
   kbStoreName: string;
   kbDocumentName: string;
-  uploadStatus: 'uploaded' | 'failed';
-  chunkingStatus: 'pending' | 'running' | 'completed' | 'failed';
-  indexingStatus: 'pending' | 'running' | 'completed' | 'failed';
-  metadataStatus: 'pending' | 'running' | 'completed' | 'failed';
+  uploadStatus: "uploaded" | "failed";
+  chunkingStatus: "pending" | "running" | "completed" | "failed";
+  indexingStatus: "pending" | "running" | "completed" | "failed";
+  metadataStatus: "pending" | "running" | "completed" | "failed";
   chunkConfig: KbChunkConfig;
   chunkCountTotal?: number;
   chunkCountIndexed?: number;
@@ -198,10 +202,22 @@ export interface CouncilRepository {
     episodes: MemberMemoryEpisode[];
     refreshState: MemberMemoryRefreshState | null;
   }>;
-  saveMemberInteractionPolicy(input: { memberId: string; body: string }): Promise<MemberMemoryDocument | null>;
-  saveMemberMentalModel(input: { memberId: string; body: string }): Promise<MemberMemoryDocument | null>;
-  unlockMemberMemory(input: { memberId: string; kind: 'interaction_policy' | 'mental_model' }): Promise<void>;
-  queueMemberMemoryRefresh(input: { memberId: string; force?: boolean }): Promise<{ scheduled: boolean }>;
+  saveMemberInteractionPolicy(input: {
+    memberId: string;
+    body: string;
+  }): Promise<MemberMemoryDocument | null>;
+  saveMemberMentalModel(input: {
+    memberId: string;
+    body: string;
+  }): Promise<MemberMemoryDocument | null>;
+  unlockMemberMemory(input: {
+    memberId: string;
+    kind: "interaction_policy" | "mental_model";
+  }): Promise<void>;
+  queueMemberMemoryRefresh(input: {
+    memberId: string;
+    force?: boolean;
+  }): Promise<{ scheduled: boolean }>;
   updateMemberMemoryEpisode(input: {
     episodeId: string;
     title?: string;
@@ -212,7 +228,10 @@ export interface CouncilRepository {
   listConversations(includeArchived?: boolean): Promise<Conversation[]>;
   listHalls(includeArchived?: boolean): Promise<Conversation[]>;
   listChambers(includeArchived?: boolean): Promise<Conversation[]>;
-  listChamberThreadsByMember(memberId: string, includeArchived?: boolean): Promise<Conversation[]>;
+  listChamberThreadsByMember(
+    memberId: string,
+    includeArchived?: boolean,
+  ): Promise<Conversation[]>;
   createHall(input: CreateHallInput): Promise<Conversation>;
   createChamberThread(memberId: string): Promise<Conversation>;
   startHallFollowUpThread(input: {
@@ -224,9 +243,18 @@ export interface CouncilRepository {
     memory: string;
   }>;
   getLatestChamberThread(memberId: string): Promise<Conversation | null>;
-  setChamberResponseMode(conversationId: string, mode: ChamberResponseMode): Promise<Conversation>;
-  setChamberTimeAwareReentryEnabled(conversationId: string, enabled: boolean): Promise<Conversation>;
-  setChamberPersonalSourcesEnabled(conversationId: string, enabled: boolean): Promise<Conversation>;
+  setChamberResponseMode(
+    conversationId: string,
+    mode: ChamberResponseMode,
+  ): Promise<Conversation>;
+  setChamberTimeAwareReentryEnabled(
+    conversationId: string,
+    enabled: boolean,
+  ): Promise<Conversation>;
+  setChamberPersonalSourcesEnabled(
+    conversationId: string,
+    enabled: boolean,
+  ): Promise<Conversation>;
   setChamberTimeAwareReentryState(input: {
     conversationId: string;
     state?: {
@@ -236,12 +264,21 @@ export interface CouncilRepository {
       activatedAt: number;
     };
   }): Promise<Conversation>;
-  markChamberTimeAwareReentryNoticeSeen(conversationId: string): Promise<Conversation>;
-  renameConversation(conversationId: string, title: string): Promise<Conversation>;
+  markChamberTimeAwareReentryNoticeSeen(
+    conversationId: string,
+  ): Promise<Conversation>;
+  renameConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<Conversation>;
   archiveConversation(conversationId: string): Promise<void>;
-  closeHall(conversationId: string): Promise<{ conversation: Conversation; closingMessage: Message }>;
+  closeHall(
+    conversationId: string,
+  ): Promise<{ conversation: Conversation; closingMessage: Message }>;
   clearChamberByMember(memberId: string): Promise<void>;
-  listConversationGuidanceDirectives(conversationId: string): Promise<ConversationGuidanceDirective[]>;
+  listConversationGuidanceDirectives(
+    conversationId: string,
+  ): Promise<ConversationGuidanceDirective[]>;
   listMessageFeedback(conversationId: string): Promise<MessageFeedback[]>;
   setMessageFeedback(input: {
     messageId: string;
@@ -268,24 +305,47 @@ export interface CouncilRepository {
   }): Promise<{ directivesCreated: number }>;
   reflectChamberGuidance(input: {
     conversationId: string;
-    trigger: 'interval' | 'feedback';
+    trigger: "interval" | "feedback";
     messageId?: string;
     feedbackKeys?: MessageFeedbackKey[];
-  }): Promise<{ directivesCreated: number; model?: string; skippedReason?: string }>;
+  }): Promise<{
+    directivesCreated: number;
+    model?: string;
+    skippedReason?: string;
+  }>;
 
-  listParticipants(conversationId: string, includeRemoved?: boolean): Promise<ConversationParticipant[]>;
-  ensureHallParticipantResponseSlots(conversationId: string): Promise<{ updatedCount: number }>;
+  listParticipants(
+    conversationId: string,
+    includeRemoved?: boolean,
+  ): Promise<ConversationParticipant[]>;
+  ensureHallParticipantResponseSlots(
+    conversationId: string,
+  ): Promise<{ updatedCount: number }>;
   addHallParticipant(conversationId: string, memberId: string): Promise<void>;
-  removeHallParticipant(conversationId: string, memberId: string): Promise<void>;
+  removeHallParticipant(
+    conversationId: string,
+    memberId: string,
+  ): Promise<void>;
 
   listMessages(conversationId: string): Promise<Message[]>;
   listMessagesPage(
     conversationId: string,
-    options?: { cursor?: string | null; limit?: number }
-  ): Promise<{ messages: Message[]; continueCursor: string | null; hasMore: boolean }>;
-  getMessageCounts(conversationId: string): Promise<{ totalNonSystem: number; activeNonSystem: number }>;
-  getLatestChamberMemoryLog(conversationId: string): Promise<ConversationMemoryLog | null>;
-  listMemoryLogsByScope(conversationId: string, scope: 'chamber' | 'hall'): Promise<ConversationMemoryLog[]>;
+    options?: { cursor?: string | null; limit?: number },
+  ): Promise<{
+    messages: Message[];
+    continueCursor: string | null;
+    hasMore: boolean;
+  }>;
+  getMessageCounts(
+    conversationId: string,
+  ): Promise<{ totalNonSystem: number; activeNonSystem: number }>;
+  getLatestChamberMemoryLog(
+    conversationId: string,
+  ): Promise<ConversationMemoryLog | null>;
+  listMemoryLogsByScope(
+    conversationId: string,
+    scope: "chamber" | "hall",
+  ): Promise<ConversationMemoryLog[]>;
   upsertHallRoundSummary(input: {
     conversationId: string;
     roundNumber: number;
@@ -299,14 +359,29 @@ export interface CouncilRepository {
   getMessagePromptTrace(messageId: string): Promise<PromptTraceRecord | null>;
   listPromptTraceMessageIds(conversationId: string): Promise<string[]>;
   appendMessages(input: AppendMessagesInput): Promise<Message[]>;
+  deleteLatestTurn(input: {
+    conversationId: string;
+    expectedLatestUserMessageId?: string;
+  }): Promise<{
+    latestUserMessageId: string;
+    deletedMessageIds: string[];
+    deletedAt: number;
+    updatedAt: number;
+    lastMessageAt?: number;
+    guidanceLastReflectedUserTurnCount?: number;
+  }>;
   discardMessage(messageId: string): Promise<Message | null>;
   replaceWithRefinement(input: {
     targetMessageId: string;
-    replacement: Omit<Message, 'id' | 'createdAt' | 'compacted'> & { promptTraceDraft?: PromptTraceDraft };
+    replacement: Omit<Message, "id" | "createdAt" | "compacted"> & {
+      promptTraceDraft?: PromptTraceDraft;
+    };
   }): Promise<{ superseded: Message; replacement: Message }>;
   appendElaborationReply(input: {
     targetMessageId: string;
-    reply: Omit<Message, 'id' | 'createdAt' | 'compacted'> & { promptTraceDraft?: PromptTraceDraft };
+    reply: Omit<Message, "id" | "createdAt" | "compacted"> & {
+      promptTraceDraft?: PromptTraceDraft;
+    };
   }): Promise<Message>;
   clearMessages(conversationId: string): Promise<void>;
   clearChamberSummary(conversationId: string): Promise<void>;
@@ -314,7 +389,7 @@ export interface CouncilRepository {
     conversationId: string,
     summary: string,
     compactedMessageIds: string[],
-    recentRawTail?: number
+    recentRawTail?: number,
   ): Promise<void>;
 
   setToken(token: string | null): void;
@@ -331,14 +406,23 @@ export interface CouncilRepository {
       sizeBytes?: number;
     };
     chunkConfig?: KbChunkConfig;
-  }): Promise<{ personalSourceDocumentId: string; document: PersonalSourceDocument }>;
-  processPersonalSource(input: { personalSourceDocumentId: string }): Promise<{ ok: boolean; document: PersonalSourceDocument }>;
+  }): Promise<{
+    personalSourceDocumentId: string;
+    document: PersonalSourceDocument;
+  }>;
+  processPersonalSource(input: {
+    personalSourceDocumentId: string;
+  }): Promise<{ ok: boolean; document: PersonalSourceDocument }>;
   reprocessPersonalSource(input: {
     personalSourceDocumentId: string;
     chunkConfig?: KbChunkConfig;
   }): Promise<{ ok: boolean; document: PersonalSourceDocument }>;
-  deletePersonalSource(input: { personalSourceDocumentId: string }): Promise<{ ok: boolean }>;
-  getPersonalSourceDownloadUrl(input: { personalSourceDocumentId: string }): Promise<string | null>;
+  deletePersonalSource(input: {
+    personalSourceDocumentId: string;
+  }): Promise<{ ok: boolean }>;
+  getPersonalSourceDownloadUrl(input: {
+    personalSourceDocumentId: string;
+  }): Promise<string | null>;
   listPersonalSourceDigests(): Promise<PersonalSourceDigest[]>;
   updatePersonalSourceDigestMetadata(input: {
     digestId: string;
@@ -347,12 +431,17 @@ export interface CouncilRepository {
       documentKinds: string[];
       semanticClasses: string[];
       queryHints: string[];
-      voice?: 'first_person' | 'second_person' | 'mixed' | 'unknown';
+      voice?: "first_person" | "second_person" | "mixed" | "unknown";
     };
   }): Promise<{ ok: boolean }>;
-  getConversationNotebook(conversationId: string): Promise<ConversationNotebook | null>;
+  getConversationNotebook(
+    conversationId: string,
+  ): Promise<ConversationNotebook | null>;
   listActiveConversationNotebooks(): Promise<ConversationNotebook[]>;
-  saveConversationNotebook(conversationId: string, content: string): Promise<ConversationNotebook | null>;
+  saveConversationNotebook(
+    conversationId: string,
+    content: string,
+  ): Promise<ConversationNotebook | null>;
   archiveConversationNotebook(conversationId: string): Promise<void>;
 
   routeHallMembers(input: {
@@ -386,11 +475,11 @@ export interface CouncilRepository {
     memberId: string;
     message: string;
     previousSummary?: string;
-    contextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    contextMessages?: Array<{ role: "user" | "assistant"; content: string }>;
     hallContext?: string;
     chatProfile?: ChamberResponseMode;
     retrievalStrategy?: RetrievalStrategy;
-    turnDirective?: 'shorter' | 'elaborate';
+    turnDirective?: "shorter" | "elaborate";
     timeAwareReentry?: {
       gapBucket: TimeAwareReentryGapBucket;
       repliesRemaining: 1 | 2;
@@ -403,7 +492,7 @@ export interface CouncilRepository {
   }): Promise<MemberChatResult>;
   prepareRoundtableRound(input: {
     conversationId: string;
-    trigger: 'user_message' | 'continue';
+    trigger: "user_message" | "continue";
     triggerMessageId?: string;
     mentionedMemberIds?: string[];
   }): Promise<RoundtableState>;
@@ -415,7 +504,7 @@ export interface CouncilRepository {
     conversationId: string;
     roundNumber: number;
     speakingMemberId?: string;
-    selectedBy?: 'allocator' | 'mention_boost' | 'user_manual_fallback';
+    selectedBy?: "allocator" | "mention_boost" | "user_manual_fallback";
   }): Promise<RoundtableState>;
   markRoundtableCompleted(input: {
     conversationId: string;
@@ -428,31 +517,38 @@ export interface CouncilRepository {
     memberId: string;
     force?: boolean;
     debugPromptTrace?: boolean;
-  }): Promise<MemberChatResult & { intent: 'speak' | 'challenge' | 'support'; targetMemberId?: string }>;
+  }): Promise<
+    MemberChatResult & {
+      intent: "speak" | "challenge" | "support";
+      targetMemberId?: string;
+    }
+  >;
   chatRoundtableSpeakers(input: {
     conversationId: string;
     roundNumber: number;
     debugPromptTrace?: boolean;
-  }): Promise<Array<{
-    memberId: string;
-    status: 'sent' | 'error';
-    answer: string;
-    intent: 'speak' | 'challenge' | 'support';
-    targetMemberId?: string;
-    error?: string;
-    attemptedResponseModelSlot?: number;
-    attemptedResponseModelSpec?: string;
-    finalResponseModelSlot?: number;
-    finalResponseModelSpec?: string;
-    fallbackUsed?: boolean;
-    promptTraceDraft?: PromptTraceDraft;
-  }>>;
+  }): Promise<
+    Array<{
+      memberId: string;
+      status: "sent" | "error";
+      answer: string;
+      intent: "speak" | "challenge" | "support";
+      targetMemberId?: string;
+      error?: string;
+      attemptedResponseModelSlot?: number;
+      attemptedResponseModelSpec?: string;
+      finalResponseModelSlot?: number;
+      finalResponseModelSpec?: string;
+      fallbackUsed?: boolean;
+      promptTraceDraft?: PromptTraceDraft;
+    }>
+  >;
   compactConversation(input: {
     conversationId: string;
     previousSummary?: string;
-    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    messages: Array<{ role: "user" | "assistant"; content: string }>;
     messageIds: string[];
-    memoryScope?: 'chamber' | 'hall';
+    memoryScope?: "chamber" | "hall";
     memoryContext?: {
       conversationId: string;
       memberName: string;
@@ -465,7 +561,9 @@ export interface CouncilRepository {
     messages: Array<{ author: string; content: string }>;
     model?: string;
   }): Promise<{ summary: string }>;
-  ensureMemberStore(input: { memberId: string }): Promise<{ storeName: string; created: boolean }>;
+  ensureMemberStore(input: {
+    memberId: string;
+  }): Promise<{ storeName: string; created: boolean }>;
   createKbDocumentRecord(input: {
     memberId: string;
     stagedFile: {
@@ -476,18 +574,32 @@ export interface CouncilRepository {
     };
     chunkConfig?: KbChunkConfig;
   }): Promise<{ kbDocumentId: string; document: KbDocumentLifecycle }>;
-  startKbDocumentProcessing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
-  retryKbDocumentIndexing(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
-  retryKbDocumentMetadata(input: { kbDocumentId: string }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  startKbDocumentProcessing(input: {
+    kbDocumentId: string;
+  }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  retryKbDocumentIndexing(input: {
+    kbDocumentId: string;
+  }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
+  retryKbDocumentMetadata(input: {
+    kbDocumentId: string;
+  }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
   reprocessKbDocument(input: {
     kbDocumentId: string;
     chunkConfig?: KbChunkConfig;
   }): Promise<{ ok: boolean; document: KbDocumentLifecycle }>;
-  getKbDocumentDownloadUrl(input: { kbDocumentId: string }): Promise<string | null>;
+  getKbDocumentDownloadUrl(input: {
+    kbDocumentId: string;
+  }): Promise<string | null>;
   listKbDocuments(input: { memberId: string }): Promise<KbDocumentLifecycle[]>;
   deleteKbDocument(input: {
     kbDocumentId: string;
-  }): Promise<{ ok: boolean; alreadyDeleted?: boolean; deletedChunkCount?: number; clearedStoreName?: boolean; error?: string }>;
+  }): Promise<{
+    ok: boolean;
+    alreadyDeleted?: boolean;
+    deletedChunkCount?: number;
+    clearedStoreName?: boolean;
+    error?: string;
+  }>;
   uploadMemberDocuments(input: {
     memberId: string;
     stagedFiles: Array<{
@@ -496,13 +608,23 @@ export interface CouncilRepository {
       mimeType?: string;
       sizeBytes?: number;
     }>;
-  }): Promise<{ storeName: string; documents: Array<{ name?: string; displayName?: string }> }>;
-  listMemberDocuments(input: { memberId: string }): Promise<Array<{ name?: string; displayName?: string }>>;
+  }): Promise<{
+    storeName: string;
+    documents: Array<{ name?: string; displayName?: string }>;
+  }>;
+  listMemberDocuments(input: {
+    memberId: string;
+  }): Promise<Array<{ name?: string; displayName?: string }>>;
   deleteMemberDocument(input: {
     memberId: string;
     documentName: string;
-  }): Promise<{ ok: boolean; documents?: Array<{ name?: string; displayName?: string }> }>;
-  listMemberDigestMetadata(input: { memberId: string }): Promise<KBDigestMetadata[]>;
+  }): Promise<{
+    ok: boolean;
+    documents?: Array<{ name?: string; displayName?: string }>;
+  }>;
+  listMemberDigestMetadata(input: {
+    memberId: string;
+  }): Promise<KBDigestMetadata[]>;
   updateMemberDigestMetadata(input: {
     digestId: string;
     displayName: string;
@@ -511,12 +633,14 @@ export interface CouncilRepository {
   }): Promise<{ ok: boolean }>;
   rehydrateMemberStore(input: {
     memberId: string;
-    mode?: 'missing-only' | 'all';
+    mode?: "missing-only" | "all";
   }): Promise<{
     storeName: string;
     rehydratedCount: number;
     skippedCount: number;
     documents: Array<{ name?: string; displayName?: string }>;
   }>;
-  purgeExpiredStagedDocuments(input: { memberId?: string }): Promise<{ purgedCount: number }>;
+  purgeExpiredStagedDocuments(input: {
+    memberId?: string;
+  }): Promise<{ purgedCount: number }>;
 }
