@@ -3,6 +3,7 @@ import { query, mutation } from './_generated/server';
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { promptTraceDraftValidator, promptTraceRecordValidator } from './promptTraceValidators';
+import { ENABLE_PROMPT_TRACE_DEBUG } from '../shared/featureFlags';
 
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -61,6 +62,7 @@ export async function upsertPromptTraceForMessage(
     };
   }
 ) {
+  if (!ENABLE_PROMPT_TRACE_DEBUG) return;
   if (!input.promptTraceDraft) return;
 
   const existingRows = await listPromptTraceRowsByMessageId(ctx, input.messageId);
@@ -96,6 +98,7 @@ export const getByMessageId = query({
   },
   returns: v.union(promptTraceRecordValidator, v.null()),
   handler: async (ctx, args) => {
+    if (!ENABLE_PROMPT_TRACE_DEBUG) return null;
     const userId = await requireUser(ctx);
     const message = await requireOwnedMessage(ctx, userId, args.messageId);
     await requireOwnedConversation(ctx, userId, message.conversationId);
@@ -117,6 +120,7 @@ export const listMessageIdsByConversation = query({
   },
   returns: v.array(v.id('messages')),
   handler: async (ctx, args) => {
+    if (!ENABLE_PROMPT_TRACE_DEBUG) return [];
     const userId = await requireUser(ctx);
     await requireOwnedConversation(ctx, userId, args.conversationId);
     const rows = await ctx.db
@@ -137,6 +141,7 @@ export const upsertForMessage = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    if (!ENABLE_PROMPT_TRACE_DEBUG) return null;
     const userId = await requireUser(ctx);
     const message = await requireOwnedMessage(ctx, userId, args.messageId);
     if (message.conversationId !== args.conversationId) {

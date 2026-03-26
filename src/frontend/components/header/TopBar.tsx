@@ -18,6 +18,7 @@ import {
   TYPING_INDICATOR_INITIAL_DELAY_MS,
 } from '../../constants/presence';
 import { useChatSpeech } from '../../features/chat/ChatSpeechProvider';
+import { ENABLE_PROMPT_TRACE_DEBUG } from '../../../../shared/featureFlags';
 
 interface TopBarProps {
   conversation?: Conversation;
@@ -296,16 +297,18 @@ export function TopBar({
             <NotebookPen className="h-4 w-4" />
           </Button>
         ) : null}
-        <Button
-          type="button"
-          variant={promptDebugMode ? 'outline' : 'ghost'}
-          className="h-9 shrink-0 gap-1.5 px-3 text-xs"
-          onClick={() => setPromptDebugMode(!promptDebugMode)}
-          aria-label={promptDebugMode ? 'Disable prompt debug mode' : 'Enable prompt debug mode'}
-        >
-          <Bug className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Prompt Debug</span>
-        </Button>
+        {ENABLE_PROMPT_TRACE_DEBUG ? (
+          <Button
+            type="button"
+            variant={promptDebugMode ? 'outline' : 'ghost'}
+            className="h-9 shrink-0 gap-1.5 px-3 text-xs"
+            onClick={() => setPromptDebugMode(!promptDebugMode)}
+            aria-label={promptDebugMode ? 'Disable prompt debug mode' : 'Enable prompt debug mode'}
+          >
+            <Bug className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Prompt Debug</span>
+          </Button>
+        ) : null}
         {isChamber && pinnedMessages.length > 0 ? (
           <DialogPrimitive.Root open={isPinnedManagerOpen} onOpenChange={setIsPinnedManagerOpen}>
             <DialogPrimitive.Trigger asChild>

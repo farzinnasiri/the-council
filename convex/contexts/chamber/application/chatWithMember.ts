@@ -369,6 +369,15 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     includeGuidance: true,
   });
   const effectiveSystemPrompt = renderPromptTraceSections(promptTraceSections);
+  setMainSpanAttributes({
+    'memory.summary.present': Boolean(summaryBlock),
+    'memory.context_messages.count': chamberRuntimeContext.contextMessages.length,
+    'memory.episodes.count': relevantEpisodes.length,
+    'memory.pinned_messages.count': pinnedMessages.length,
+    'memory.mental_model.present': Boolean(mentalModelBlock),
+    'memory.interaction_policy.present': Boolean(interactionPolicyBlock),
+    'user.profile_note.present': Boolean(identityBlock),
+  });
 
   const kbDigests = member.deletedAt ? [] : await listMemberDigests(ctx, args.memberId);
   const participantRows = conversation.kind === 'hall'

@@ -28,7 +28,7 @@ The role of this file is to describe common mistakes and confusion points that a
 1. The workspace path currently includes trailing spaces (`.../the-council  `). Absolute-path tooling can fail with `Not a directory` unless paths preserve those trailing spaces exactly. Prefer repo-relative paths in shell/apply_patch commands.
 2. Wide events default to essential-only output. Set `WIDE_EVENTS_VERBOSE=1` when you need the full debugging payload instead of just the baseline event plus `llm.calls`.
 3. In the chamber retrieval stack, `retrievalModel` does not currently change the embedding backend used for KB vector search. It still uses the OpenAI embedding path in `convex/ai/openaiEmbeddings.ts` unless that is explicitly refactored.
-4. To disable prompt-trace debug mode entirely, hide the UI toggle/button path in `src/frontend/components/header/TopBar.tsx` and `src/frontend/features/chat/MessageBubble.tsx`, and short-circuit backend persistence in `convex/ai/chat.ts`, `convex/ai/roundtable.ts`, and `convex/messages.ts` so `debugPromptTrace`/`promptTraceDraft` are never forwarded or stored.
+4. Prompt-trace debug mode is controlled by `shared/featureFlags.ts`. Set `ENABLE_PROMPT_TRACE_DEBUG = false` to disable the UI controls, frontend fetch path, and backend trace generation/storage together.
 
 ## Required Validation Before Finalizing
 

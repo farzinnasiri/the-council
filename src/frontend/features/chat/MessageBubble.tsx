@@ -11,6 +11,7 @@ import { MarkdownMessage } from './MarkdownMessage';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { cn } from '../../lib/utils';
 import { useChatSpeech } from './ChatSpeechProvider';
+import { ENABLE_PROMPT_TRACE_DEBUG } from '../../../../shared/featureFlags';
 
 const FEEDBACK_OPTIONS = [
   { key: 'helpful', label: 'Helpful', activeLabel: 'Helpful', Icon: ThumbsUp },
@@ -229,6 +230,7 @@ export function MessageBubble({ message }: { message: Message }) {
   const hasPromptTrace = Boolean(promptTraceMessageIdsByConversation[message.conversationId]?.includes(message.id));
   const canOpenPromptTrace =
     Boolean(
+      ENABLE_PROMPT_TRACE_DEBUG &&
       promptDebugMode &&
       hasPromptTrace &&
       !isUser &&
@@ -275,8 +277,17 @@ export function MessageBubble({ message }: { message: Message }) {
   useEffect(() => {
     if (!promptTraceDialogOpen) {
       setCollapsedPromptTraceSections({});
+      return;
     }
-  }, [promptTraceDialogOpen]);
+    if (!promptTrace) {
+      return;
+    }
+    setCollapsedPromptTraceSections(
+      Object.fromEntries(
+        promptTrace.sections.map((section, index) => [`${section.key}-${index}`, true]),
+      ),
+    );
+  }, [promptTrace, promptTraceDialogOpen]);
 
   const openCustomGuidanceDialog = () => {
     setCustomGuidanceChips(existingCustomGuidance?.chips ?? []);

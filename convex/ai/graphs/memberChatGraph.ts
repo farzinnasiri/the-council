@@ -24,7 +24,8 @@ import {
   personalSourceSemanticClassValues,
 } from '../../personalSourcesShared';
 import type { Citation, ContextMessage, GroundedSnippet, KBDocumentDigestHint, KnowledgeRetriever } from './types';
-import { appendMainList, getMainTraceId, setMainSpanAttributes } from '../../observability/wideEvents';
+import { appendMainList, getMainTraceId, incrementMainStat, setMainSpanAttributes } from '../../observability/wideEvents';
+import { sanitizeErrorMessage } from '../../observability/errors';
 import {
   createPromptTraceSection,
   formatPromptTraceQueryList,
@@ -33,6 +34,7 @@ import {
   type PromptTraceKind,
   type PromptTraceSection,
 } from '../../../shared/promptTrace';
+import { ENABLE_PROMPT_TRACE_DEBUG } from '../../../shared/featureFlags';
 
 type RetrievalTurnType = 'style_only' | 'continuation' | 'autobiographical' | 'tactical' | 'factual' | 'mixed';
 type PlannerResponseDirective = 'normal' | 'brief' | 'continue';
@@ -119,6 +121,21 @@ interface KnowledgeRoutePlan {
   rankedCandidates: RankedDigestCandidate[];
 }
 
+type KnowledgePlannerStatus = 'fallback_skip' | 'parsed' | 'empty_fallback' | 'error_fallback';
+type PersonalSourcePlannerStatus = 'unavailable' | 'not_applicable' | 'parsed' | 'error_fallback';
+
+interface RetrievalPlanningResult {
+  plan: RetrievalTurnPlan;
+  plannerStatus: KnowledgePlannerStatus;
+  plannerError?: string;
+}
+
+interface PersonalSourcePlanningResult {
+  plan: PersonalSourcePlan;
+  plannerStatus: PersonalSourcePlannerStatus;
+  plannerError?: string;
+}
+
 interface GroundedEvidence {
   citations: Citation[];
   snippets: GroundedSnippet[];
@@ -129,6 +146,13 @@ interface RetrievePass {
   grounded: boolean;
   retrievalText: string;
   evidence: GroundedEvidence;
+}
+
+interface RetrievePassResult {
+  pass?: RetrievePass;
+  queries: string[];
+  passes: RetrievePass[];
+  errors: string[];
 }
 
 export interface MemberChatInput {
@@ -176,7 +200,6 @@ const retrievalTurnSchema = z.object({
   queryVariants: z
     .array(
       z.object({
-        source: z.literal('knowledge_base').default('knowledge_base'),
         family: z.enum(['anchor', 'tactical', 'autobiographical', 'thematic', 'contrast', 'adjacent', 'wildcard']),
         query: z.string().default(''),
         rationale: z.string().default(''),
@@ -903,14 +926,17 @@ async function safeListDocuments(input: MemberChatInput): Promise<{ docs: Array<
   }
 }
 
-async function safeListPersonalSources(input: MemberChatInput): Promise<{ sources: PersonalSourceDigestHint[] }> {
+async function safeListPersonalSources(input: MemberChatInput): Promise<{ sources: PersonalSourceDigestHint[]; error?: string }> {
   if (!input.personalSourceRetriever) {
     return { sources: [] };
   }
   try {
     return await input.personalSourceRetriever.listSources();
-  } catch {
-    return { sources: [] };
+  } catch (error) {
+    return {
+      sources: [],
+      error: describeKnowledgeError(error),
+    };
   }
 }
 
@@ -964,7 +990,7 @@ function buildPlannerPrompt(
     'Classify the turn, identify the active topic, and propose hidden KB retrieval queries only when they are needed.',
     'If the turn is only about style, length, tone, or formatting, set skipRetrieval=true and responseDirective=brief when appropriate.',
     'If the turn only asks to continue, elaborate, or expand on the most recent assistant answer, set skipRetrieval=true and responseDirective=continue.',
-    'Return queryVariants with source, family, query, and rationale.',
+    'Return queryVariants with family, query, and rationale.',
     'Valid families are: anchor, tactical, autobiographical, thematic, contrast, adjacent, wildcard.',
     `Each queryVariant.query must be a short retrieval query, not a pasted excerpt. Keep it under ${MAX_RETRIEVAL_QUERY_WORDS} words and under ${MAX_RETRIEVAL_QUERY_CHARS} characters.`,
     'Never copy the full user message or large spans of user-provided text into a query.',
@@ -993,11 +1019,14 @@ async function planRetrievalTurn(input: MemberChatInput, context: {
   knowledgeAvailable: boolean;
   retrievalStrategy: RetrievalStrategy;
   strategyConfig: ResolvedRetrievalStrategyConfig;
-}): Promise<RetrievalTurnPlan> {
+}): Promise<RetrievalPlanningResult> {
   const fallback = buildFallbackTurnPlan(input);
 
   if (fallback.skipRetrieval) {
-    return fallback;
+    return {
+      plan: fallback,
+      plannerStatus: 'fallback_skip',
+    };
   }
 
   const target = modelRegistry.resolve(
@@ -1031,26 +1060,42 @@ async function planRetrievalTurn(input: MemberChatInput, context: {
 
     if (plan.turnType === 'style_only' || plan.turnType === 'continuation') {
       return {
-        ...plan,
-        skipRetrieval: true,
-        queryVariants: [],
+        plan: {
+          ...plan,
+          skipRetrieval: true,
+          queryVariants: [],
+        },
+        plannerStatus: 'parsed',
       };
     }
 
     if (plan.skipRetrieval) {
-      return plan;
+      return {
+        plan,
+        plannerStatus: 'parsed',
+      };
     }
 
     if (plan.queryVariants.length === 0) {
       return {
-        ...fallback,
-        reason: 'turn-planner-empty-fallback',
+        plan: {
+          ...fallback,
+          reason: 'turn-planner-empty-fallback',
+        },
+        plannerStatus: 'empty_fallback',
       };
     }
 
-    return plan;
-  } catch {
-    return fallback;
+    return {
+      plan,
+      plannerStatus: 'parsed',
+    };
+  } catch (error) {
+    return {
+      plan: fallback,
+      plannerStatus: 'error_fallback',
+      plannerError: describeKnowledgeError(error),
+    };
   }
 }
 
@@ -1209,14 +1254,17 @@ async function planPersonalSources(input: {
   memberChatInput: MemberChatInput;
   planner: RetrievalTurnPlan;
   sources: PersonalSourceDigestHint[];
-}): Promise<PersonalSourcePlan> {
+}): Promise<PersonalSourcePlanningResult> {
   const fallback = buildFallbackPersonalSourcePlan(input.memberChatInput, input.planner);
   if (!input.sources.length || !shouldConsiderPersonalSources(input.memberChatInput, input.planner)) {
     return {
-      ...fallback,
-      shouldUsePersonalSources: false,
-      reason: input.sources.length ? fallback.reason : 'personal-sources-unavailable',
-      queries: [],
+      plan: {
+        ...fallback,
+        shouldUsePersonalSources: false,
+        reason: input.sources.length ? fallback.reason : 'personal-sources-unavailable',
+        queries: [],
+      },
+      plannerStatus: input.sources.length ? 'not_applicable' : 'unavailable',
     };
   }
 
@@ -1235,13 +1283,23 @@ async function planPersonalSources(input: {
     const sanitized = sanitizePersonalSourcePlan(parsed);
     if (!sanitized.shouldUsePersonalSources) {
       return {
-        ...sanitized,
-        queries: [],
+        plan: {
+          ...sanitized,
+          queries: [],
+        },
+        plannerStatus: 'parsed',
       };
     }
-    return sanitized;
-  } catch {
-    return fallback;
+    return {
+      plan: sanitized,
+      plannerStatus: 'parsed',
+    };
+  } catch (error) {
+    return {
+      plan: fallback,
+      plannerStatus: 'error_fallback',
+      plannerError: describeKnowledgeError(error),
+    };
   }
 }
 
@@ -1285,19 +1343,31 @@ async function retrieveKnowledgePasses(
   queries: string[],
   documentNames: string[] | undefined,
   limit: number,
-): Promise<{ pass?: RetrievePass; queries: string[]; passes: RetrievePass[] }> {
-  const passes = (
-    await Promise.all(
-      queries.map(async (query) => {
-        try {
-          return await retrieveKnowledgeEvidence(input, traceId, query, documentNames, limit);
-        } catch {
-          return undefined;
-        }
-      }),
-    )
-  ).filter((pass): pass is RetrievePass => Boolean(pass));
-  return mergeRetrievePasses(queries, passes);
+  stage: 'first_pass' | 'second_pass',
+): Promise<RetrievePassResult> {
+  const settled = await Promise.all(
+    queries.map(async (query) => {
+      try {
+        return {
+          pass: await retrieveKnowledgeEvidence(input, traceId, query, documentNames, limit),
+        };
+      } catch (error) {
+        return {
+          error: recordKnowledgePathError(stage, error),
+        };
+      }
+    }),
+  );
+  const passes = settled
+    .map((result) => result.pass)
+    .filter((pass): pass is RetrievePass => Boolean(pass));
+  const errors = settled
+    .map((result) => result.error)
+    .filter((error): error is string => Boolean(error));
+  return {
+    ...mergeRetrievePasses(queries, passes),
+    errors,
+  };
 }
 
 async function runWithConcurrency<T, TResult>(
@@ -1361,19 +1431,32 @@ async function retrievePersonalSourcePasses(
   input: MemberChatInput,
   traceId: string,
   plan: PersonalSourcePlan,
-): Promise<{ pass?: RetrievePass; queries: string[]; passes: RetrievePass[] }> {
-  const passes = await runWithConcurrency(
+): Promise<RetrievePassResult> {
+  const results = await runWithConcurrency(
     plan.queries,
     plan.parallelQueryCount,
     async (query) => {
       try {
-        return await retrievePersonalSourceEvidence(input, traceId, query, plan);
-      } catch {
-        return undefined;
+        return {
+          pass: await retrievePersonalSourceEvidence(input, traceId, query, plan),
+        };
+      } catch (error) {
+        return {
+          error: recordPersonalSourcePathError('retrieval', error),
+        };
       }
     },
   );
-  return mergeRetrievePasses(plan.queries.map((query) => query.query), passes);
+  const passes = results
+    .map((result) => result.pass)
+    .filter((pass): pass is RetrievePass => Boolean(pass));
+  const errors = results
+    .map((result) => result.error)
+    .filter((error): error is string => Boolean(error));
+  return {
+    ...mergeRetrievePasses(plan.queries.map((query) => query.query), passes),
+    errors,
+  };
 }
 
 function selectSecondPassDocuments(
@@ -1426,6 +1509,50 @@ function buildSecondPassKnowledgeQueries(input: {
   return dedupeQueries(candidates).slice(0, input.budget);
 }
 
+function describeKnowledgeError(error: unknown): string {
+  const message = sanitizeErrorMessage(error);
+  if (error instanceof Error && error.name && error.name !== 'Error') {
+    return `${error.name}: ${message}`.slice(0, 240);
+  }
+  return message;
+}
+
+function recordKnowledgePathError(stage: string, error: unknown): string {
+  const message = describeKnowledgeError(error);
+  appendMainList('knowledge.errors', `${stage}: ${message}`);
+  incrementMainStat('knowledge.error_count', 1);
+  return message;
+}
+
+function recordPersonalSourcePathError(stage: string, error: unknown): string {
+  const message = describeKnowledgeError(error);
+  appendMainList('personal_source.errors', `${stage}: ${message}`);
+  incrementMainStat('personal_source.error_count', 1);
+  return message;
+}
+
+function explainKnowledgeGate(input: MemberChatInput, planner: RetrievalTurnPlan, knowledgeAvailable: boolean, knowledgeRequested: boolean): string {
+  if (input.knowledgeMode === 'off') return 'knowledge-mode-off';
+  if (planner.skipRetrieval) return 'planner-skip-retrieval';
+  if (!knowledgeAvailable) return 'knowledge-unavailable';
+  if (!knowledgeRequested) return 'planner-produced-no-queries';
+  return 'enabled';
+}
+
+function explainPersonalSourceGate(
+  planner: RetrievalTurnPlan,
+  sourceCount: number,
+  plan: PersonalSourcePlan,
+  runPersonalSources: boolean,
+): string {
+  if (runPersonalSources) return 'enabled';
+  if (planner.skipRetrieval) return 'planner-skip-retrieval';
+  if (sourceCount === 0) return 'personal-sources-unavailable';
+  if (!plan.shouldUsePersonalSources) return 'planner-declined-personal-sources';
+  if (plan.queries.length === 0) return 'planner-produced-no-queries';
+  return 'planner-declined-personal-sources';
+}
+
 export async function runMemberChatGraph(input: MemberChatInput): Promise<MemberChatOutput> {
   const traceId = getMainTraceId();
   const requestedChatProfile = input.chatProfile ?? 'instant';
@@ -1454,16 +1581,44 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     safeListPersonalSources(input),
   ]);
   const knowledgeAvailable = docs.length > 0 && Boolean(input.storeName && input.knowledgeRetriever);
+  setMainSpanAttributes({
+    'knowledge.docs_count': docs.length,
+    'knowledge.available': knowledgeAvailable,
+    'knowledge.error_count': 0,
+    'knowledge.list.error': Boolean(listError),
+    'knowledge.list.error_message': listError || undefined,
+  });
+  if (listError) {
+    appendMainList('knowledge.errors', `list: ${listError}`);
+    incrementMainStat('knowledge.error_count', 1);
+  }
+  setMainSpanAttributes({
+    'personal_source.available': personalSourceState.sources.length > 0,
+    'personal_source.count': personalSourceState.sources.length,
+    'personal_source.error_count': 0,
+    'personal_source.list.error': Boolean(personalSourceState.error),
+    'personal_source.list.error_message': personalSourceState.error || undefined,
+  });
+  if (personalSourceState.error) {
+    appendMainList('personal_source.errors', `list: ${personalSourceState.error}`);
+    incrementMainStat('personal_source.error_count', 1);
+  }
 
-  const planner = await planRetrievalTurn(input, {
+  const planning = await planRetrievalTurn(input, {
     docsCount: docs.length,
     knowledgeAvailable,
     retrievalStrategy: effectiveRetrievalStrategy,
     strategyConfig,
   });
+  const planner = planning.plan;
+  if (planning.plannerError) {
+    appendMainList('knowledge.errors', `planner: ${planning.plannerError}`);
+    incrementMainStat('knowledge.error_count', 1);
+  }
 
   const knowledgeRequested = planner.queryVariants.length > 0;
   const runKnowledge = !planner.skipRetrieval && input.knowledgeMode !== 'off' && knowledgeAvailable && knowledgeRequested;
+  const knowledgeGateReason = explainKnowledgeGate(input, planner, knowledgeAvailable, knowledgeRequested);
   const knowledgeRoute = runKnowledge
     ? buildKnowledgeRoute(input, planner, strategyConfig, effectiveRetrievalStrategy)
     : {
@@ -1477,16 +1632,27 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         rankedCandidates: [],
       };
 
-  const personalSourcePlan = await planPersonalSources({
+  const personalSourcePlanning = await planPersonalSources({
     memberChatInput: input,
     planner,
     sources: personalSourceState.sources,
   });
+  const personalSourcePlan = personalSourcePlanning.plan;
+  if (personalSourcePlanning.plannerError) {
+    appendMainList('personal_source.errors', `planner: ${personalSourcePlanning.plannerError}`);
+    incrementMainStat('personal_source.error_count', 1);
+  }
   const runPersonalSources =
     !planner.skipRetrieval &&
     personalSourcePlan.shouldUsePersonalSources &&
     personalSourcePlan.queries.length > 0 &&
     personalSourceState.sources.length > 0;
+  const personalSourceGateReason = explainPersonalSourceGate(
+    planner,
+    personalSourceState.sources.length,
+    personalSourcePlan,
+    runPersonalSources,
+  );
 
   let knowledgeQueries =
     runKnowledge && (knowledgeRoute.mode !== 'broad' || strategyConfig.allowBroadFallback)
@@ -1503,14 +1669,19 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     'ai.retrieval_strategy': effectiveRetrievalStrategy,
     'ai.turn_type': planner.turnType,
     'ai.retrieval_skipped': planner.skipRetrieval,
-    'knowledge.docs_count': docs.length,
+    'knowledge.planner.status': planning.plannerStatus,
+    'knowledge.planner.error': planning.plannerError,
+    'knowledge.gate.run': runKnowledge,
+    'knowledge.gate.disabled_reason': runKnowledge ? 'none' : knowledgeGateReason,
+    'knowledge.query_count': knowledgeQueries.length,
     'knowledge.route.mode': knowledgeRoute.mode,
     'knowledge.route.selected_doc_count': knowledgeRoute.selectedDocumentNames.length,
     'knowledge.route.summary': knowledgeRoute.summary,
-    'personal_source.count': personalSourceState.sources.length,
+    'personal_source.plan.status': personalSourcePlanning.plannerStatus,
+    'personal_source.plan.error': personalSourcePlanning.plannerError,
+    'personal_source.plan.reason': personalSourcePlan.reason,
     'personal_source.run': runPersonalSources,
-    'personal_source.plan.reason': runPersonalSources ? personalSourcePlan.reason : 'not used',
-    'knowledge.list_error': Boolean(listError),
+    'personal_source.gate.disabled_reason': runPersonalSources ? 'none' : personalSourceGateReason,
   });
 
   const [knowledgeResult, personalSourceResult] = await Promise.all([
@@ -1521,11 +1692,13 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
           knowledgeQueries,
           knowledgeRoute.mode === 'targeted' ? knowledgeRoute.selectedDocumentNames : undefined,
           strategyConfig.initialKnowledgeChunkLimit,
+          'first_pass',
         )
       : Promise.resolve({
           pass: undefined as RetrievePass | undefined,
           queries: [] as string[],
           passes: [] as RetrievePass[],
+          errors: [] as string[],
         }),
     runPersonalSources
       ? retrievePersonalSourcePasses(input, traceId, personalSourcePlan)
@@ -1533,6 +1706,7 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
           pass: undefined as RetrievePass | undefined,
           queries: [] as string[],
           passes: [] as RetrievePass[],
+          errors: [] as string[],
         }),
   ]);
 
@@ -1542,10 +1716,11 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
 
   let secondPassQueries: string[] = [];
   let secondPassDocNames: string[] = [];
-  let secondPassResult: { pass?: RetrievePass; queries: string[]; passes: RetrievePass[] } = {
+  let secondPassResult: RetrievePassResult = {
     pass: undefined,
     queries: [],
     passes: [],
+    errors: [],
   };
 
   if (runKnowledge && strategyConfig.runSecondPassExploitation && knowledgePass?.grounded) {
@@ -1565,6 +1740,7 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
         secondPassQueries,
         secondPassDocNames.length > 0 ? secondPassDocNames : undefined,
         strategyConfig.secondPassKnowledgeChunkLimit,
+        'second_pass',
       );
     }
   }
@@ -1745,14 +1921,17 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
     'ai.context.mode': evidenceMode,
     'ai.context.reason': planner.reason || 'none',
     'knowledge.retrieval.grounded': Boolean(finalKnowledgePass?.grounded),
+    'knowledge.retrieval.first_pass.error_count': knowledgeResult.errors.length,
+    'knowledge.retrieval.second_pass.error_count': secondPassResult.errors.length,
     'personal_source.retrieval.grounded': Boolean(personalSourcePass?.grounded),
+    'personal_source.retrieval.error_count': personalSourceResult.errors.length,
     'knowledge.citation_count': finalKnowledgePass?.evidence.citations.length ?? 0,
     'personal_source.citation_count': personalSourcePass?.evidence.citations.length ?? 0,
     'knowledge.snippet_count': finalKnowledgePass?.evidence.snippets.length ?? 0,
     'personal_source.snippet_count': personalSourcePass?.evidence.snippets.length ?? 0,
   });
 
-  const promptTraceDraft = input.debugPromptTrace
+  const promptTraceDraft = ENABLE_PROMPT_TRACE_DEBUG && input.debugPromptTrace
     ? buildPromptTraceDraft({
         kind: input.promptTraceKind,
         baseSections: combinedPromptTraceSections,

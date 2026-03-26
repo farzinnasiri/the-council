@@ -200,9 +200,9 @@ export async function searchMemberChunks(
       return q.or(...documentNames.map((documentName) => q.eq('kbDocumentName', documentName)));
     },
   });
-
-  return (await ctx.runQuery('kbDocumentChunks:hydrateVectorResults', {
+  const hydrated = (await ctx.runQuery('kbDocumentChunks:hydrateVectorResults', {
     memberId: input.memberId,
     vectorResults,
   })) as RAGEvidenceResult;
+  return hydrated;
 }

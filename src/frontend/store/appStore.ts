@@ -49,6 +49,7 @@ import {
 import { routeToMembers } from '../lib/mockRouting';
 import type { KbChunkConfig, KbDocumentLifecycle } from '../repository/CouncilRepository';
 import { DEFAULT_KB_CHUNK_CONFIG } from '../constants/kbChunking';
+import { ENABLE_PROMPT_TRACE_DEBUG } from '../../../shared/featureFlags';
 
 interface CreateMemberPayload {
   name: string;
@@ -235,11 +236,13 @@ function mapNotebooksByConversation(notebooks: ConversationNotebook[]) {
 }
 
 function readPromptDebugMode(): boolean {
+  if (!ENABLE_PROMPT_TRACE_DEBUG) return false;
   if (typeof window === 'undefined') return false;
   return window.localStorage.getItem(PROMPT_DEBUG_MODE_STORAGE_KEY) === '1';
 }
 
 function writePromptDebugMode(enabled: boolean) {
+  if (!ENABLE_PROMPT_TRACE_DEBUG) return;
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(PROMPT_DEBUG_MODE_STORAGE_KEY, enabled ? '1' : '0');
 }
@@ -1128,6 +1131,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setPromptDebugMode: (enabled) => {
+    if (!ENABLE_PROMPT_TRACE_DEBUG) {
+      set({ promptDebugMode: false });
+      return;
+    }
     writePromptDebugMode(enabled);
     set({ promptDebugMode: enabled });
     get().showToast(
@@ -1142,6 +1149,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   refreshPromptTraceAvailability: async (conversationId) => {
+    if (!ENABLE_PROMPT_TRACE_DEBUG) return;
     const ids = await councilRepository.listPromptTraceMessageIds(conversationId);
     set((state) => ({
       promptTraceMessageIdsByConversation: {
@@ -1152,6 +1160,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   getMessagePromptTrace: async (messageId) => {
+    if (!ENABLE_PROMPT_TRACE_DEBUG) return null;
     const cached = get().promptTraceByMessageId[messageId];
     if (cached !== undefined) {
       return cached ?? null;
