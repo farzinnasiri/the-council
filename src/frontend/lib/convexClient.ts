@@ -8,5 +8,6 @@
  * Do NOT create a second ConvexHttpClient anywhere — it will not have the token.
  */
 import { ConvexReactClient } from 'convex/react';
+import { resolveConvexUrl } from './resolveConvexUrl';
 
-export const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+export const convex = new ConvexReactClient(resolveConvexUrl());

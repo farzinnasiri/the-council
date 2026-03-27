@@ -157,15 +157,16 @@ export function QuickStartPage() {
                         key={member.id}
                         icon={
                           member.avatarUrl ? (
-                            <img src={member.avatarUrl} alt={member.name} className="h-9 w-9 rounded-full object-cover" />
+                            <img src={member.avatarUrl} alt={member.name} className="h-full w-full rounded-full object-cover" />
                           ) : (
-                            <Avatar className="h-9 w-9 rounded-full border border-border">
+                            <Avatar className="h-full w-full rounded-full">
                               <AvatarFallback className="bg-muted text-xs font-medium">
                                 {member.name.slice(0, 2).toUpperCase()}
                               </AvatarFallback>
                             </Avatar>
                           )
                         }
+                        iconFramed={false}
                         label={member.name}
                         meta={threads.length > 0 ? `${threads.length} thread${threads.length === 1 ? '' : 's'}` : 'No threads yet'}
                         onClick={() => {
@@ -204,7 +205,7 @@ export function QuickStartPage() {
                     </div>
                     <Button
                       type="button"
-                      className="gap-2"
+                      className="gap-2 rounded-none"
                       onClick={() => void beginNewConversation(selectedMember.id)}
                       disabled={creatingMemberId === selectedMember.id}
                     >
@@ -251,8 +252,8 @@ export function QuickStartPage() {
 
   return (
     <PageFrame>
-      <div className="mx-auto flex min-h-full max-w-5xl items-center justify-center">
-        <div className="grid w-full max-w-4xl grid-cols-1 gap-3 sm:grid-cols-2 md:gap-4">
+      <div className="mx-auto flex min-h-[calc(100vh-12rem)] w-full items-center justify-center py-8">
+        <div className="flex w-full max-w-2xl flex-col gap-3">
           <QuickStartCard title="New Hall" onClick={() => setView('hall')} />
           <QuickStartCard title="Talk to a Member" onClick={() => setView('member')} />
           <QuickStartCard
@@ -327,16 +328,14 @@ function QuickStartCard({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'flex min-h-40 flex-col justify-between border border-border bg-card p-5 text-left transition hover:border-foreground/20 hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50',
+        'flex min-h-0 items-center justify-between gap-4 border border-border bg-card px-5 py-4 text-left transition hover:border-foreground/20 hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50',
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-lg font-medium">{title}</p>
-          <p className="mt-2 text-sm text-muted-foreground">{meta ?? 'Start here'}</p>
-        </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-lg font-medium">{title}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{meta ?? 'Start here'}</p>
       </div>
+      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
     </button>
   );
 }
@@ -380,11 +379,13 @@ function CompactActionRow({
   icon,
   label,
   meta,
+  iconFramed = true,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
   meta: string;
+  iconFramed?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -393,7 +394,14 @@ function CompactActionRow({
       onClick={onClick}
       className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-muted/40"
     >
-      <div className="grid h-9 w-9 shrink-0 place-items-center border border-border bg-background text-muted-foreground">
+      <div
+        className={cn(
+          'h-9 w-9 shrink-0 overflow-hidden',
+          iconFramed
+            ? 'grid place-items-center border border-border bg-background text-muted-foreground'
+            : 'rounded-full',
+        )}
+      >
         {typeof icon === 'string' ? <UserCircle2 className="h-4 w-4" /> : icon}
       </div>
       <div className="min-w-0 flex-1">

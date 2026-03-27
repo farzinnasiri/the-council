@@ -1230,6 +1230,16 @@ class ConvexCouncilRepository implements CouncilRepository {
     );
   }
 
+  async syncHallParticipants(
+    conversationId: string,
+    memberIds: string[],
+  ): Promise<void> {
+    await this.clientAny.mutation("conversations:syncHallParticipants", {
+      conversationId: conversationId as Id<"conversations">,
+      memberIds: memberIds as Id<"members">[],
+    });
+  }
+
   async addHallParticipant(
     conversationId: string,
     memberId: string,

@@ -2763,11 +2763,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           routingSource = "fallback";
         }
 
-        await Promise.all(
-          routedIds.map((memberId) =>
-            councilRepository.addHallParticipant(conversationId, memberId),
-          ),
-        );
+        await councilRepository.syncHallParticipants(conversationId, routedIds);
 
         activeParticipantIds = routedIds;
         set((current) => ({
@@ -3102,14 +3098,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const toRemove = participantIds.filter(
           (memberId) => !chosenSet.has(memberId),
         );
-        await Promise.all([
-          ...toAdd.map((memberId) =>
-            councilRepository.addHallParticipant(conversationId, memberId),
-          ),
-          ...toRemove.map((memberId) =>
-            councilRepository.removeHallParticipant(conversationId, memberId),
-          ),
-        ]);
+        await councilRepository.syncHallParticipants(conversationId, memberIds);
 
         set((current) => ({
           hallParticipantsByConversation: {
@@ -3158,10 +3147,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           (memberId) => !participantSet.has(memberId),
         );
         if (toAdd.length > 0) {
-          await Promise.all(
-            toAdd.map((memberId) =>
-              councilRepository.addHallParticipant(conversationId, memberId),
-            ),
+          await councilRepository.syncHallParticipants(
+            conversationId,
+            Array.from(new Set([...participantIds, ...toAdd])),
           );
           set((current) => ({
             hallParticipantsByConversation: {

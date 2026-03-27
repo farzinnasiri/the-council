@@ -153,11 +153,6 @@ function configuredHallResponseSlotSet(): Set<number> {
   return new Set(configuredHallResponseSlots());
 }
 
-function pickRandomHallResponseSlot(): number {
-  const slots = configuredHallResponseSlots();
-  return slots[Math.floor(Math.random() * slots.length)] ?? 1;
-}
-
 function assignBalancedHallResponseSlots(memberIds: any[]): Map<string, number> {
   const slots = configuredHallResponseSlots();
   if (memberIds.length === 0) {
@@ -237,6 +232,72 @@ async function ensureHallParticipantResponseSlotsForConversation(
   }
 
   return rowsNeedingAssignment.length;
+}
+
+async function syncHallParticipantsForConversation(
+  ctx: any,
+  conversationId: any,
+  userId: any,
+  memberIds: any[]
+): Promise<void> {
+  const conversation = await getOwnedConversation(ctx, userId, conversationId);
+  if (conversation.kind !== 'hall' || conversation.deletedAt) {
+    throw new Error('Only active hall conversations support participants');
+  }
+  assertHallConversationOpen(conversation);
+
+  const uniqueMemberIds = Array.from(new Set(memberIds));
+  await Promise.all(uniqueMemberIds.map((memberId) => assertOwnedMember(ctx, userId, memberId)));
+
+  const now = Date.now();
+  const desiredMemberIds = new Set(uniqueMemberIds.map((memberId) => String(memberId)));
+  const assignedSlots = assignBalancedHallResponseSlots(uniqueMemberIds);
+  const existingRows = await ctx.db
+    .query('conversationParticipants')
+    .withIndex('by_user_conversation', (q: any) => q.eq('userId', userId).eq('conversationId', conversationId))
+    .collect();
+  const existingByMemberId = new Map(existingRows.map((row: any) => [String(row.memberId), row as any]));
+
+  for (const memberId of uniqueMemberIds) {
+    const slot = assignedSlots.get(String(memberId)) ?? 1;
+    const current: any = existingByMemberId.get(String(memberId));
+    if (!current) {
+      await ctx.db.insert('conversationParticipants', {
+        conversationId,
+        userId,
+        memberId,
+        chatResponseModelSlot: slot,
+        status: 'active',
+        joinedAt: now,
+      });
+      continue;
+    }
+
+    const patch: Record<string, any> = {};
+    if (current.status !== 'active') {
+      patch.status = 'active';
+      patch.joinedAt = now;
+      patch.leftAt = undefined;
+    }
+    if (current.chatResponseModelSlot !== slot) {
+      patch.chatResponseModelSlot = slot;
+    }
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(current._id, patch);
+    }
+  }
+
+  for (const row of existingRows) {
+    if (row.status !== 'active' || desiredMemberIds.has(String(row.memberId))) {
+      continue;
+    }
+    await ctx.db.patch(row._id, {
+      status: 'removed',
+      leftAt: now,
+    });
+  }
+
+  await ctx.db.patch(conversationId, { updatedAt: now });
 }
 
 async function createChamberThreadDoc(ctx: any, userId: any, memberId: any) {
@@ -713,25 +774,28 @@ export const addHallParticipant = mutation({
     const current = existing.find((p: any) => p.memberId === args.memberId);
     if (current?.status === 'active') return null;
 
-    if (current) {
-      await ctx.db.patch(current._id, {
-        status: 'active',
-        chatResponseModelSlot: current.chatResponseModelSlot ?? pickRandomHallResponseSlot(),
-        joinedAt: Date.now(),
-        leftAt: undefined,
-      });
-    } else {
-      await ctx.db.insert('conversationParticipants', {
-        conversationId: args.conversationId,
-        userId,
-        memberId: args.memberId,
-        chatResponseModelSlot: pickRandomHallResponseSlot(),
-        status: 'active',
-        joinedAt: Date.now(),
-      });
-    }
+    const nextMemberIds = Array.from(
+      new Set(
+        existing
+          .filter((row: any) => row.status === 'active')
+          .map((row: any) => row.memberId)
+          .concat(args.memberId)
+      )
+    );
+    await syncHallParticipantsForConversation(ctx, args.conversationId, userId, nextMemberIds);
+    return null;
+  },
+});
 
-    await ctx.db.patch(args.conversationId, { updatedAt: Date.now() });
+export const syncHallParticipants = mutation({
+  args: {
+    conversationId: v.id('conversations'),
+    memberIds: v.array(v.id('members')),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    await syncHallParticipantsForConversation(ctx, args.conversationId, userId, args.memberIds);
     return null;
   },
 });
@@ -773,11 +837,10 @@ export const removeHallParticipant = mutation({
       throw new Error('Hall must keep at least one active member');
     }
 
-    await ctx.db.patch(current._id, {
-      status: 'removed',
-      leftAt: Date.now(),
-    });
-    await ctx.db.patch(args.conversationId, { updatedAt: Date.now() });
+    const nextMemberIds = existing
+      .filter((row: any) => row.status === 'active' && row.memberId !== args.memberId)
+      .map((row: any) => row.memberId);
+    await syncHallParticipantsForConversation(ctx, args.conversationId, userId, nextMemberIds);
     return null;
   },
 });

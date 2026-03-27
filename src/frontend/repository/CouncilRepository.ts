@@ -318,6 +318,7 @@ export interface CouncilRepository {
     conversationId: string,
     includeRemoved?: boolean,
   ): Promise<ConversationParticipant[]>;
+  syncHallParticipants(conversationId: string, memberIds: string[]): Promise<void>;
   ensureHallParticipantResponseSlots(
     conversationId: string,
   ): Promise<{ updatedCount: number }>;
