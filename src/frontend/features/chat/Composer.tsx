@@ -8,6 +8,7 @@ import {
   Mic,
   Search,
   SendHorizontal,
+  Sparkles,
   Square,
   Zap,
 } from "lucide-react";
@@ -79,7 +80,7 @@ const CHAMBER_MODE_OPTIONS: Array<{
     value: "brainstorm",
     label: "Brainstorm",
     description: "Wider, more surprising angles",
-    Icon: Search,
+    Icon: Sparkles,
   },
   {
     value: "deep_dive",
@@ -222,7 +223,7 @@ export function Composer({
     <div className="bg-background px-4 py-4 md:px-8 border-t border-border">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
         {mentionOptions.length > 0 ? (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <div className="no-scrollbar flex items-center gap-2 overflow-x-auto">
             {mentionOptions.map((member) => {
               const active = selectedMentionIds.includes(member.id);
               return (
@@ -245,22 +246,22 @@ export function Composer({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-transparent p-2">
+        <div className="flex items-end gap-2 rounded-lg border border-border bg-transparent p-2">
           {chamberResponseMode && onChamberResponseModeChange ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 shrink-0 gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground"
+                  className="h-8 w-24 shrink-0 justify-start gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground md:w-28"
                   disabled={isLocked}
                   aria-label={`Response mode: ${activeMode?.label ?? "Instant"}`}
                 >
-                  <ActiveModeIcon className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">
+                  <ActiveModeIcon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden truncate sm:inline">
                     {activeMode?.label ?? "Instant"}
                   </span>
-                  <ChevronDown className="h-3 w-3 opacity-70" />
+                  <ChevronDown className="ml-auto h-3 w-3 shrink-0 opacity-70" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-52">
@@ -269,8 +270,7 @@ export function Composer({
                   ({ value, label, description, Icon }) => (
                     <DropdownMenuItem
                       key={value}
-                      onSelect={(event) => {
-                        event.preventDefault();
+                      onSelect={() => {
                         void onChamberResponseModeChange(value);
                       }}
                       className={cn(
@@ -294,8 +294,7 @@ export function Composer({
                   <>
                     <DropdownMenuLabel>Thread Behavior</DropdownMenuLabel>
                     <DropdownMenuItem
-                      onSelect={(event) => {
-                        event.preventDefault();
+                      onSelect={() => {
                         void onTimeAwareReentryEnabledChange(
                           !timeAwareReentryEnabled,
                         );
