@@ -227,18 +227,18 @@ export function TopBar({
   const hasSecondaryRow = Boolean(subtitle || showHallParticipants);
 
   return (
-    <header className="grid min-h-[74px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-border bg-background px-4 py-3 md:min-h-16 md:items-center md:gap-y-2 md:px-6 md:py-2">
-      <div className={hasSecondaryRow ? 'flex min-w-0 items-start gap-3 md:items-center' : 'flex min-w-0 items-center gap-3'}>
-        <Button size="icon" variant="ghost" onClick={onToggleSidebar} aria-label="Toggle sidebar">
+    <header className="grid min-h-[74px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-border bg-background px-4 py-3 md:min-h-16 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-y-2 md:px-6 md:py-2">
+      <div className={hasSecondaryRow ? 'flex min-w-0 items-start md:items-center md:gap-3' : 'flex min-w-0 items-center md:gap-3'}>
+        <Button size="icon" variant="ghost" onClick={onToggleSidebar} aria-label="Toggle sidebar" className="shrink-0">
           <Menu className="h-5 w-5" />
         </Button>
-        <div className="min-w-0 flex-1">
-          <p className="max-w-[16rem] break-words font-mono text-sm font-semibold tracking-tight text-foreground md:max-w-[34rem]">
+        <div className="hidden min-w-0 flex-1 md:block">
+          <p className="max-w-[16rem] truncate whitespace-nowrap font-mono text-sm font-semibold tracking-tight text-foreground md:max-w-[34rem] md:whitespace-normal md:break-words">
             {title}
           </p>
           {subtitle || showHallParticipants ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground md:mt-1">
-              {subtitle ? <span>{subtitle}</span> : null}
+            <div className="mt-2 hidden flex-wrap items-center gap-2 text-xs text-muted-foreground md:mt-1 md:flex">
+              {subtitle ? <span className="truncate">{subtitle}</span> : null}
               {showHallParticipants ? (
                 <CouncilMembersMenu
                   trigger={
@@ -266,7 +266,13 @@ export function TopBar({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 justify-self-end self-start md:flex-nowrap md:items-center md:self-center">
+      <div className="min-w-0 md:hidden">
+        <p className="truncate whitespace-nowrap text-center font-mono text-sm font-semibold tracking-tight text-foreground">
+          {title}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 justify-self-end self-center md:flex-nowrap md:items-center">
         {hasPlayback ? (
           <div className="hidden items-center gap-1 rounded-full border border-border/80 bg-card px-1.5 py-1 shadow-sm md:flex">
             <div className="hidden min-w-0 px-2 md:block">

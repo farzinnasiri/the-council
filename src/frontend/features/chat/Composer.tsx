@@ -253,7 +253,7 @@ export function Composer({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-24 shrink-0 justify-start gap-1 rounded-md px-2 text-muted-foreground hover:text-foreground md:w-28"
+                  className="h-8 w-8 shrink-0 justify-center gap-1 rounded-md px-0 text-muted-foreground hover:text-foreground sm:w-24 sm:justify-start sm:px-2 md:w-28"
                   disabled={isLocked}
                   aria-label={`Response mode: ${activeMode?.label ?? "Instant"}`}
                 >
