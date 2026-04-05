@@ -49,6 +49,7 @@ interface MemberMemoryBundleState {
 }
 
 type ExpandedMemberMemoryEditor = 'interaction_policy' | 'mental_model';
+type MemberEditorView = 'profile' | 'knowledge';
 
 const emptyForm: MemberFormState = {
   name: '',
@@ -114,6 +115,7 @@ export function MembersPage() {
   const [memberMemoryError, setMemberMemoryError] = useState<string | null>(null);
   const [isMemberMemoryDialogOpen, setIsMemberMemoryDialogOpen] = useState(false);
   const [expandedMemberMemoryEditor, setExpandedMemberMemoryEditor] = useState<ExpandedMemberMemoryEditor | null>(null);
+  const [editorView, setEditorView] = useState<MemberEditorView>('profile');
 
   const activeMembers = useMemo(() => members.filter((member) => !member.deletedAt), [members]);
   const archivedMembers = useMemo(() => members.filter((member) => Boolean(member.deletedAt)), [members]);
@@ -126,6 +128,29 @@ export function MembersPage() {
   );
   const isFormActive = isCreating || Boolean(editingMemberId);
   const showKbPanel = isCreating || Boolean(editingMemberId);
+  const kbDocumentsReadyCount = useMemo(
+    () =>
+      editingDocs.filter(
+        (doc) =>
+          doc.chunkingStatus === 'completed' &&
+          doc.indexingStatus === 'completed' &&
+          doc.metadataStatus === 'completed'
+      ).length,
+    [editingDocs]
+  );
+  const kbDocumentsProcessingCount = useMemo(
+    () =>
+      editingDocs.filter(
+        (doc) =>
+          doc.chunkingStatus === 'pending' ||
+          doc.chunkingStatus === 'running' ||
+          doc.indexingStatus === 'pending' ||
+          doc.indexingStatus === 'running' ||
+          doc.metadataStatus === 'pending' ||
+          doc.metadataStatus === 'running'
+      ).length,
+    [editingDocs]
+  );
 
   useEffect(() => {
     void hydrateMemberDocuments();
@@ -206,6 +231,7 @@ export function MembersPage() {
   }, [anyUploadInProgress]);
 
   const startCreate = () => {
+    setEditorView('profile');
     setEditingMemberId(null);
     setForm(emptyForm);
     setIsCreating(true);
@@ -223,9 +249,15 @@ export function MembersPage() {
   };
 
   const startEdit = (memberId: string) => {
+    if (!isCreating && editingMemberId === memberId) {
+      resetForm();
+      return;
+    }
+
     const member = members.find((item) => item.id === memberId);
     if (!member) return;
 
+    setEditorView('profile');
     setEditingMemberId(memberId);
     setForm({
       name: member.name,
@@ -250,6 +282,7 @@ export function MembersPage() {
   };
 
   const resetForm = () => {
+    setEditorView('profile');
     setIsCreating(false);
     setEditingMemberId(null);
     setForm(emptyForm);
@@ -831,333 +864,431 @@ export function MembersPage() {
 
         {isFormActive && (
           <section className="order-1 w-full min-w-0 overflow-x-hidden rounded-lg border border-border bg-transparent p-4 xl:order-2 xl:self-start">
-            <h2 className="font-mono text-sm font-semibold tracking-tight">{editingMemberId ? 'Edit member' : 'Create member'}</h2>
-            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-              Set member identity and manage knowledge.
-            </p>
-
-            <div className="mt-4 space-y-4">
-              <div className="flex items-start gap-3">
-                <AvatarUploader
-                  currentAvatarUrl={editingMember?.avatarUrl}
-                  onUpload={async (blob) => {
-                    if (!editingMemberId) {
-                      setPendingAvatarBlob(blob);
-                      return;
-                    }
-                    await uploadAvatarForMember(editingMemberId, blob);
-                  }}
-                />
-                <label className="grid flex-1 gap-1.5 font-mono text-xs">
-                  Name
-                  <input
-                    className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
-                    value={form.name}
-                    onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Member name"
-                  />
-                </label>
+            <div className="sticky top-0 z-10 -mx-4 -mt-4 border-b border-border bg-background/95 px-4 py-4 backdrop-blur">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-mono text-sm font-semibold tracking-tight">{editingMemberId ? 'Edit member' : 'Create member'}</h2>
+                  <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    Use profile for identity and behavior. Use knowledge for documents and processing.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button className="h-8 gap-2 rounded-md text-xs" onClick={() => void save()} disabled={!form.name.trim() || !form.systemPrompt.trim()}>
+                    <Save className="h-3.5 w-3.5" />
+                    Save
+                  </Button>
+                  <Button variant="ghost" className="h-8 rounded-md text-xs" onClick={resetForm}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
 
-              <label className="grid gap-1.5 font-mono text-xs">
-                <span className="flex items-center justify-between gap-2">
-                  <span>Specialties (csv)</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                    disabled={!form.name.trim() || !form.systemPrompt.trim() || isSuggestingSpecialties}
-                    onClick={() => void generateSpecialties()}
-                    title="Suggest specialties with AI"
-                  >
-                    <Sparkles className="h-3 w-3" />
-                    {isSuggestingSpecialties ? 'Working…' : 'AI'}
-                  </Button>
-                </span>
-                <input
-                  className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
-                  value={form.specialties}
-                  onChange={(event) => setForm((current) => ({ ...current, specialties: event.target.value }))}
-                  placeholder="strategy, execution"
-                />
-              </label>
-
-              <label className="grid gap-1.5 font-mono text-xs">
-                <span className="flex items-center justify-between gap-2">
-                  <span>System prompt</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                    onClick={openPromptDialog}
-                    title="Expand system prompt editor"
-                  >
-                    <Expand className="h-3 w-3" />
-                    Expand
-                  </Button>
-                </span>
-                <textarea
-                  className="min-h-36 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
-                  value={form.systemPrompt}
-                  onChange={(event) => setForm((current) => ({ ...current, systemPrompt: event.target.value }))}
-                  placeholder="Direct instructions for this member..."
-                />
-              </label>
-
-              <label className="grid gap-1.5 font-mono text-xs">
-                <span className="flex items-center justify-between gap-2">
-                  <span>Guidance profile</span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                      onClick={() => void generateGuidance()}
-                      disabled={!editingMemberId || isGeneratingGuidance}
-                      title="Generate guidance profile"
-                    >
-                      {isGeneratingGuidance ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                      {isGeneratingGuidance ? 'Working…' : 'Generate'}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                      onClick={openGuidanceDialog}
-                      title="Expand guidance profile editor"
-                    >
-                      <Expand className="h-3 w-3" />
-                      Expand
-                    </Button>
-                  </div>
-                </span>
-                <textarea
-                  className="min-h-32 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
-                  value={form.guidanceProfilePrompt}
-                  onChange={(event) => setForm((current) => ({ ...current, guidanceProfilePrompt: event.target.value }))}
-                  placeholder="Generated from the system prompt after save"
-                />
-                <p className="font-mono text-[10px] text-muted-foreground">
-                  {form.guidanceProfilePrompt.trim().length > 0
-                    ? 'Guidance profile is editable and will not auto-refresh when the system prompt changes. Press Generate to replace it.'
-                    : 'Generated from the system prompt after save. Existing members can generate it manually.'}
-                </p>
-              </label>
-
-              <label className="grid gap-1.5 font-mono text-xs">
-                <span>Chamber response model</span>
-                <select
-                  className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
-                  value={String(form.chatResponseModelSlot)}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      chatResponseModelSlot: Number.parseInt(event.target.value, 10) || 1,
-                    }))
-                  }
-                >
-                  {(chatResponseModelSlots.length > 0
-                    ? chatResponseModelSlots
-                    : [{ slot: 1, envKey: 'AI_MODEL_CHAT_RESPONSE', modelSpec: 'openai:gpt-5.3-chat-latest', isDefault: true }]
-                  ).map((slot) => (
-                    <option key={slot.slot} value={slot.slot}>
-                      {`Slot ${slot.slot}${slot.isDefault ? ' (default / fallback)' : ''} - ${slot.modelSpec}`}
-                    </option>
-                  ))}
-                </select>
-                <p className="font-mono text-[10px] text-muted-foreground">
-                  This preference applies to chamber replies. Halls assign response models per participant automatically.
-                </p>
-              </label>
-
-              <label className="grid gap-1.5 font-mono text-xs">
-                <span>Speech voice</span>
-                <select
-                  className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
-                  value={form.ttsVoiceName}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, ttsVoiceName: event.target.value as MemberVoiceName }))
-                  }
-                >
-                  {MEMBER_VOICE_OPTIONS.map((voice) => (
-                    <option key={voice.value} value={voice.value}>
-                      {voice.label} - {voice.family}
-                    </option>
-                  ))}
-                </select>
-                <p className="font-mono text-[10px] text-muted-foreground">
-                  {describeMemberVoice(form.ttsVoiceName)}
-                </p>
-              </label>
-
-              <label className="grid gap-1.5 font-mono text-xs">
-                <span className="flex items-center justify-between gap-2">
-                  <span>Voice persona</span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                      onClick={() => void generateVoicePersona()}
-                      disabled={!editingMemberId || isGeneratingVoicePersona}
-                      title="Generate voice persona"
-                    >
-                      {isGeneratingVoicePersona ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                      {isGeneratingVoicePersona ? 'Working…' : 'Generate'}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                      onClick={openVoicePersonaDialog}
-                      title="Expand voice persona editor"
-                    >
-                      <Expand className="h-3 w-3" />
-                      Expand
-                    </Button>
-                  </div>
-                </span>
-                <textarea
-                  className="min-h-28 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
-                  value={form.ttsPersonaPrompt}
-                  onChange={(event) => setForm((current) => ({ ...current, ttsPersonaPrompt: event.target.value }))}
-                  placeholder="Generated from the system prompt after save"
-                />
-                <p className="font-mono text-[10px] text-muted-foreground">
-                  Used only for speech delivery. If blank, TTS falls back to the default explanatory persona.
-                </p>
-              </label>
-
-              <section className="rounded-md border border-border bg-background/50 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      Member Memory
-                    </p>
-                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                      Chamber-only long-term memory for this member. Open the editor to inspect or update the full details.
-                    </p>
-                  </div>
-                </div>
-
-                {memberMemoryError ? (
-                  <p className="mt-2 font-mono text-[11px] text-destructive">{memberMemoryError}</p>
-                ) : null}
-
-                {!editingMemberId ? (
-                  <p className="mt-3 font-mono text-[11px] text-muted-foreground">
-                    Save this member first to inspect or edit member memory.
-                  </p>
-                ) : null}
-
-                {editingMemberId && memberMemoryBundle ? (
-                  <div className="mt-4 rounded-md border border-border/70 bg-background/70 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-2 min-w-0 flex-1">
-                        <div className="flex flex-wrap gap-2">
-                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                            Interaction policy: {memberMemoryBundle.interactionPolicy?.lockedByUser ? 'Locked' : memberMemoryBundle.interactionPolicy ? 'Generated' : 'Empty'}
-                          </span>
-                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                            Mental model: {memberMemoryBundle.mentalModel?.lockedByUser ? 'Locked' : memberMemoryBundle.mentalModel ? 'Generated' : 'Empty'}
-                          </span>
-                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                            Episodes: {memberMemoryBundle.episodes.length}
-                          </span>
-                        </div>
-                        <p className="font-mono text-[10px] text-muted-foreground">
-                          Open the modal to inspect, edit, archive, regenerate, or refresh member memory.
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                          onClick={() => void refreshMemberMemory(true)}
-                          disabled={!editingMemberId || isMemberMemoryLoading}
-                        >
-                          {isMemberMemoryLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
-                          Refresh
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-6 gap-1 rounded-md px-2 text-[10px]"
-                          onClick={() => setIsMemberMemoryDialogOpen(true)}
-                        >
-                          <Expand className="h-3 w-3" />
-                          Open
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-
-              <section className="rounded-md border border-border bg-background/50 p-3">
-                <div className="mb-2">
-                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Personal Sources
-                  </p>
-                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                    Allow this member to access the user&apos;s shared personal source library in chamber threads.
-                  </p>
-                </div>
+              <div className="mt-4 inline-flex rounded-md border border-border bg-muted/30 p-1">
                 <button
                   type="button"
-                  onClick={() =>
-                    setForm((current) => ({
-                      ...current,
-                      personalSourcesPermissionEnabled: !current.personalSourcesPermissionEnabled,
-                    }))
-                  }
-                  className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left font-mono text-xs transition-colors ${
-                    form.personalSourcesPermissionEnabled
-                      ? 'border-foreground/30 bg-foreground text-background'
-                      : 'border-border bg-transparent text-foreground hover:border-foreground/20 hover:bg-muted/40'
+                  onClick={() => setEditorView('profile')}
+                  className={`rounded-md px-3 py-1.5 font-mono text-xs transition-colors ${
+                    editorView === 'profile' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}
+                  aria-pressed={editorView === 'profile'}
                 >
-                  <span>Use personal sources in chamber</span>
-                  <span className="text-[10px] uppercase tracking-[0.14em]">
-                    {form.personalSourcesPermissionEnabled ? 'On' : 'Off'}
-                  </span>
+                  Profile
                 </button>
-              </section>
-
-              <div className="mt-2 flex items-center gap-2">
-                <Button className="h-8 gap-2 rounded-md text-xs" onClick={() => void save()} disabled={!form.name.trim() || !form.systemPrompt.trim()}>
-                  <Save className="h-3.5 w-3.5" />
-                  Save
-                </Button>
-                <Button variant="ghost" className="h-8 rounded-md text-xs" onClick={resetForm}>
-                  Cancel
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => setEditorView('knowledge')}
+                  className={`rounded-md px-3 py-1.5 font-mono text-xs transition-colors ${
+                    editorView === 'knowledge' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  aria-pressed={editorView === 'knowledge'}
+                >
+                  Knowledge
+                </button>
               </div>
+            </div>
 
-              {showKbPanel ? (
-                <section className="mt-4 rounded-md border border-border bg-background p-4 min-w-0">
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="mt-5">
+              {editorView === 'profile' ? (
+                <>
+                  <details open className="border-b border-border/70 py-4">
+                    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                      <div>
+                        <p className="font-mono text-xs font-semibold">Identity</p>
+                        <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                          Core profile fields used across chamber and hall experiences.
+                        </p>
+                      </div>
+                    </summary>
+                    <div className="mt-4 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <AvatarUploader
+                          currentAvatarUrl={editingMember?.avatarUrl}
+                          onUpload={async (blob) => {
+                            if (!editingMemberId) {
+                              setPendingAvatarBlob(blob);
+                              return;
+                            }
+                            await uploadAvatarForMember(editingMemberId, blob);
+                          }}
+                        />
+                        <label className="grid flex-1 gap-1.5 font-mono text-xs">
+                          Name
+                          <input
+                            className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                            value={form.name}
+                            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                            placeholder="Member name"
+                          />
+                        </label>
+                      </div>
+
+                      <label className="grid gap-1.5 font-mono text-xs">
+                        <span className="flex items-center justify-between gap-2">
+                          <span>Specialties (csv)</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                            disabled={!form.name.trim() || !form.systemPrompt.trim() || isSuggestingSpecialties}
+                            onClick={() => void generateSpecialties()}
+                            title="Suggest specialties with AI"
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            {isSuggestingSpecialties ? 'Working…' : 'AI'}
+                          </Button>
+                        </span>
+                        <input
+                          className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                          value={form.specialties}
+                          onChange={(event) => setForm((current) => ({ ...current, specialties: event.target.value }))}
+                          placeholder="strategy, execution"
+                        />
+                      </label>
+                    </div>
+                  </details>
+
+                  <details className="border-b border-border/70 py-4">
+                    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-xs font-semibold">Behavior</p>
+                        <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                          Prompt, guidance, and model preferences for text responses.
+                        </p>
+                      </div>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        {form.systemPrompt.trim() ? 'Prompt configured' : 'No prompt yet'}
+                      </p>
+                    </summary>
+                    <div className="mt-4 space-y-4">
+                      <label className="grid gap-1.5 font-mono text-xs">
+                        <span className="flex items-center justify-between gap-2">
+                          <span>System prompt</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                            onClick={openPromptDialog}
+                            title="Expand system prompt editor"
+                          >
+                            <Expand className="h-3 w-3" />
+                            Open editor
+                          </Button>
+                        </span>
+                        <textarea
+                          className="min-h-36 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                          value={form.systemPrompt}
+                          onChange={(event) => setForm((current) => ({ ...current, systemPrompt: event.target.value }))}
+                          placeholder="Direct instructions for this member..."
+                        />
+                      </label>
+
+                      <label className="grid gap-1.5 font-mono text-xs">
+                        <span className="flex items-center justify-between gap-2">
+                          <span>Guidance profile</span>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                              onClick={() => void generateGuidance()}
+                              disabled={!editingMemberId || isGeneratingGuidance}
+                              title="Generate guidance profile"
+                            >
+                              {isGeneratingGuidance ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                              {isGeneratingGuidance ? 'Working…' : 'Generate'}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                              onClick={openGuidanceDialog}
+                              title="Expand guidance profile editor"
+                            >
+                              <Expand className="h-3 w-3" />
+                              Open editor
+                            </Button>
+                          </div>
+                        </span>
+                        <textarea
+                          className="min-h-32 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                          value={form.guidanceProfilePrompt}
+                          onChange={(event) => setForm((current) => ({ ...current, guidanceProfilePrompt: event.target.value }))}
+                          placeholder="Generated from the system prompt after save"
+                        />
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          {form.guidanceProfilePrompt.trim().length > 0
+                            ? 'Guidance profile is editable and will not auto-refresh when the system prompt changes. Press Generate to replace it.'
+                            : 'Generated from the system prompt after save. Existing members can generate it manually.'}
+                        </p>
+                      </label>
+
+                      <label className="grid gap-1.5 font-mono text-xs">
+                        <span>Chamber response model</span>
+                        <select
+                          className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                          value={String(form.chatResponseModelSlot)}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              chatResponseModelSlot: Number.parseInt(event.target.value, 10) || 1,
+                            }))
+                          }
+                        >
+                          {(chatResponseModelSlots.length > 0
+                            ? chatResponseModelSlots
+                            : [{ slot: 1, envKey: 'AI_MODEL_CHAT_RESPONSE', modelSpec: 'openai:gpt-5.3-chat-latest', isDefault: true }]
+                          ).map((slot) => (
+                            <option key={slot.slot} value={slot.slot}>
+                              {`Slot ${slot.slot}${slot.isDefault ? ' (default / fallback)' : ''} - ${slot.modelSpec}`}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          This preference applies to chamber replies. Halls assign response models per participant automatically.
+                        </p>
+                      </label>
+                    </div>
+                  </details>
+
+                  <details className="border-b border-border/70 py-4">
+                    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-xs font-semibold">Voice</p>
+                        <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                          Speech voice and delivery-specific persona.
+                        </p>
+                      </div>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        {MEMBER_VOICE_OPTIONS.find((voice) => voice.value === form.ttsVoiceName)?.label ?? form.ttsVoiceName}
+                      </p>
+                    </summary>
+                    <div className="mt-4 space-y-4">
+                      <label className="grid gap-1.5 font-mono text-xs">
+                        <span>Speech voice</span>
+                        <select
+                          className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                          value={form.ttsVoiceName}
+                          onChange={(event) =>
+                            setForm((current) => ({ ...current, ttsVoiceName: event.target.value as MemberVoiceName }))
+                          }
+                        >
+                          {MEMBER_VOICE_OPTIONS.map((voice) => (
+                            <option key={voice.value} value={voice.value}>
+                              {voice.label} - {voice.family}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          {describeMemberVoice(form.ttsVoiceName)}
+                        </p>
+                      </label>
+
+                      <label className="grid gap-1.5 font-mono text-xs">
+                        <span className="flex items-center justify-between gap-2">
+                          <span>Voice persona</span>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                              onClick={() => void generateVoicePersona()}
+                              disabled={!editingMemberId || isGeneratingVoicePersona}
+                              title="Generate voice persona"
+                            >
+                              {isGeneratingVoicePersona ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                              {isGeneratingVoicePersona ? 'Working…' : 'Generate'}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                              onClick={openVoicePersonaDialog}
+                              title="Expand voice persona editor"
+                            >
+                              <Expand className="h-3 w-3" />
+                              Open editor
+                            </Button>
+                          </div>
+                        </span>
+                        <textarea
+                          className="min-h-28 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                          value={form.ttsPersonaPrompt}
+                          onChange={(event) => setForm((current) => ({ ...current, ttsPersonaPrompt: event.target.value }))}
+                          placeholder="Generated from the system prompt after save"
+                        />
+                        <p className="font-mono text-[10px] text-muted-foreground">
+                          Used only for speech delivery. If blank, TTS falls back to the default explanatory persona.
+                        </p>
+                      </label>
+                    </div>
+                  </details>
+
+                  <details className="py-4">
+                    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-mono text-xs font-semibold">Memory & access</p>
+                        <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                          Long-term memory and personal source permissions.
+                        </p>
+                      </div>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        {form.personalSourcesPermissionEnabled ? 'Personal sources on' : 'Personal sources off'}
+                      </p>
+                    </summary>
+
+                    <div className="mt-4 space-y-5">
+                      <section>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-mono text-xs font-semibold">Member memory</p>
+                            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                              Chamber-only long-term memory for this member. Open the editor to inspect or update the full details.
+                            </p>
+                          </div>
+                        </div>
+
+                        {memberMemoryError ? (
+                          <p className="mt-2 font-mono text-[11px] text-destructive">{memberMemoryError}</p>
+                        ) : null}
+
+                        {!editingMemberId ? (
+                          <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+                            Save this member first to inspect or edit member memory.
+                          </p>
+                        ) : null}
+
+                        {editingMemberId && memberMemoryBundle ? (
+                          <div className="mt-4 border-t border-border/70 pt-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-2 min-w-0 flex-1">
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                    Interaction policy: {memberMemoryBundle.interactionPolicy?.lockedByUser ? 'Locked' : memberMemoryBundle.interactionPolicy ? 'Generated' : 'Empty'}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                    Mental model: {memberMemoryBundle.mentalModel?.lockedByUser ? 'Locked' : memberMemoryBundle.mentalModel ? 'Generated' : 'Empty'}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                    Episodes: {memberMemoryBundle.episodes.length}
+                                  </span>
+                                </div>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  Open the modal to inspect, edit, archive, regenerate, or refresh member memory.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                                  onClick={() => void refreshMemberMemory(true)}
+                                  disabled={!editingMemberId || isMemberMemoryLoading}
+                                >
+                                  {isMemberMemoryLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
+                                  Refresh
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                                  onClick={() => setIsMemberMemoryDialogOpen(true)}
+                                >
+                                  <Expand className="h-3 w-3" />
+                                  Open
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </section>
+
+                      <section className="border-t border-border/70 pt-4">
+                        <div className="mb-2">
+                          <p className="font-mono text-xs font-semibold">Personal sources</p>
+                          <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                            Allow this member to access the user&apos;s shared personal source library in chamber threads.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setForm((current) => ({
+                              ...current,
+                              personalSourcesPermissionEnabled: !current.personalSourcesPermissionEnabled,
+                            }))
+                          }
+                          className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left font-mono text-xs transition-colors ${
+                            form.personalSourcesPermissionEnabled
+                              ? 'border-foreground/30 bg-foreground text-background'
+                              : 'border-border bg-transparent text-foreground hover:border-foreground/20 hover:bg-muted/40'
+                          }`}
+                        >
+                          <span>Use personal sources in chamber</span>
+                          <span className="text-[10px] uppercase tracking-[0.14em]">
+                            {form.personalSourcesPermissionEnabled ? 'On' : 'Off'}
+                          </span>
+                        </button>
+                      </section>
+                    </div>
+                  </details>
+                </>
+              ) : null}
+
+              {editorView === 'knowledge' && showKbPanel ? (
+                <section className="rounded-md border border-border bg-background p-4 min-w-0">
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
                     <div className="min-w-0 flex-1">
                       <p className="font-mono text-sm font-semibold">Knowledge base</p>
-                      <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
-                        Track upload, chunking, indexing, and metadata per document.
+                      <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                        Upload, process, and tune the document set behind this member.
                       </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          Docs: {editingDocs.length}
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          Ready: {kbDocumentsReadyCount}
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          Processing: {kbDocumentsProcessingCount}
+                        </span>
+                      </div>
                     </div>
                     <label
-                      className={`inline-flex items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 py-1.5 font-mono text-xs transition-colors ${editingMemberId ? 'cursor-pointer hover:border-foreground/20 hover:bg-muted/40' : 'cursor-not-allowed opacity-50'
-                        }`}
+                      className={`inline-flex items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 py-1.5 font-mono text-xs transition-colors ${
+                        editingMemberId ? 'cursor-pointer hover:border-foreground/20 hover:bg-muted/40' : 'cursor-not-allowed opacity-50'
+                      }`}
                     >
                       <Upload className="h-3.5 w-3.5" />
-                      Upload
+                      Upload documents
                       <input
                         type="file"
                         multiple
@@ -1172,9 +1303,16 @@ export function MembersPage() {
                   </div>
 
                   {editingMemberId ? (
-                    <div className="mb-4 rounded-md border border-border/70 bg-muted/20 p-3">
-                      <p className="font-mono text-[11px] font-semibold">Upload chunking defaults</p>
-                      <div className="mt-2 grid gap-2 md:grid-cols-3">
+                    <details className="mb-4 border-b border-border/70 pb-4">
+                      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                        <div>
+                          <p className="font-mono text-xs font-semibold">Default processing</p>
+                          <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                            New uploads inherit these chunking settings.
+                          </p>
+                        </div>
+                      </summary>
+                      <div className="mt-4 grid gap-2 md:grid-cols-3">
                         <label className="grid gap-1 text-[11px]">
                           Preset
                           <select
@@ -1225,7 +1363,7 @@ export function MembersPage() {
                           />
                         </label>
                       </div>
-                    </div>
+                    </details>
                   ) : null}
 
                   {!editingMemberId ? (
@@ -1260,7 +1398,7 @@ export function MembersPage() {
                   ) : null}
 
                   {editingMemberId && editingDocs.length > 0 ? (
-                    <div className="space-y-2">
+                    <div>
                       {editingDocs.map((doc, index) => {
                         const key = doc.id ?? `doc-${index}`;
                         const digest = digestForDoc(doc);
@@ -1278,10 +1416,26 @@ export function MembersPage() {
                           doc.metadataStatus === 'running';
                         const docChunkConfig = getDocChunkConfig(doc.id, doc.chunkConfig);
                         return (
-                          <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20 min-w-0">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="truncate font-mono text-xs font-semibold flex-1 min-w-[100px]">{doc.displayName ?? 'Untitled document'}</span>
-                              <div className="flex items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
+                          <details key={key} className="group border-b border-border/70 py-3 min-w-0">
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-mono text-xs font-semibold">{doc.displayName ?? 'Untitled document'}</p>
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                  <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.chunkingStatus)}`}>
+                                    Chunking: {doc.chunkingStatus}
+                                  </span>
+                                  <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.indexingStatus)}`}>
+                                    Indexing: {doc.indexingStatus}
+                                  </span>
+                                  <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.metadataStatus)}`}>
+                                    Metadata: {doc.metadataStatus}
+                                  </span>
+                                </div>
+                              </div>
+                            </summary>
+
+                            <div className="mt-4 min-w-0">
+                              <div className="mb-3 flex flex-wrap items-center gap-1 opacity-80">
                                 {digest ? (
                                   <Button
                                     type="button"
@@ -1357,32 +1511,32 @@ export function MembersPage() {
                                   </Button>
                                 ) : null}
                               </div>
-                            </div>
-
-                            <div className="mt-3 border-t border-border pt-2 min-w-0">
-                              <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                                <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.chunkingStatus)}`}>
-                                  Chunking: {doc.chunkingStatus}
-                                </span>
-                                <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.indexingStatus)}`}>
-                                  Indexing: {doc.indexingStatus}
-                                </span>
-                                <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.metadataStatus)}`}>
-                                  Metadata: {doc.metadataStatus}
-                                </span>
-                              </div>
                               {doc.ingestErrorIndexing ? (
                                 <p className="mt-1 text-[11px] text-destructive break-words">Indexing error: {doc.ingestErrorIndexing}</p>
                               ) : null}
                               {doc.ingestErrorMetadata ? (
                                 <p className="mt-1 text-[11px] text-destructive break-words">Metadata error: {doc.ingestErrorMetadata}</p>
                               ) : null}
-                              {doc.id && doc.storageId ? (
-                                <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-2 min-w-0">
-                                  <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    Chunking config
+                              {digest ? (
+                                <div className="min-w-0">
+                                  <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground truncate">
+                                    {digest.documentCard.docType || 'other'}
                                   </p>
-                                  <div className="mt-2 grid gap-2 md:grid-cols-[120px_1fr_1fr]">
+                                  {digest.documentCard.about ? (
+                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground break-words">{digest.documentCard.about}</p>
+                                  ) : null}
+                                </div>
+                              ) : isDigestLoading ? (
+                                <p className="text-[11px] text-muted-foreground">Metadata syncing…</p>
+                              ) : (
+                                <p className="text-[11px] text-muted-foreground">No digest metadata yet for this document.</p>
+                              )}
+                              {doc.id && doc.storageId ? (
+                                <details className="mt-3 border-t border-border/70 pt-3">
+                                  <summary className="cursor-pointer list-none font-mono text-[10px] uppercase tracking-wider text-muted-foreground [&::-webkit-details-marker]:hidden">
+                                    Processing settings
+                                  </summary>
+                                  <div className="mt-3 grid gap-2 md:grid-cols-[120px_1fr_1fr]">
                                     <label className="grid gap-1 text-[11px]">
                                       Preset
                                       <select
@@ -1442,24 +1596,10 @@ export function MembersPage() {
                                       />
                                     </label>
                                   </div>
-                                </div>
+                                </details>
                               ) : null}
-                              {digest ? (
-                                <div className="min-w-0">
-                                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground truncate">
-                                    {digest.documentCard.docType || 'other'}
-                                  </p>
-                                  {digest.documentCard.about ? (
-                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground break-words">{digest.documentCard.about}</p>
-                                  ) : null}
-                                </div>
-                              ) : isDigestLoading ? (
-                                <p className="text-[11px] text-muted-foreground">Metadata syncing…</p>
-                              ) : (
-                                <p className="text-[11px] text-muted-foreground">No digest metadata yet for this document.</p>
-                              )}
                             </div>
-                          </article>
+                          </details>
                         );
                       })}
                     </div>
