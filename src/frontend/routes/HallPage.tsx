@@ -82,7 +82,7 @@ export function HallPage() {
       !message.deletedAt &&
       !message.supersededAt,
   );
-  const typingMembers = (pendingReplyMemberIds[conversation.id] ?? [])
+  const typingMembers = Array.from(new Set(pendingReplyMemberIds[conversation.id] ?? []))
     .map((memberId) => members.find((member) => member.id === memberId))
     .filter((member): member is NonNullable<typeof member> => Boolean(member))
     .map((member) => ({

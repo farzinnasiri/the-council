@@ -786,9 +786,15 @@ export function MembersPage() {
   };
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-5 md:px-8 md:py-8">
-      <div className={`mx-auto grid w-full gap-6 ${isFormActive ? 'max-w-6xl lg:grid-cols-[1.2fr_1fr]' : 'max-w-2xl grid-cols-1'}`}>
-        <section className={`space-y-4 ${isFormActive ? 'order-2 lg:order-1' : 'order-1'}`}>
+    <div className="h-full overflow-x-hidden overflow-y-auto px-4 py-5 md:px-8 md:py-8">
+      <div
+        className={`mx-auto grid w-full gap-6 ${
+          isFormActive
+            ? 'max-w-[1400px] grid-cols-1 xl:grid-cols-[minmax(0,560px)_minmax(0,1fr)] xl:items-start'
+            : 'max-w-5xl grid-cols-1'
+        }`}
+      >
+        <section className={`space-y-4 min-w-0 ${isFormActive ? 'order-2 xl:order-1' : 'order-1'}`}>
           <div className="flex items-center justify-between">
             <h1 className="font-mono text-xl font-semibold tracking-tight">Members</h1>
             <Button variant="outline" className="h-8 gap-2 rounded-md text-xs" onClick={startCreate}>
@@ -824,7 +830,7 @@ export function MembersPage() {
         </section>
 
         {isFormActive && (
-          <section className="order-1 rounded-lg border border-border bg-transparent p-4 lg:order-2">
+          <section className="order-1 w-full min-w-0 overflow-x-hidden rounded-lg border border-border bg-transparent p-4 xl:order-2 xl:self-start">
             <h2 className="font-mono text-sm font-semibold tracking-tight">{editingMemberId ? 'Edit member' : 'Create member'}</h2>
             <p className="mt-1 font-mono text-[11px] text-muted-foreground">
               Set member identity and manage knowledge.
@@ -845,7 +851,7 @@ export function MembersPage() {
                 <label className="grid flex-1 gap-1.5 font-mono text-xs">
                   Name
                   <input
-                    className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                    className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
                     value={form.name}
                     onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder="Member name"
@@ -870,7 +876,7 @@ export function MembersPage() {
                   </Button>
                 </span>
                 <input
-                  className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                  className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
                   value={form.specialties}
                   onChange={(event) => setForm((current) => ({ ...current, specialties: event.target.value }))}
                   placeholder="strategy, execution"
@@ -893,7 +899,7 @@ export function MembersPage() {
                   </Button>
                 </span>
                 <textarea
-                  className="min-h-36 rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                  className="min-h-36 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
                   value={form.systemPrompt}
                   onChange={(event) => setForm((current) => ({ ...current, systemPrompt: event.target.value }))}
                   placeholder="Direct instructions for this member..."
@@ -930,7 +936,7 @@ export function MembersPage() {
                   </div>
                 </span>
                 <textarea
-                  className="min-h-32 rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                  className="min-h-32 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
                   value={form.guidanceProfilePrompt}
                   onChange={(event) => setForm((current) => ({ ...current, guidanceProfilePrompt: event.target.value }))}
                   placeholder="Generated from the system prompt after save"
@@ -945,7 +951,7 @@ export function MembersPage() {
               <label className="grid gap-1.5 font-mono text-xs">
                 <span>Chamber response model</span>
                 <select
-                  className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                  className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
                   value={String(form.chatResponseModelSlot)}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -971,7 +977,7 @@ export function MembersPage() {
               <label className="grid gap-1.5 font-mono text-xs">
                 <span>Speech voice</span>
                 <select
-                  className="h-9 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
+                  className="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:border-foreground focus-visible:outline-none transition-colors"
                   value={form.ttsVoiceName}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, ttsVoiceName: event.target.value as MemberVoiceName }))
@@ -1018,7 +1024,7 @@ export function MembersPage() {
                   </div>
                 </span>
                 <textarea
-                  className="min-h-28 rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
+                  className="min-h-28 w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm leading-relaxed focus-visible:border-foreground focus-visible:outline-none transition-colors resize-y"
                   value={form.ttsPersonaPrompt}
                   onChange={(event) => setForm((current) => ({ ...current, ttsPersonaPrompt: event.target.value }))}
                   placeholder="Generated from the system prompt after save"
@@ -1053,7 +1059,7 @@ export function MembersPage() {
                 {editingMemberId && memberMemoryBundle ? (
                   <div className="mt-4 rounded-md border border-border/70 bg-background/70 p-3">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-2">
+                      <div className="space-y-2 min-w-0 flex-1">
                         <div className="flex flex-wrap gap-2">
                           <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
                             Interaction policy: {memberMemoryBundle.interactionPolicy?.lockedByUser ? 'Locked' : memberMemoryBundle.interactionPolicy ? 'Generated' : 'Empty'}
@@ -1069,7 +1075,7 @@ export function MembersPage() {
                           Open the modal to inspect, edit, archive, regenerate, or refresh member memory.
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <Button
                           type="button"
                           size="sm"
@@ -1138,9 +1144,9 @@ export function MembersPage() {
               </div>
 
               {showKbPanel ? (
-                <section className="mt-4 rounded-md border border-border bg-background p-4">
-                  <div className="mb-4 flex items-center justify-between gap-2">
-                    <div>
+                <section className="mt-4 rounded-md border border-border bg-background p-4 min-w-0">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
                       <p className="font-mono text-sm font-semibold">Knowledge base</p>
                       <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
                         Track upload, chunking, indexing, and metadata per document.
@@ -1172,7 +1178,7 @@ export function MembersPage() {
                         <label className="grid gap-1 text-[11px]">
                           Preset
                           <select
-                            className="h-9 rounded-md border border-border bg-background px-2"
+                            className="h-9 w-full rounded-md border border-border bg-background px-2"
                             value={detectKbChunkPreset(uploadChunkConfig)}
                             onChange={(event) => {
                               const preset = event.target.value;
@@ -1192,7 +1198,7 @@ export function MembersPage() {
                             type="number"
                             min={50}
                             max={12000}
-                            className="h-9 rounded-md border border-border bg-background px-3"
+                            className="h-9 w-full rounded-md border border-border bg-background px-3"
                             value={uploadChunkConfig.chunkSizeChars}
                             onChange={(event) =>
                               setUploadChunkConfig((current) => ({
@@ -1208,7 +1214,7 @@ export function MembersPage() {
                             type="number"
                             min={0}
                             max={4000}
-                            className="h-9 rounded-md border border-border bg-background px-3"
+                            className="h-9 w-full rounded-md border border-border bg-background px-3"
                             value={uploadChunkConfig.chunkOverlapChars}
                             onChange={(event) =>
                               setUploadChunkConfig((current) => ({
@@ -1272,9 +1278,9 @@ export function MembersPage() {
                           doc.metadataStatus === 'running';
                         const docChunkConfig = getDocChunkConfig(doc.id, doc.chunkConfig);
                         return (
-                          <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="truncate font-mono text-xs font-semibold">{doc.displayName ?? 'Untitled document'}</span>
+                          <article key={key} className="group rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20 min-w-0">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="truncate font-mono text-xs font-semibold flex-1 min-w-[100px]">{doc.displayName ?? 'Untitled document'}</span>
                               <div className="flex items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
                                 {digest ? (
                                   <Button
@@ -1353,7 +1359,7 @@ export function MembersPage() {
                               </div>
                             </div>
 
-                            <div className="mt-3 border-t border-border pt-2">
+                            <div className="mt-3 border-t border-border pt-2 min-w-0">
                               <div className="mb-2 flex flex-wrap items-center gap-1.5">
                                 <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stageClass(doc.chunkingStatus)}`}>
                                   Chunking: {doc.chunkingStatus}
@@ -1366,13 +1372,13 @@ export function MembersPage() {
                                 </span>
                               </div>
                               {doc.ingestErrorIndexing ? (
-                                <p className="mt-1 text-[11px] text-destructive">Indexing error: {doc.ingestErrorIndexing}</p>
+                                <p className="mt-1 text-[11px] text-destructive break-words">Indexing error: {doc.ingestErrorIndexing}</p>
                               ) : null}
                               {doc.ingestErrorMetadata ? (
-                                <p className="mt-1 text-[11px] text-destructive">Metadata error: {doc.ingestErrorMetadata}</p>
+                                <p className="mt-1 text-[11px] text-destructive break-words">Metadata error: {doc.ingestErrorMetadata}</p>
                               ) : null}
                               {doc.id && doc.storageId ? (
-                                <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-2">
+                                <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-2 min-w-0">
                                   <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                                     Chunking config
                                   </p>
@@ -1380,7 +1386,7 @@ export function MembersPage() {
                                     <label className="grid gap-1 text-[11px]">
                                       Preset
                                       <select
-                                        className="h-8 rounded-md border border-border bg-background px-2"
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2"
                                         value={detectKbChunkPreset(docChunkConfig)}
                                         onChange={(event) => {
                                           const preset = event.target.value;
@@ -1405,7 +1411,7 @@ export function MembersPage() {
                                         type="number"
                                         min={50}
                                         max={12000}
-                                        className="h-8 rounded-md border border-border bg-background px-2"
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2"
                                         value={docChunkConfig.chunkSizeChars}
                                         onChange={(event) =>
                                           updateDocChunkConfig(
@@ -1423,7 +1429,7 @@ export function MembersPage() {
                                         type="number"
                                         min={0}
                                         max={4000}
-                                        className="h-8 rounded-md border border-border bg-background px-2"
+                                        className="h-8 w-full rounded-md border border-border bg-background px-2"
                                         value={docChunkConfig.chunkOverlapChars}
                                         onChange={(event) =>
                                           updateDocChunkConfig(
@@ -1439,14 +1445,14 @@ export function MembersPage() {
                                 </div>
                               ) : null}
                               {digest ? (
-                                <>
-                                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                                <div className="min-w-0">
+                                  <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground truncate">
                                     {digest.documentCard.docType || 'other'}
                                   </p>
                                   {digest.documentCard.about ? (
-                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">{digest.documentCard.about}</p>
+                                    <p className="mt-1 font-mono text-[10px] text-muted-foreground break-words">{digest.documentCard.about}</p>
                                   ) : null}
-                                </>
+                                </div>
                               ) : isDigestLoading ? (
                                 <p className="text-[11px] text-muted-foreground">Metadata syncing…</p>
                               ) : (
@@ -1622,12 +1628,12 @@ export function MembersPage() {
                   {memberMemoryBundle ? (
                     <TooltipProvider>
                       <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                      <div className="rounded-md border border-border/70 bg-background/70 p-3">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <div>
+                      <div className="rounded-md border border-border/70 bg-background/70 p-3 min-w-0">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
                               <MemoryInfoHint description="How this member should answer this user over time. It is generated from cross-thread chat history with this member, explicit feedback, refine actions like shorter or deep dive, and response-pattern signals. It focuses on stable answering habits such as tone, directness, depth, and pacing." />
-                              <p className="font-mono text-xs font-semibold">Interaction policy</p>
+                              <p className="font-mono text-xs font-semibold truncate">Interaction policy</p>
                             </div>
                             <p className="font-mono text-[10px] text-muted-foreground">
                               {memberMemoryBundle.interactionPolicy?.lockedByUser ? 'Locked' : 'Generated'}
@@ -1679,12 +1685,12 @@ export function MembersPage() {
                         </div>
                       </div>
 
-                      <div className="rounded-md border border-border/70 bg-background/70 p-3">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <div>
+                      <div className="rounded-md border border-border/70 bg-background/70 p-3 min-w-0">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
                               <MemoryInfoHint description="This member's current understanding of the user. It is generated from the member's chamber history with this user, guidance profile, feedback, and repeated conversational patterns. It captures goals, preferences, sticking points, and what tends to click from this member's point of view." />
-                              <p className="font-mono text-xs font-semibold">Mental model</p>
+                              <p className="font-mono text-xs font-semibold truncate">Mental model</p>
                             </div>
                             <p className="font-mono text-[10px] text-muted-foreground">
                               {memberMemoryBundle.mentalModel?.lockedByUser ? 'Locked' : 'Generated'}
@@ -1736,7 +1742,7 @@ export function MembersPage() {
                         </div>
                       </div>
 
-                      <div className="rounded-md border border-border/70 bg-background/70 p-3">
+                      <div className="rounded-md border border-border/70 bg-background/70 p-3 min-w-0">
                         <div className="mb-2">
                           <div className="flex items-center gap-1.5">
                             <MemoryInfoHint description="Specific remembered examples from past chats with this member. Episodes are generated when there is enough history and the system can identify concrete moments that worked, failed, or taught something useful about how this member should respond to the user." />
@@ -1751,7 +1757,7 @@ export function MembersPage() {
                             <p className="font-mono text-[11px] text-muted-foreground">No episodes yet.</p>
                           ) : (
                             memberMemoryBundle.episodes.map((episode) => (
-                              <div key={episode.id} className="rounded-md border border-border bg-background/60 p-3">
+                              <div key={episode.id} className="rounded-md border border-border bg-background/60 p-3 min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                   <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                                     {episode.lockedByUser ? 'Locked' : 'Generated'}
@@ -1903,7 +1909,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Display name
                         <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          className="h-10 w-full rounded-lg border border-border bg-background px-3"
                           value={digestEditor.displayName}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, displayName: event.target.value } : current))
@@ -1913,7 +1919,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Document type
                         <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          className="h-10 w-full rounded-lg border border-border bg-background px-3"
                           value={digestEditor.docType}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, docType: event.target.value } : current))
@@ -1923,7 +1929,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Document card
                         <textarea
-                          className="min-h-28 rounded-lg border border-border bg-background px-3 py-2"
+                          className="min-h-28 w-full rounded-lg border border-border bg-background px-3 py-2"
                           value={digestEditor.about}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, about: event.target.value } : current))
@@ -1933,7 +1939,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Best for questions (comma-separated)
                         <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          className="h-10 w-full rounded-lg border border-border bg-background px-3"
                           value={digestEditor.bestFor}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, bestFor: event.target.value } : current))
@@ -1943,7 +1949,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Evidence kinds (comma-separated)
                         <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          className="h-10 w-full rounded-lg border border-border bg-background px-3"
                           value={digestEditor.evidenceKinds}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, evidenceKinds: event.target.value } : current))
@@ -1953,7 +1959,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Not for (comma-separated)
                         <input
-                          className="h-10 rounded-lg border border-border bg-background px-3"
+                          className="h-10 w-full rounded-lg border border-border bg-background px-3"
                           value={digestEditor.notFor}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, notFor: event.target.value } : current))
@@ -1963,7 +1969,7 @@ export function MembersPage() {
                       <label className="grid gap-1 text-sm">
                         Query hints (comma-separated)
                         <textarea
-                          className="min-h-28 rounded-lg border border-border bg-background px-3 py-2"
+                          className="min-h-28 w-full rounded-lg border border-border bg-background px-3 py-2"
                           value={digestEditor.queryHints}
                           onChange={(event) =>
                             setDigestEditor((current) => (current ? { ...current, queryHints: event.target.value } : current))
@@ -2055,7 +2061,7 @@ function MemberList({
       <h2 className="mb-3 font-mono text-xs font-semibold uppercase tracking-tight text-muted-foreground">{title}</h2>
       <div className="grid gap-2">
         {members.map((member) => (
-          <article key={member.id} className="group relative rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
+          <article key={member.id} className="group relative min-w-0 rounded-md border border-border bg-transparent p-3 transition-colors hover:border-foreground/20">
             <div className="flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
                 {member.avatarUrl
@@ -2063,10 +2069,10 @@ function MemberList({
                   : <UserCircle2 className="h-5 w-5 text-muted-foreground/50" />
                 }
               </div>
-              <div className="flex-1">
-                <p className="font-mono text-sm font-semibold">{member.name}</p>
+              <div className="flex-1 min-w-0">
+                <p className="font-mono text-sm font-semibold truncate">{member.name}</p>
                 {member.specialties.length > 0 ? (
-                  <p className="mt-0.5 text-xs text-muted-foreground">{member.specialties.join(' · ')}</p>
+                  <p className="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground">{member.specialties.join(' · ')}</p>
                 ) : null}
               </div>
 
@@ -2082,7 +2088,7 @@ function MemberList({
               ) : null}
             </div>
 
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex flex-wrap items-center gap-3">
               {!archived ? (
                 <Button variant="outline" size="sm" className="h-7 gap-1 rounded-md text-xs" onClick={() => void onCreateChamber(member.id)}>
                   <MessageSquarePlus className="h-3 w-3" />

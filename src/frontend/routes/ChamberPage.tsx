@@ -77,7 +77,7 @@ export function ChamberPage() {
       !message.supersededAt,
   );
   const typingMembers = member
-    ? (pendingReplyMemberIds[conversation.id] ?? [])
+    ? Array.from(new Set(pendingReplyMemberIds[conversation.id] ?? []))
         .filter((pendingMemberId) => pendingMemberId === member.id)
         .map(() => ({
           id: member.id,

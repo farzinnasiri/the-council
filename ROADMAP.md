@@ -253,3 +253,30 @@ Status: Completed (February 25, 2026)
 ## Notes
 - This document captures brainstormed items and an initial ordering.
 - Final sequencing should be validated against dependencies, risk, and release goals.
+
+---
+brainstorm:
+inbox, timed tasks, reminders
+
+better context management in the hall,
+brainstorm on first round in the hall (roundtable)
+
+fast reserach context gathering: using grok and Gemini, do reserach and grounding -> we should think about the ux and product design.
+
+
+Adding cognitive dissonance to members behaviour
+
+memory retention policies, forgetingn memory system
+
+history search mechanims (past chats of the same member/thread)
+
+user commands can overwrite some of reeds system prompt behavior: change your tone, don't use emojis etc -> thread overwrite (targetd feedback)
+
+Use fillers and specific natural language markers: (ok ok, wait, … hmmm, that’s weird) 
+
+paragraph based query builder for kb search (the queris should cover all the parts of the input text)
+
+memebrs setting, size changes of hte layout, and too many boxes inside boxes! the save button very badly postioned
+
+mmebers aread, double creation!
+

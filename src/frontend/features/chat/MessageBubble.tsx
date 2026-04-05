@@ -11,7 +11,9 @@ import {
   MessageSquarePlus,
   NotebookPen,
   Pin,
+  RefreshCcw,
   Reply,
+  RotateCcw,
   Search,
   SlidersHorizontal,
   Square,
@@ -138,6 +140,8 @@ export function MessageBubble({
   onDeleteLatestTurn?: (message: Message) => void | Promise<void>;
   onEditLatestTurn?: (message: Message) => void | Promise<void>;
 }) {
+  if (message.deletedAt) return null;
+
   const [copied, setCopied] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
   const [startingFollowUp, setStartingFollowUp] = useState(false);
@@ -339,9 +343,12 @@ export function MessageBubble({
   );
   const isPinned = Boolean(message.pinnedAt);
   const isRetrying = Boolean(retryingMessageIds[message.id]);
+  const isFallbackGenerationFailure =
+    message.content.trim() === "I could not generate a response." ||
+    message.content.trim() === "Could not generate a response right now.";
   const canRetryFailedGeneration = Boolean(
     message.role === "member" &&
-    message.status === "error" &&
+    (message.status === "error" || isFallbackGenerationFailure) &&
     !message.deletedAt &&
     !message.supersededAt,
   );
@@ -677,14 +684,16 @@ export function MessageBubble({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 rounded-md px-2 text-[11px]"
+                  className="h-8 gap-2 border-destructive/20 rounded-md px-3 text-xs hover:bg-destructive/5 hover:text-destructive"
                   onClick={() => void retryFailedMessage(message.id)}
                   disabled={isRetrying}
                 >
                   {isRetrying ? (
-                    <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
-                  ) : null}
-                  {isRetrying ? "Retrying" : "Retry"}
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  )}
+                  {isRetrying ? "Regenerating..." : "Retry generation"}
                 </Button>
               </div>
             ) : null}

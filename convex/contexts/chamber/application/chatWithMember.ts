@@ -1,5 +1,7 @@
 'use node';
 
+import { resolveOpeningHallDefaults } from '../../hall/domain/openingRoundDefaults';
+
 import { api, internal } from '../../../_generated/api';
 import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
 import { createAiProvider, createKnowledgeRetriever, createPersonalSourceRetriever, toKBDigestHints } from '../../shared/convexGateway';
@@ -399,9 +401,16 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     conversation.kind === 'chamber' &&
     Boolean(member.personalSourcesPermissionEnabled) &&
     conversation.personalSourcesEnabled !== false;
-  const providerInput = {
-    query: args.message,
-    storeName: effectiveStoreName,
+    const openingHallDefaults = resolveOpeningHallDefaults({
+      isOpeningRound:
+        conversation.kind === 'hall' &&
+        !chamberRuntimeContext.contextMessages.some((message) => message.role === 'member'),
+      chatProfile: args.chatProfile,
+      retrievalStrategy: args.retrievalStrategy,
+    });
+    const providerInput = {
+      query: args.message,
+      storeName: effectiveStoreName,
     knowledgeRetriever: createKnowledgeRetriever(ctx, args.memberId),
     personalSourceRetriever: personalSourcesAllowed
       ? createPersonalSourceRetriever(ctx, userId, user?.name)
@@ -409,10 +418,10 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     identityContext: undefined,
     memoryHint: chamberRuntimeContext.previousSummary,
     kbDigests: toKBDigestHints(kbDigests),
-    chatProfile: args.chatProfile,
-    retrievalModel: args.retrievalModel,
-    retrievalStrategy: args.retrievalStrategy,
-    retrievalProfile: args.retrievalProfile,
+      chatProfile: openingHallDefaults.chatProfile,
+      retrievalModel: args.retrievalModel,
+      retrievalStrategy: openingHallDefaults.retrievalStrategy,
+      retrievalProfile: args.retrievalProfile,
     temperature: 0.35,
     contextMessages: chamberRuntimeContext.contextMessages.slice(-12),
     includeConversationContext: args.hallContext?.trim() ? false : true,

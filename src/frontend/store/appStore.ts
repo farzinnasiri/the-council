@@ -702,6 +702,17 @@ function findRetrySourceUserMessage(
     .sort((a, b) => b.createdAt - a.createdAt)[0];
 }
 
+function isRetryableGenerationFailureMessage(message: Message): boolean {
+  if (message.role !== "member") return false;
+  if (message.deletedAt || message.supersededAt) return false;
+  if (message.status === "error") return true;
+  const trimmed = message.content.trim();
+  return (
+    trimmed === "I could not generate a response." ||
+    trimmed === "Could not generate a response right now."
+  );
+}
+
 function getLatestActiveNonSystemMessageAt(
   messages: Message[],
   conversationId: string,
@@ -4028,12 +4039,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       (message) => message.id === messageId,
     );
     if (!failedMessage) return;
-    if (
-      failedMessage.role !== "member" ||
-      failedMessage.status !== "error" ||
-      failedMessage.deletedAt ||
-      failedMessage.supersededAt
-    ) {
+    if (!isRetryableGenerationFailureMessage(failedMessage)) {
       throw new Error("Only active failed member replies can be retried.");
     }
     if (!failedMessage.authorMemberId) {
@@ -4051,6 +4057,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       retryingMessageIds: {
         ...current.retryingMessageIds,
         [messageId]: true,
+      },
+      pendingReplyMemberIds: {
+        ...current.pendingReplyMemberIds,
+        [failedMessage.conversationId]: Array.from(
+          new Set([
+            ...(current.pendingReplyMemberIds[failedMessage.conversationId] ??
+              []),
+            failedMessage.authorMemberId!,
+          ]),
+        ),
+      },
+      pendingReplyCount: {
+        ...current.pendingReplyCount,
+        [failedMessage.conversationId]:
+          (current.pendingReplyCount[failedMessage.conversationId] ?? 0) + 1,
       },
     }));
 
@@ -4308,6 +4329,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     } finally {
       set((current) => ({
         retryingMessageIds: removeKey(current.retryingMessageIds, messageId),
+        pendingReplyMemberIds: {
+          ...current.pendingReplyMemberIds,
+          [failedMessage.conversationId]: (
+            current.pendingReplyMemberIds[failedMessage.conversationId] ?? []
+          ).filter((id) => id !== failedMessage.authorMemberId),
+        },
+        pendingReplyCount: {
+          ...current.pendingReplyCount,
+          [failedMessage.conversationId]: Math.max(
+            0,
+            (current.pendingReplyCount[failedMessage.conversationId] ?? 0) - 1,
+          ),
+        },
       }));
     }
   },

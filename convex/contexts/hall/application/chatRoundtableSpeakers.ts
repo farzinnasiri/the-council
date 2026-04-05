@@ -8,6 +8,7 @@ import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation }
 import { createAiProvider, createKnowledgeRetriever, toKBDigestHints, withTimeout } from '../../shared/convexGateway';
 import type { MemberListRow, MessageRow, RoundCandidateRow, RoundtableSpeakerResult } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
+import { resolveOpeningHallDefaults } from '../domain/openingRoundDefaults';
 import { moveTypeToRoundIntent } from '../domain/roundtableAllocator';
 import { buildContextMessages, buildHallSystemPrompt, buildHallSystemPromptSections } from '../domain/hallPrompt';
 import type { ChatRoundtableSpeakersInput } from '../contracts';
@@ -127,6 +128,9 @@ export async function runRoundtableSpeakerContribution(
     : undefined;
 
   const effectiveIntent = moveTypeToRoundIntent(options.candidateRow.moveType);
+  const openingRoundDefaults = resolveOpeningHallDefaults({
+    isOpeningRound: options.roundNumber === 1,
+  });
 
   const roundPrompt = [
     `Round #${options.roundNumber} intent: ${effectiveIntent}.`,
@@ -160,10 +164,12 @@ export async function runRoundtableSpeakerContribution(
           personalSourceRetriever: undefined,
           identityContext: undefined,
           memoryHint: undefined,
-          kbDigests: toKBDigestHints(kbDigests),
-          responseModel,
-          retrievalModel: options.retrievalModel,
-          temperature: 0.35,
+            kbDigests: toKBDigestHints(kbDigests),
+            responseModel,
+            chatProfile: openingRoundDefaults.chatProfile,
+            retrievalModel: options.retrievalModel,
+            retrievalStrategy: openingRoundDefaults.retrievalStrategy,
+            temperature: 0.35,
           personaPrompt: buildHallSystemPrompt({
             member,
             participants: options.activeMembers,
