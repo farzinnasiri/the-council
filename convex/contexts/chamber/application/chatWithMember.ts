@@ -395,22 +395,26 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     conversation.kind === 'hall'
       ? (participant?.chatResponseModelSlot ?? 1)
       : (member.chatResponseModelSlot ?? 1);
+  const hallMessages = conversation.kind === 'hall'
+    ? await ctx.runQuery(api.messages.listActive, { conversationId: args.conversationId })
+    : [];
+  const isOpeningHallRound =
+    conversation.kind === 'hall' &&
+    !hallMessages.some((message: any) => message.role === 'member' && message.status !== 'error');
 
   const provider = createAiProvider();
   const personalSourcesAllowed =
     conversation.kind === 'chamber' &&
     Boolean(member.personalSourcesPermissionEnabled) &&
     conversation.personalSourcesEnabled !== false;
-    const openingHallDefaults = resolveOpeningHallDefaults({
-      isOpeningRound:
-        conversation.kind === 'hall' &&
-        !chamberRuntimeContext.contextMessages.some((message) => message.role === 'member'),
-      chatProfile: args.chatProfile,
-      retrievalStrategy: args.retrievalStrategy,
-    });
-    const providerInput = {
-      query: args.message,
-      storeName: effectiveStoreName,
+  const openingHallDefaults = resolveOpeningHallDefaults({
+    isOpeningRound: isOpeningHallRound,
+    chatProfile: args.chatProfile,
+    retrievalStrategy: args.retrievalStrategy,
+  });
+  const providerInput = {
+    query: args.message,
+    storeName: effectiveStoreName,
     knowledgeRetriever: createKnowledgeRetriever(ctx, args.memberId),
     personalSourceRetriever: personalSourcesAllowed
       ? createPersonalSourceRetriever(ctx, userId, user?.name)

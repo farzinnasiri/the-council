@@ -70,6 +70,7 @@ import type * as contexts_hall_application_suggestMemberSpecialties from "../con
 import type * as contexts_hall_contracts from "../contexts/hall/contracts.js";
 import type * as contexts_hall_domain_hallMode from "../contexts/hall/domain/hallMode.js";
 import type * as contexts_hall_domain_hallPrompt from "../contexts/hall/domain/hallPrompt.js";
+import type * as contexts_hall_domain_openingRoundDefaults from "../contexts/hall/domain/openingRoundDefaults.js";
 import type * as contexts_hall_domain_roundtableAllocator from "../contexts/hall/domain/roundtableAllocator.js";
 import type * as contexts_hall_infrastructure_membersRepo from "../contexts/hall/infrastructure/membersRepo.js";
 import type * as contexts_hall_infrastructure_memoryRepo from "../contexts/hall/infrastructure/memoryRepo.js";
@@ -188,6 +189,7 @@ declare const fullApi: ApiFromModules<{
   "contexts/hall/contracts": typeof contexts_hall_contracts;
   "contexts/hall/domain/hallMode": typeof contexts_hall_domain_hallMode;
   "contexts/hall/domain/hallPrompt": typeof contexts_hall_domain_hallPrompt;
+  "contexts/hall/domain/openingRoundDefaults": typeof contexts_hall_domain_openingRoundDefaults;
   "contexts/hall/domain/roundtableAllocator": typeof contexts_hall_domain_roundtableAllocator;
   "contexts/hall/infrastructure/membersRepo": typeof contexts_hall_infrastructure_membersRepo;
   "contexts/hall/infrastructure/memoryRepo": typeof contexts_hall_infrastructure_memoryRepo;
