@@ -1,6 +1,6 @@
 'use node';
 
-import { api } from '../../../_generated/api';
+import { api, internal } from '../../../_generated/api';
 import type { Id } from '../../../_generated/dataModel';
 import { ensureMemberStore } from '../../../ai/kbIngest';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
@@ -18,6 +18,7 @@ import { listMemberKBDigests, loadActiveMembersMap } from '../infrastructure/mem
 import { listActiveMessages, listAllMessages } from '../infrastructure/messagesRepo';
 import { listActiveParticipants } from '../infrastructure/participantsRepo';
 import { getRoundtableState } from '../infrastructure/roundtableRepo';
+import { buildRunningBriefPromptBlock } from '../../../runningBriefsShared';
 
 interface RunRoundtableSpeakerOptions {
   ctx: any;
@@ -146,6 +147,15 @@ export async function runRoundtableSpeakerContribution(
   const kbDigests = await listMemberKBDigests(options.ctx, options.memberId);
 
   try {
+    const userId = await requireAuthUser(options.ctx);
+    const runningBriefContext = await options.ctx.runQuery(internal.runningBriefs.getPromptContextInternal, {
+      userId,
+      conversationId: options.conversationId,
+      memberId: options.memberId,
+    });
+    const runningBriefBlock = runningBriefContext.enabled
+      ? buildRunningBriefPromptBlock(runningBriefContext.rawBody)
+      : '';
     const provider = createAiProvider();
     const hallPromptSections = buildHallSystemPromptSections({
       member,
@@ -154,6 +164,7 @@ export async function runRoundtableSpeakerContribution(
       roundSummaries: options.roundSummaries,
       rawMessages: options.rawContextMessages,
       conversationId: options.conversationId,
+      runningBriefBlock,
     });
     const invokeProvider = async (responseModel: string) =>
       await withTimeout(
@@ -177,6 +188,7 @@ export async function runRoundtableSpeakerContribution(
             roundSummaries: options.roundSummaries,
             rawMessages: options.rawContextMessages,
             conversationId: options.conversationId,
+            runningBriefBlock,
           }),
           promptTraceKind: 'hall_roundtable',
           promptTraceSections: hallPromptSections,

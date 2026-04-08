@@ -19,6 +19,7 @@ import { useQuery } from 'convex/react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { api } from '../../../../convex/_generated/api';
 import { useAppStore } from '../../store/appStore';
+import { convexRepository } from '../../repository/ConvexCouncilRepository';
 import { Separator } from '../ui/separator';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
@@ -94,6 +95,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const archiveConversation = useAppStore((state) => state.archiveConversation);
   const clearChamberByMember = useAppStore((state) => state.clearChamberByMember);
   const setChamberPersonalSourcesEnabled = useAppStore((state) => state.setChamberPersonalSourcesEnabled);
+  const setConversationMemberRunningBriefEnabled = useAppStore((state) => state.setConversationMemberRunningBriefEnabled);
+  const conversationMemberRunningBriefOverridesByConversation = useAppStore(
+    (state) => state.conversationMemberRunningBriefOverridesByConversation,
+  );
+  const [runningBriefAvailableByMember, setRunningBriefAvailableByMember] = useState<Record<string, boolean>>({});
   const sessionItemBaseClass =
     'group relative rounded-md border border-transparent bg-transparent px-3 py-2 transition-colors duration-200 ease-out hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border';
   const sessionItemActiveClass = 'bg-muted shadow-[inset_2px_0_0_hsl(var(--foreground))]';
@@ -147,6 +153,30 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           }
     );
   }, [THREAD_PAGE_SIZE, activeChamberMemberId, dismissedFocusedMemberId]);
+
+  useEffect(() => {
+    if (!selectedThreadPanelMemberId) return;
+    let cancelled = false;
+    void convexRepository
+      .listMemberRunningBriefStatuses([selectedThreadPanelMemberId])
+      .then((rows) => {
+        if (cancelled) return;
+        setRunningBriefAvailableByMember((current) => ({
+          ...current,
+          [selectedThreadPanelMemberId]: Boolean(rows[0]?.available),
+        }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRunningBriefAvailableByMember((current) => ({
+          ...current,
+          [selectedThreadPanelMemberId]: false,
+        }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedThreadPanelMemberId]);
 
   useEffect(() => {
     try {
@@ -308,6 +338,19 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                   const isActive = location.pathname === `/chamber/${thread.id}`;
                   const personalSourcesEnabled = thread.personalSourcesEnabled !== false;
                   const memberAllowsPersonalSources = Boolean(selectedThreadPanelMember?.personalSourcesPermissionEnabled);
+                  const runningBriefAvailable = Boolean(
+                    selectedThreadPanelMemberId
+                      ? runningBriefAvailableByMember[selectedThreadPanelMemberId]
+                      : false,
+                  );
+                  const runningBriefEnabled =
+                    selectedThreadPanelMemberId
+                      ? (
+                          conversationMemberRunningBriefOverridesByConversation[thread.id]?.[
+                            selectedThreadPanelMemberId
+                          ] ?? true
+                        )
+                      : true;
                   return (
                     <NavLink
                       key={thread.id}
@@ -328,6 +371,15 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                                 className={cn(
                                   'h-3 w-3 shrink-0 transition-colors',
                                   personalSourcesEnabled ? 'text-foreground/70' : 'text-muted-foreground/40',
+                                )}
+                                aria-hidden="true"
+                              />
+                            ) : null}
+                            {runningBriefAvailable ? (
+                              <NotebookPen
+                                className={cn(
+                                  'h-3 w-3 shrink-0 transition-colors',
+                                  runningBriefEnabled ? 'text-foreground/70' : 'text-muted-foreground/40',
                                 )}
                                 aria-hidden="true"
                               />
@@ -359,6 +411,22 @@ export function Sidebar({ onNavigate }: SidebarProps) {
                               >
                                 <Archive className="h-3.5 w-3.5" />
                                 {personalSourcesEnabled ? 'Hide sources' : 'Use sources'}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {runningBriefAvailable && selectedThreadPanelMemberId ? (
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void setConversationMemberRunningBriefEnabled(
+                                    thread.id,
+                                    selectedThreadPanelMemberId,
+                                    !runningBriefEnabled,
+                                  );
+                                }}
+                                className="gap-2"
+                              >
+                                <NotebookPen className="h-3.5 w-3.5" />
+                                {runningBriefEnabled ? 'Hide running brief' : 'Use running brief'}
                               </DropdownMenuItem>
                             ) : null}
                             <DropdownMenuItem

@@ -15,6 +15,8 @@ import type {
   MemberMemoryDocument,
   MemberMemoryEpisode,
   MemberMemoryRefreshState,
+  MemberRunningBrief,
+  MemberRunningBriefStatus,
   Message,
   PromptTraceDraft,
   PromptTraceRecord,
@@ -26,6 +28,7 @@ import type {
   RetrievalStrategy,
   ThemeMode,
   TimeAwareReentryGapBucket,
+  ConversationMemberRunningBriefOverride,
   User,
 } from "../types/domain";
 import {
@@ -250,6 +253,38 @@ function toConversationNotebook(doc: any): ConversationNotebook {
   };
 }
 
+function toMemberRunningBrief(doc: any): MemberRunningBrief {
+  return {
+    id: doc._id,
+    memberId: doc.memberId,
+    rawBody: doc.rawBody,
+    enabled: Boolean(doc.enabled),
+    createdAt: doc._creationTime,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function toMemberRunningBriefStatus(doc: any): MemberRunningBriefStatus {
+  return {
+    memberId: doc.memberId,
+    enabled: Boolean(doc.enabled),
+    hasContent: Boolean(doc.hasContent),
+    available: Boolean(doc.available),
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function toConversationMemberRunningBriefOverride(doc: any): ConversationMemberRunningBriefOverride {
+  return {
+    id: doc._id,
+    conversationId: doc.conversationId,
+    memberId: doc.memberId,
+    runningBriefEnabled: doc.runningBriefEnabled,
+    updatedAt: doc.updatedAt,
+    createdAt: doc._creationTime,
+  };
+}
+
 function toPromptTraceRecord(doc: ConvexPromptTraceDoc): PromptTraceRecord {
   return {
     id: doc._id,
@@ -457,13 +492,14 @@ class ConvexCouncilRepository implements CouncilRepository {
   }
 
   async getSnapshot(): Promise<CouncilSnapshot> {
-    const [themeMode, members, conversations] = await Promise.all([
+    const [themeMode, members, conversations, conversationMemberRunningBriefOverrides] = await Promise.all([
       this.getThemeMode(),
       this.listMembers(true),
       this.listConversations(),
+      this.listConversationMemberRunningBriefOverrides(),
     ]);
 
-    return { themeMode, members, conversations };
+    return { themeMode, members, conversations, conversationMemberRunningBriefOverrides };
   }
 
   async getThemeMode(): Promise<ThemeMode> {
@@ -662,6 +698,40 @@ class ConvexCouncilRepository implements CouncilRepository {
       archivedAt: input.archivedAt,
     });
     return result ? toMemberMemoryEpisode(result) : null;
+  }
+
+  async getMemberRunningBrief(memberId: string): Promise<MemberRunningBrief | null> {
+    const result = await this.client.query(api.runningBriefs.get, {
+      memberId: memberId as Id<"members">,
+    });
+    return result ? toMemberRunningBrief(result) : null;
+  }
+
+  async getMemberRunningBriefStatus(memberId: string): Promise<MemberRunningBriefStatus> {
+    const result = await this.client.query(api.runningBriefs.getStatus, {
+      memberId: memberId as Id<"members">,
+    });
+    return toMemberRunningBriefStatus(result);
+  }
+
+  async listMemberRunningBriefStatuses(memberIds: string[]): Promise<MemberRunningBriefStatus[]> {
+    const result = await this.client.query(api.runningBriefs.listStatusesByMembers, {
+      memberIds: memberIds as Id<"members">[],
+    });
+    return result.map(toMemberRunningBriefStatus);
+  }
+
+  async saveMemberRunningBrief(input: {
+    memberId: string;
+    rawBody: string;
+    enabled: boolean;
+  }): Promise<MemberRunningBrief | null> {
+    const result = await this.client.mutation(api.runningBriefs.save, {
+      memberId: input.memberId as Id<"members">,
+      rawBody: input.rawBody,
+      enabled: input.enabled,
+    });
+    return result ? toMemberRunningBrief(result) : null;
   }
 
   async generateUploadUrl(): Promise<string> {
@@ -1050,6 +1120,24 @@ class ConvexCouncilRepository implements CouncilRepository {
       },
     );
     return toConversation(doc);
+  }
+
+  async listConversationMemberRunningBriefOverrides(): Promise<ConversationMemberRunningBriefOverride[]> {
+    const docs = await this.client.query(api.runningBriefs.listConversationMemberRunningBriefOverrides, {});
+    return docs.map(toConversationMemberRunningBriefOverride);
+  }
+
+  async setConversationMemberRunningBriefEnabled(input: {
+    conversationId: string;
+    memberId: string;
+    enabled: boolean;
+  }): Promise<ConversationMemberRunningBriefOverride | null> {
+    const doc = await this.client.mutation(api.runningBriefs.setConversationMemberRunningBriefEnabled, {
+      conversationId: input.conversationId as Id<"conversations">,
+      memberId: input.memberId as Id<"members">,
+      enabled: input.enabled,
+    });
+    return doc ? toConversationMemberRunningBriefOverride(doc) : null;
   }
 
   async setChamberTimeAwareReentryState(input: {

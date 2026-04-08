@@ -608,4 +608,36 @@ export default defineSchema({
   })
     .index('by_user_member', ['userId', 'memberId'])
     .index('by_next_eligible', ['nextEligibleAt']),
+
+  memberRunningBriefs: defineTable({
+    userId: v.id('users'),
+    memberId: v.id('members'),
+    rawBody: v.string(),
+    enabled: v.boolean(),
+    promptBody: v.optional(v.string()),
+    autoUpdateEnabled: v.optional(v.boolean()),
+    cadenceDays: v.optional(v.union(v.literal(1), v.literal(3), v.literal(7), v.literal(30))),
+    provider: v.optional(v.literal('gemini_web')),
+    processing: v.optional(v.boolean()),
+    processingStartedAt: v.optional(v.number()),
+    nextEligibleAt: v.optional(v.number()),
+    lastRunAt: v.optional(v.number()),
+    lastSuccessAt: v.optional(v.number()),
+    lastFailureAt: v.optional(v.number()),
+    retryCount: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index('by_user_member', ['userId', 'memberId']),
+
+  conversationMemberContextOverrides: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    memberId: v.id('members'),
+    runningBriefEnabled: v.optional(v.boolean()),
+    updatedAt: v.number(),
+  })
+    .index('by_user', ['userId'])
+    .index('by_user_conversation', ['userId', 'conversationId'])
+    .index('by_user_conversation_member', ['userId', 'conversationId', 'memberId']),
 });

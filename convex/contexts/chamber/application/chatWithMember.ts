@@ -18,6 +18,7 @@ import {
   type PromptTraceKind,
   type PromptTraceSection,
 } from '../../../../shared/promptTrace';
+import { buildRunningBriefPromptBlock } from '../../../runningBriefsShared';
 
 const COMPACTION_THRESHOLD_KEY = 'compaction-threshold';
 const COMPACTION_RECENT_RAW_TAIL_KEY = 'compaction-recent-raw-tail';
@@ -40,6 +41,7 @@ function buildEffectiveSystemPromptSections(input: {
   episodesBlock?: string;
   pinnedMessagesBlock?: string;
   identityBlock?: string;
+  runningBriefBlock?: string;
   hallBlock?: string;
   summaryBlock?: string;
   includeGuidance: boolean;
@@ -87,6 +89,12 @@ function buildEffectiveSystemPromptSections(input: {
       key: 'user_profile_note',
       label: 'User Profile Note',
       content: input.identityBlock,
+      sourceKind: 'context',
+    }),
+    createPromptTraceSection({
+      key: 'running_brief',
+      label: 'Running Brief',
+      content: input.runningBriefBlock,
       sourceKind: 'context',
     }),
     createPromptTraceSection({
@@ -357,6 +365,14 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
         effectiveProfileNote,
       ].join('\n')
     : '';
+  const runningBriefContext = await ctx.runQuery(internal.runningBriefs.getPromptContextInternal, {
+    userId,
+    conversationId: args.conversationId,
+    memberId: args.memberId,
+  });
+  const runningBriefBlock = runningBriefContext.enabled
+    ? buildRunningBriefPromptBlock(runningBriefContext.rawBody)
+    : '';
   const promptTraceKind: PromptTraceKind = conversation.kind === 'hall' ? 'hall_advisory' : 'chamber';
   const promptTraceSections = buildEffectiveSystemPromptSections({
     systemPrompt: member.systemPrompt,
@@ -366,6 +382,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     episodesBlock,
     pinnedMessagesBlock,
     identityBlock,
+    runningBriefBlock,
     hallBlock,
     summaryBlock,
     includeGuidance: true,
@@ -379,6 +396,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
     'memory.mental_model.present': Boolean(mentalModelBlock),
     'memory.interaction_policy.present': Boolean(interactionPolicyBlock),
     'user.profile_note.present': Boolean(identityBlock),
+    'running_brief.present': Boolean(runningBriefBlock),
   });
 
   const kbDigests = member.deletedAt ? [] : await listMemberDigests(ctx, args.memberId);
@@ -460,6 +478,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
           episodesBlock,
           pinnedMessagesBlock,
           identityBlock,
+          runningBriefBlock,
           hallBlock,
           summaryBlock,
           includeGuidance: false,
@@ -472,6 +491,7 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
           episodesBlock,
           pinnedMessagesBlock,
           identityBlock,
+          runningBriefBlock,
           hallBlock,
           summaryBlock,
           includeGuidance: false,

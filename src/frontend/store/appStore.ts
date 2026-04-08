@@ -112,6 +112,7 @@ interface AppState {
   kbReprocessingDocumentIds: Record<string, boolean>;
   chamberMemoryByConversation: Record<string, string>;
   hallParticipantsByConversation: Record<string, string[]>;
+  conversationMemberRunningBriefOverridesByConversation: Record<string, Record<string, boolean>>;
   roundtableStateByConversation: Record<string, RoundtableState | null>;
   roundtablePreparingByConversation: Record<string, boolean>;
   hallSummaryFailureCountByConversation: Record<string, number>;
@@ -168,6 +169,11 @@ interface AppState {
   ) => Promise<void>;
   setChamberPersonalSourcesEnabled: (
     conversationId: string,
+    enabled: boolean,
+  ) => Promise<void>;
+  setConversationMemberRunningBriefEnabled: (
+    conversationId: string,
+    memberId: string,
     enabled: boolean,
   ) => Promise<void>;
   markChamberTimeAwareReentryNoticeSeen: (
@@ -340,6 +346,20 @@ function mapNotebooksByConversation(notebooks: ConversationNotebook[]) {
   return Object.fromEntries(
     notebooks.map((notebook) => [notebook.conversationId, notebook]),
   ) as Record<string, ConversationNotebook>;
+}
+
+function mapRunningBriefOverridesByConversation(
+  overrides: Array<{ conversationId: string; memberId: string; runningBriefEnabled?: boolean }>,
+) {
+  const next: Record<string, Record<string, boolean>> = {};
+  for (const override of overrides) {
+    if (typeof override.runningBriefEnabled !== "boolean") continue;
+    next[override.conversationId] = {
+      ...(next[override.conversationId] ?? {}),
+      [override.memberId]: override.runningBriefEnabled,
+    };
+  }
+  return next;
 }
 
 function readPromptDebugMode(): boolean {
@@ -1280,6 +1300,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   kbReprocessingDocumentIds: {},
   chamberMemoryByConversation: {},
   hallParticipantsByConversation: {},
+  conversationMemberRunningBriefOverridesByConversation: {},
   roundtableStateByConversation: {},
   roundtablePreparingByConversation: {},
   hallSummaryFailureCountByConversation: {},
@@ -1571,6 +1592,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         members: snapshot.members,
         conversations,
         chamberMemoryByConversation: {},
+        conversationMemberRunningBriefOverridesByConversation:
+          mapRunningBriefOverridesByConversation(
+            snapshot.conversationMemberRunningBriefOverrides,
+          ),
         roundtableStateByConversation: {},
         roundtablePreparingByConversation: {},
         compactionPolicy: policy,
@@ -2252,6 +2277,45 @@ export const useAppStore = create<AppState>((set, get) => ({
         item.id === conversationId ? updated : item,
       ),
     }));
+  },
+
+  setConversationMemberRunningBriefEnabled: async (
+    conversationId,
+    memberId,
+    enabled,
+  ) => {
+    await councilRepository.setConversationMemberRunningBriefEnabled({
+      conversationId,
+      memberId,
+      enabled,
+    });
+    set((state) => {
+      const currentConversation =
+        state.conversationMemberRunningBriefOverridesByConversation[
+          conversationId
+        ] ?? {};
+      const nextConversation = { ...currentConversation };
+      if (enabled) {
+        delete nextConversation[memberId];
+      } else {
+        nextConversation[memberId] = false;
+      }
+
+      const nextOverrides =
+        Object.keys(nextConversation).length > 0
+          ? {
+              ...state.conversationMemberRunningBriefOverridesByConversation,
+              [conversationId]: nextConversation,
+            }
+          : removeKey(
+              state.conversationMemberRunningBriefOverridesByConversation,
+              conversationId,
+            );
+
+      return {
+        conversationMemberRunningBriefOverridesByConversation: nextOverrides,
+      };
+    });
   },
 
   markChamberTimeAwareReentryNoticeSeen: async (conversationId) => {

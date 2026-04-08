@@ -3,6 +3,7 @@ import { Bug, LoaderCircle, Lock, Menu, NotebookPen, Pause, Pin, Play, Plus, Ski
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
+import { convexRepository } from '../../repository/ConvexCouncilRepository';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,13 +51,25 @@ export function TopBar({
   const setMessagePinned = useAppStore((state) => state.setMessagePinned);
   const pendingReplyMemberIds = useAppStore((state) => state.pendingReplyMemberIds);
   const hallParticipantsByConversation = useAppStore((state) => state.hallParticipantsByConversation);
+  const setConversationMemberRunningBriefEnabled = useAppStore((state) => state.setConversationMemberRunningBriefEnabled);
+  const conversationMemberRunningBriefOverridesByConversation = useAppStore(
+    (state) => state.conversationMemberRunningBriefOverridesByConversation,
+  );
   const promptDebugMode = useAppStore((state) => state.promptDebugMode);
   const setPromptDebugMode = useAppStore((state) => state.setPromptDebugMode);
   const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
-  const participants = participantIds
-    .map((id) => members.find((member) => member.id === id && !member.deletedAt))
-    .filter((m): m is NonNullable<typeof m> => Boolean(m));
-  const inactiveMembers = members.filter((member) => !member.deletedAt && !participantIds.includes(member.id));
+  const participantIdsKey = participantIds.join('|');
+  const participants = useMemo(
+    () =>
+      participantIds
+        .map((id) => members.find((member) => member.id === id && !member.deletedAt))
+        .filter((m): m is NonNullable<typeof m> => Boolean(m)),
+    [members, participantIdsKey],
+  );
+  const inactiveMembers = useMemo(
+    () => members.filter((member) => !member.deletedAt && !participantIds.includes(member.id)),
+    [members, participantIdsKey],
+  );
   const activeCount = participants.length;
   const isChamber = conversation?.kind === 'chamber';
   const showHallParticipants = showParticipants && !isChamber;
@@ -65,6 +78,7 @@ export function TopBar({
   const [isChamberTypingVisible, setIsChamberTypingVisible] = useState(false);
   const [isPinnedManagerOpen, setIsPinnedManagerOpen] = useState(false);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  const [runningBriefAvailableByMember, setRunningBriefAvailableByMember] = useState<Record<string, boolean>>({});
   const typingVisibilityTimerRef = useRef<number | null>(null);
   const {
     hasPlayback,
@@ -84,6 +98,31 @@ export function TopBar({
     }, CHAMBER_PRESENCE_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [isChamber]);
+
+  useEffect(() => {
+    if (!conversation || conversation.kind !== 'hall' || participants.length === 0) {
+      setRunningBriefAvailableByMember((current) =>
+        Object.keys(current).length === 0 ? current : {},
+      );
+      return;
+    }
+    let cancelled = false;
+    void convexRepository
+      .listMemberRunningBriefStatuses(participants.map((member) => member.id))
+      .then((rows) => {
+        if (cancelled) return;
+        setRunningBriefAvailableByMember(
+          Object.fromEntries(rows.map((row) => [row.memberId, Boolean(row.available)])),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRunningBriefAvailableByMember({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation?.id, conversation?.kind, participantIdsKey]);
 
   const isChamberTypingPending = useMemo(() => {
     if (!conversation || conversation.kind !== 'chamber' || !conversation.chamberMemberId) return false;
@@ -259,6 +298,16 @@ export function TopBar({
                   canManageHall={canManageHall}
                   onAdd={(memberId) => conversation && void addMemberToConversation(conversation.id, memberId)}
                   onRemove={(memberId) => conversation && void removeMemberFromConversation(conversation.id, memberId)}
+                  runningBriefAvailableByMember={runningBriefAvailableByMember}
+                  runningBriefOverrides={
+                    conversation
+                      ? conversationMemberRunningBriefOverridesByConversation[conversation.id] ?? {}
+                      : {}
+                  }
+                  onToggleRunningBrief={(memberId, enabled) =>
+                    conversation &&
+                    void setConversationMemberRunningBriefEnabled(conversation.id, memberId, enabled)
+                  }
                 />
               ) : null}
             </div>
@@ -518,6 +567,16 @@ export function TopBar({
             canManageHall={canManageHall}
             onAdd={(memberId) => conversation && void addMemberToConversation(conversation.id, memberId)}
             onRemove={(memberId) => conversation && void removeMemberFromConversation(conversation.id, memberId)}
+            runningBriefAvailableByMember={runningBriefAvailableByMember}
+            runningBriefOverrides={
+              conversation
+                ? conversationMemberRunningBriefOverridesByConversation[conversation.id] ?? {}
+                : {}
+            }
+            onToggleRunningBrief={(memberId, enabled) =>
+              conversation &&
+              void setConversationMemberRunningBriefEnabled(conversation.id, memberId, enabled)
+            }
           />
         ) : null}
       </div>
@@ -552,6 +611,9 @@ function CouncilMembersMenu({
   canManageHall,
   onAdd,
   onRemove,
+  runningBriefAvailableByMember,
+  runningBriefOverrides,
+  onToggleRunningBrief,
 }: {
   trigger: ReactNode;
   activeMembers: Array<ReturnType<typeof useAppStore.getState>['members'][number]>;
@@ -559,6 +621,9 @@ function CouncilMembersMenu({
   canManageHall: boolean;
   onAdd: (memberId: string) => void;
   onRemove: (memberId: string) => void;
+  runningBriefAvailableByMember: Record<string, boolean>;
+  runningBriefOverrides: Record<string, boolean>;
+  onToggleRunningBrief: (memberId: string, enabled: boolean) => void;
 }) {
   const canRemoveMembers = canManageHall && activeMembers.length > 1;
 
@@ -573,15 +638,26 @@ function CouncilMembersMenu({
         <DropdownMenuLabel>Active in this chat</DropdownMenuLabel>
         <div className="mb-2 space-y-1">
           {activeMembers.map((member) => (
-            <div key={member.id} className="flex items-center justify-between rounded-md px-2 py-1.5">
-              <div className="flex items-center gap-2">
+            <div key={member.id} className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background text-xs">
                   {member.avatarUrl
                     ? <img src={member.avatarUrl} alt={member.name} className="h-full w-full object-cover" />
                     : <UserCircle2 className="h-5 w-5 text-muted-foreground/60" />
                   }
                 </div>
-                <p className="text-sm font-medium leading-none">{member.name}</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium leading-none">{member.name}</p>
+                  {runningBriefAvailableByMember[member.id] ? (
+                    <button
+                      type="button"
+                      className="mt-1 text-[11px] text-muted-foreground transition hover:text-foreground"
+                      onClick={() => onToggleRunningBrief(member.id, !(runningBriefOverrides[member.id] ?? true))}
+                    >
+                      {(runningBriefOverrides[member.id] ?? true) ? 'Hide running brief' : 'Use running brief'}
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] text-emerald-500">Active</span>

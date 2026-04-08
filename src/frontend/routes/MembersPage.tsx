@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { useAppStore } from '../store/appStore';
 import { AvatarUploader } from '../components/members/AvatarUploader';
+import { RunningBriefEditorDialog } from '../components/members/RunningBriefEditorDialog';
 import { convexRepository } from '../repository/ConvexCouncilRepository';
 import type { ChatResponseModelSlotOption, KbChunkConfig, KBDigestMetadata } from '../repository/CouncilRepository';
 import { DEFAULT_MEMBER_VOICE, describeMemberVoice, MEMBER_VOICE_OPTIONS } from '../constants/memberVoice';
@@ -15,7 +16,13 @@ import {
   getKbChunkPresetConfig,
   validateKbChunkConfig,
 } from '../constants/kbChunking';
-import type { MemberMemoryDocument, MemberMemoryEpisode, MemberMemoryRefreshState, MemberVoiceName } from '../types/domain';
+import type {
+  MemberMemoryDocument,
+  MemberMemoryEpisode,
+  MemberMemoryRefreshState,
+  MemberRunningBrief,
+  MemberVoiceName,
+} from '../types/domain';
 import { suggestMemberSpecialties } from '../lib/aiClient';
 
 interface MemberFormState {
@@ -48,6 +55,11 @@ interface MemberMemoryBundleState {
   refreshState: MemberMemoryRefreshState | null;
 }
 
+interface RunningBriefDraftState {
+  rawBody: string;
+  enabled: boolean;
+}
+
 type ExpandedMemberMemoryEditor = 'interaction_policy' | 'mental_model';
 type MemberEditorView = 'profile' | 'knowledge';
 
@@ -60,6 +72,11 @@ const emptyForm: MemberFormState = {
   ttsVoiceName: DEFAULT_MEMBER_VOICE,
   ttsPersonaPrompt: '',
   personalSourcesPermissionEnabled: false,
+};
+
+const emptyRunningBriefDraft: RunningBriefDraftState = {
+  rawBody: '',
+  enabled: false,
 };
 
 export function MembersPage() {
@@ -115,6 +132,13 @@ export function MembersPage() {
   const [memberMemoryError, setMemberMemoryError] = useState<string | null>(null);
   const [isMemberMemoryDialogOpen, setIsMemberMemoryDialogOpen] = useState(false);
   const [expandedMemberMemoryEditor, setExpandedMemberMemoryEditor] = useState<ExpandedMemberMemoryEditor | null>(null);
+  const [runningBrief, setRunningBrief] = useState<MemberRunningBrief | null>(null);
+  const [runningBriefDraft, setRunningBriefDraft] = useState<RunningBriefDraftState>(emptyRunningBriefDraft);
+  const [isRunningBriefLoading, setIsRunningBriefLoading] = useState(false);
+  const [runningBriefError, setRunningBriefError] = useState<string | null>(null);
+  const [runningBriefNotice, setRunningBriefNotice] = useState<string | null>(null);
+  const [isRunningBriefDialogOpen, setIsRunningBriefDialogOpen] = useState(false);
+  const [isSavingRunningBrief, setIsSavingRunningBrief] = useState(false);
   const [editorView, setEditorView] = useState<MemberEditorView>('profile');
 
   const activeMembers = useMemo(() => members.filter((member) => !member.deletedAt), [members]);
@@ -173,6 +197,11 @@ export function MembersPage() {
       setMemberMemoryError(null);
       setIsMemberMemoryDialogOpen(false);
       setExpandedMemberMemoryEditor(null);
+      setRunningBrief(null);
+      setRunningBriefDraft(emptyRunningBriefDraft);
+      setRunningBriefError(null);
+      setRunningBriefNotice(null);
+      setIsRunningBriefDialogOpen(false);
       return;
     }
     setBusyMemberId(editingMemberId);
@@ -180,6 +209,8 @@ export function MembersPage() {
     setDigestLoadError(null);
     setIsMemberMemoryLoading(true);
     setMemberMemoryError(null);
+    setIsRunningBriefLoading(true);
+    setRunningBriefError(null);
     void fetchDocsForMember(editingMemberId).finally(() => setBusyMemberId(null));
     void convexRepository.listMemberDigestMetadata({ memberId: editingMemberId })
       .then((rows) => setKbDigests(rows))
@@ -195,6 +226,24 @@ export function MembersPage() {
       .then((bundle) => setMemberMemoryBundle(bundle))
       .catch(() => setMemberMemoryError('Could not load member memory.'))
       .finally(() => setIsMemberMemoryLoading(false));
+    void convexRepository.getMemberRunningBrief(editingMemberId)
+      .then((brief) => {
+        setRunningBrief(brief);
+        setRunningBriefDraft(
+          brief
+            ? {
+                rawBody: brief.rawBody,
+                enabled: brief.enabled,
+              }
+            : emptyRunningBriefDraft
+        );
+      })
+      .catch(() => {
+        setRunningBrief(null);
+        setRunningBriefDraft(emptyRunningBriefDraft);
+        setRunningBriefError('Could not load running brief.');
+      })
+      .finally(() => setIsRunningBriefLoading(false));
   }, [editingMemberId, fetchDocsForMember]);
 
   useEffect(() => {
@@ -246,6 +295,11 @@ export function MembersPage() {
     setMemberMemoryError(null);
     setIsMemberMemoryDialogOpen(false);
     setExpandedMemberMemoryEditor(null);
+    setRunningBrief(null);
+    setRunningBriefDraft(emptyRunningBriefDraft);
+    setRunningBriefError(null);
+    setRunningBriefNotice(null);
+    setIsRunningBriefDialogOpen(false);
   };
 
   const startEdit = (memberId: string) => {
@@ -279,6 +333,11 @@ export function MembersPage() {
     setMemberMemoryError(null);
     setIsMemberMemoryDialogOpen(false);
     setExpandedMemberMemoryEditor(null);
+    setRunningBrief(null);
+    setRunningBriefDraft(emptyRunningBriefDraft);
+    setRunningBriefError(null);
+    setRunningBriefNotice(null);
+    setIsRunningBriefDialogOpen(false);
   };
 
   const resetForm = () => {
@@ -304,6 +363,11 @@ export function MembersPage() {
     setMemberMemoryError(null);
     setIsMemberMemoryDialogOpen(false);
     setExpandedMemberMemoryEditor(null);
+    setRunningBrief(null);
+    setRunningBriefDraft(emptyRunningBriefDraft);
+    setRunningBriefError(null);
+    setRunningBriefNotice(null);
+    setIsRunningBriefDialogOpen(false);
   };
 
   const uploadAvatarForMember = async (memberId: string, blob: Blob) => {
@@ -366,6 +430,40 @@ export function MembersPage() {
       return;
     }
     resetForm();
+  };
+
+  const refreshRunningBrief = async (memberId: string) => {
+    const brief = await convexRepository.getMemberRunningBrief(memberId);
+    setRunningBrief(brief);
+    setRunningBriefDraft(
+      brief
+        ? {
+            rawBody: brief.rawBody,
+            enabled: brief.enabled,
+          }
+        : emptyRunningBriefDraft
+    );
+  };
+
+  const saveRunningBrief = async () => {
+    if (!editingMemberId) return;
+    setIsSavingRunningBrief(true);
+    setRunningBriefError(null);
+    setRunningBriefNotice('Saving running brief…');
+    try {
+      await convexRepository.saveMemberRunningBrief({
+        memberId: editingMemberId,
+        rawBody: runningBriefDraft.rawBody,
+        enabled: runningBriefDraft.enabled,
+      });
+      await refreshRunningBrief(editingMemberId);
+      setRunningBriefNotice('Running brief saved.');
+    } catch (error) {
+      setRunningBriefError(error instanceof Error ? error.message : 'Could not save running brief.');
+      setRunningBriefNotice(null);
+    } finally {
+      setIsSavingRunningBrief(false);
+    }
   };
 
   const onUploadForEditingMember = async (files: FileList | null) => {
@@ -1231,6 +1329,64 @@ export function MembersPage() {
                       </section>
 
                       <section className="border-t border-border/70 pt-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-mono text-xs font-semibold">Running brief</p>
+                            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                              Member-scoped external context that is injected into chamber and hall prompts when enabled.
+                            </p>
+                            {isRunningBriefLoading ? (
+                              <p className="mt-2 font-mono text-[11px] text-muted-foreground">Loading running brief…</p>
+                            ) : null}
+                          </div>
+                          {editingMemberId ? (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-6 gap-1 rounded-md px-2 text-[10px]"
+                                onClick={() => setIsRunningBriefDialogOpen(true)}
+                              >
+                                <Expand className="h-3 w-3" />
+                                Open
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {runningBriefError ? (
+                          <p className="mt-2 font-mono text-[11px] text-destructive">{runningBriefError}</p>
+                        ) : null}
+
+                        {!editingMemberId ? (
+                          <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+                            Save this member first to manage the running brief.
+                          </p>
+                        ) : null}
+
+                        {editingMemberId ? (
+                          <div className="mt-4 border-t border-border/70 pt-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                {runningBriefDraft.enabled ? 'On' : 'Off'}
+                              </span>
+                              <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                {runningBrief?.updatedAt
+                                  ? `Updated ${new Date(runningBrief.updatedAt).toLocaleDateString()}`
+                                  : 'Never saved'}
+                              </span>
+                            </div>
+                            <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+                              {runningBrief?.rawBody.trim()
+                                ? 'Injected only when enabled, non-empty, and not disabled for the current conversation.'
+                                : 'No running brief body yet. Open the editor to add one.'}
+                            </p>
+                          </div>
+                        ) : null}
+                      </section>
+
+                      <section className="border-t border-border/70 pt-4">
                         <div className="mb-2">
                           <p className="font-mono text-xs font-semibold">Personal sources</p>
                           <p className="mt-1 font-mono text-[10px] text-muted-foreground">
@@ -2034,6 +2190,18 @@ export function MembersPage() {
                 </DialogPrimitive.Content>
               </DialogPrimitive.Portal>
             </DialogPrimitive.Root>
+
+            <RunningBriefEditorDialog
+              open={isRunningBriefDialogOpen}
+              onOpenChange={setIsRunningBriefDialogOpen}
+              brief={runningBrief}
+              draft={runningBriefDraft}
+              onDraftChange={setRunningBriefDraft}
+              onSave={saveRunningBrief}
+              isSaving={isSavingRunningBrief}
+              error={runningBriefError}
+              notice={runningBriefNotice}
+            />
 
             <DialogPrimitive.Root open={isDigestEditorOpen} onOpenChange={setIsDigestEditorOpen}>
               <DialogPrimitive.Portal>

@@ -128,13 +128,15 @@ export const update = mutation({
     if (!current || current.userId !== userId) throw new Error('Member not found');
     const { memberId, ...patch } = args;
     const filteredPatch = Object.fromEntries(
-      Object.entries({
-        ...patch,
-        ...(args.chatResponseModelSlot !== undefined
-          ? { chatResponseModelSlot: normalizeChatResponseModelSlot(args.chatResponseModelSlot) }
-          : {}),
-      }).filter(([, value]) => value !== undefined)
-    );
+      Object.entries(patch).filter(
+        ([key, value]) => key === 'chatResponseModelSlot' || value !== undefined
+      )
+    ) as Record<string, unknown>;
+    if (args.chatResponseModelSlot !== undefined) {
+      filteredPatch.chatResponseModelSlot = normalizeChatResponseModelSlot(
+        args.chatResponseModelSlot
+      );
+    }
     await ctx.db.patch(memberId, {
       ...filteredPatch,
       ...(args.guidanceProfilePrompt !== undefined

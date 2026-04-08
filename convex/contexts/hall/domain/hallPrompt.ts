@@ -49,6 +49,7 @@ export function buildHallSystemPrompt(options: {
   roundSummaries: string[];
   rawMessages: MessageRow[];
   conversationId: Id<'conversations'>;
+  runningBriefBlock?: string;
 }): string {
   return renderPromptTraceSections(buildHallSystemPromptSections(options));
 }
@@ -60,6 +61,7 @@ export function buildHallSystemPromptSections(options: {
   roundSummaries: string[];
   rawMessages: MessageRow[];
   conversationId: Id<'conversations'>;
+  runningBriefBlock?: string;
 }): PromptTraceSection[] {
   return [
     createPromptTraceSection({
@@ -67,6 +69,12 @@ export function buildHallSystemPromptSections(options: {
       label: 'Member System Prompt',
       content: options.member.systemPrompt,
       sourceKind: 'persona',
+    }),
+    createPromptTraceSection({
+      key: 'running_brief',
+      label: 'Running Brief',
+      content: options.runningBriefBlock,
+      sourceKind: 'context',
     }),
     createPromptTraceSection({
       key: 'hall_deliberation_context',

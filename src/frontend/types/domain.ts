@@ -124,6 +124,32 @@ export interface MemberMemoryRefreshState {
   updatedAt: number;
 }
 
+export interface MemberRunningBrief {
+  id: string;
+  memberId: string;
+  rawBody: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MemberRunningBriefStatus {
+  memberId: string;
+  enabled: boolean;
+  hasContent: boolean;
+  available: boolean;
+  updatedAt?: number;
+}
+
+export interface ConversationMemberRunningBriefOverride {
+  id: string;
+  conversationId: string;
+  memberId: string;
+  runningBriefEnabled?: boolean;
+  updatedAt: number;
+  createdAt: number;
+}
+
 export interface Conversation {
   id: string;
   kind: ConversationKind;

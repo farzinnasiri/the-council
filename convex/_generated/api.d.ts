@@ -115,6 +115,8 @@ import type * as personalSourceDocuments from "../personalSourceDocuments.js";
 import type * as personalSourcesShared from "../personalSourcesShared.js";
 import type * as promptTraceValidators from "../promptTraceValidators.js";
 import type * as promptTraces from "../promptTraces.js";
+import type * as runningBriefs from "../runningBriefs.js";
+import type * as runningBriefsShared from "../runningBriefsShared.js";
 import type * as seed from "../seed.js";
 import type * as settings from "../settings.js";
 import type * as upload from "../upload.js";
@@ -234,6 +236,8 @@ declare const fullApi: ApiFromModules<{
   personalSourcesShared: typeof personalSourcesShared;
   promptTraceValidators: typeof promptTraceValidators;
   promptTraces: typeof promptTraces;
+  runningBriefs: typeof runningBriefs;
+  runningBriefsShared: typeof runningBriefsShared;
   seed: typeof seed;
   settings: typeof settings;
   upload: typeof upload;

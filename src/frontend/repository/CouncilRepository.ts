@@ -21,6 +21,9 @@ import type {
   ConversationGuidanceDirective,
   TimeAwareReentryGapBucket,
   MemberVoiceName,
+  MemberRunningBrief,
+  MemberRunningBriefStatus,
+  ConversationMemberRunningBriefOverride,
   PromptTraceDraft,
   PromptTraceRecord,
   ThemeMode,
@@ -73,6 +76,7 @@ export interface CouncilSnapshot {
   themeMode: ThemeMode;
   members: Member[];
   conversations: Conversation[];
+  conversationMemberRunningBriefOverrides: ConversationMemberRunningBriefOverride[];
 }
 
 export interface RouteResult {
@@ -224,6 +228,14 @@ export interface CouncilRepository {
     body?: string;
     archivedAt?: number | null;
   }): Promise<MemberMemoryEpisode | null>;
+  getMemberRunningBrief(memberId: string): Promise<MemberRunningBrief | null>;
+  getMemberRunningBriefStatus(memberId: string): Promise<MemberRunningBriefStatus>;
+  listMemberRunningBriefStatuses(memberIds: string[]): Promise<MemberRunningBriefStatus[]>;
+  saveMemberRunningBrief(input: {
+    memberId: string;
+    rawBody: string;
+    enabled: boolean;
+  }): Promise<MemberRunningBrief | null>;
 
   listConversations(includeArchived?: boolean): Promise<Conversation[]>;
   listHalls(includeArchived?: boolean): Promise<Conversation[]>;
@@ -255,6 +267,12 @@ export interface CouncilRepository {
     conversationId: string,
     enabled: boolean,
   ): Promise<Conversation>;
+  listConversationMemberRunningBriefOverrides(): Promise<ConversationMemberRunningBriefOverride[]>;
+  setConversationMemberRunningBriefEnabled(input: {
+    conversationId: string;
+    memberId: string;
+    enabled: boolean;
+  }): Promise<ConversationMemberRunningBriefOverride | null>;
   setChamberTimeAwareReentryState(input: {
     conversationId: string;
     state?: {
