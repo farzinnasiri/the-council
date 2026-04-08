@@ -37,30 +37,215 @@ function formatDateTime(epochMs: number) {
   });
 }
 
-function TranscriptAvatar({
+function formatDate(epochMs: number) {
+  return new Date(epochMs).toLocaleDateString([], {
+    dateStyle: "long",
+  });
+}
+
+function ParticipantAvatar({
   avatarUrl,
   name,
+  size = "md",
 }: {
   avatarUrl: string | null;
   name: string;
+  size?: "sm" | "md" | "lg";
 }) {
+  const sizeClasses = {
+    sm: "h-8 w-8",
+    md: "h-10 w-10",
+    lg: "h-14 w-14",
+  };
+
   if (avatarUrl) {
     return (
       <img
         src={avatarUrl}
         alt={name}
-        className="h-10 w-10 shrink-0 rounded-full border border-border object-cover"
+        className={`${sizeClasses[size]} shrink-0 rounded-full border border-border/60 object-cover`}
       />
     );
   }
 
   return (
     <UserCircle2
-      className="h-10 w-10 shrink-0 text-muted-foreground/60"
+      className={`${sizeClasses[size]} shrink-0 text-muted-foreground/50`}
       aria-label={name}
     />
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Entry card — visual treatment varies by role                      */
+/* ------------------------------------------------------------------ */
+
+function EntryCard({
+  entry,
+  copiedEntrySequence,
+  onCopy,
+  animationDelay,
+}: {
+  entry: PublicRoundtableEntry;
+  copiedEntrySequence: number | null;
+  onCopy: (entry: PublicRoundtableEntry) => void;
+  animationDelay: number;
+}) {
+  const isPrompt = entry.role === "user";
+  const isFinalSynthesis = entry.isFinalSynthesis;
+  const speakerName =
+    entry.speakerName ??
+    (isPrompt ? "Prompt" : isFinalSynthesis ? "The Council" : "Reply");
+
+  const isCopied = copiedEntrySequence === entry.sequence;
+
+  /* ── Prompt entries ───────────────────────────────────────────── */
+  if (isPrompt) {
+    return (
+      <article
+        className="group relative rounded-2xl border border-border/50 bg-muted/40 px-5 py-5 md:px-6"
+        style={{
+          animation: `pub-fade-in 420ms ease-out ${animationDelay}ms both`,
+        }}
+      >
+        {/* left accent */}
+        <div className="absolute inset-y-3 left-0 w-[3px] rounded-full bg-muted-foreground/25" />
+
+        <div className="flex items-center gap-3">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-muted text-[9px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+            Q
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {speakerName}
+            </p>
+            <p className="text-[11px] text-muted-foreground/70">
+              {typeof entry.roundNumber === "number"
+                ? `Round ${entry.roundNumber} · `
+                : ""}
+              {formatDateTime(entry.createdAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onCopy(entry)}
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-muted-foreground group-hover:opacity-100"
+          >
+            {isCopied ? (
+              <Check className="h-3 w-3" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+            {isCopied ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        <div className="mt-3 text-sm leading-relaxed">
+          <MarkdownMessage content={entry.content} />
+        </div>
+      </article>
+    );
+  }
+
+  /* ── Final synthesis ──────────────────────────────────────────── */
+  if (isFinalSynthesis) {
+    return (
+      <article
+        className="pub-synthesis group relative overflow-hidden rounded-2xl border border-border/60 px-5 py-5 md:px-6"
+        style={{
+          animation: `pub-fade-in 420ms ease-out ${animationDelay}ms both`,
+        }}
+      >
+        {/* subtle gradient tint */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/[0.04] via-transparent to-primary/[0.02]" />
+
+        <div className="relative flex items-center gap-3">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-foreground text-[9px] font-bold uppercase tracking-[0.22em] text-background">
+            TC
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold uppercase tracking-wider text-foreground/80">
+              {speakerName}
+            </p>
+            <p className="text-[11px] text-muted-foreground/70">
+              {typeof entry.roundNumber === "number"
+                ? `Round ${entry.roundNumber} · `
+                : ""}
+              {formatDateTime(entry.createdAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onCopy(entry)}
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-muted-foreground group-hover:opacity-100"
+          >
+            {isCopied ? (
+              <Check className="h-3 w-3" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+            {isCopied ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        <div className="relative mt-4 text-sm leading-relaxed">
+          <MarkdownMessage content={entry.content} />
+        </div>
+      </article>
+    );
+  }
+
+  /* ── Member entries (default) ─────────────────────────────────── */
+  return (
+    <article
+      className="group rounded-2xl border border-border/40 bg-card px-5 py-5 md:px-6"
+      style={{
+        animation: `pub-fade-in 420ms ease-out ${animationDelay}ms both`,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <ParticipantAvatar
+          avatarUrl={entry.speakerAvatarUrl}
+          name={speakerName}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{speakerName}</p>
+              <p className="text-[11px] text-muted-foreground/70">
+                {typeof entry.roundNumber === "number"
+                  ? `Round ${entry.roundNumber} · `
+                  : ""}
+                {formatDateTime(entry.createdAt)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onCopy(entry)}
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-muted-foreground group-hover:opacity-100"
+            >
+              {isCopied ? (
+                <Check className="h-3 w-3" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+              {isCopied ? "Copied" : "Copy"}
+            </button>
+          </div>
+
+          <div className="mt-3 text-sm leading-relaxed">
+            <MarkdownMessage content={entry.content} />
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Page component                                                     */
+/* ------------------------------------------------------------------ */
 
 export function PublicRoundtablePage() {
   const { slug } = useParams();
@@ -168,19 +353,21 @@ export function PublicRoundtablePage() {
     }
   };
 
+  /* ── Loading ──────────────────────────────────────────────────── */
   if (loading) {
     return (
       <div className="grid min-h-svh place-items-center bg-background px-6">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-foreground" />
           <p className="text-sm text-muted-foreground">
-            Loading public roundtable...
+            Loading public roundtable…
           </p>
         </div>
       </div>
     );
   }
 
+  /* ── Not found ────────────────────────────────────────────────── */
   if (notFound || !payload) {
     return (
       <div className="grid min-h-svh place-items-center bg-background px-6">
@@ -200,6 +387,7 @@ export function PublicRoundtablePage() {
     );
   }
 
+  /* ── Error ────────────────────────────────────────────────────── */
   if (error) {
     return (
       <div className="grid min-h-svh place-items-center bg-background px-6">
@@ -218,119 +406,165 @@ export function PublicRoundtablePage() {
     );
   }
 
+  /* ── Round separators ─────────────────────────────────────────── */
+  const entriesWithSeparators = buildEntriesWithRoundLabels(payload.entries);
+
+  /* ── Main content ─────────────────────────────────────────────── */
   return (
-    <div className="min-h-svh bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8 md:px-8 md:py-12">
-        <header className="rounded-[28px] border border-border/80 bg-card px-5 py-6 shadow-sm md:px-7">
-          <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                Public Roundtable
-              </p>
-              <h1 className="mt-3 font-display text-3xl leading-tight md:text-4xl">
-                {payload.title}
-              </h1>
-              <p className="mt-3 text-sm text-muted-foreground">
-                Closed {formatDateTime(payload.closedAt)}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 shrink-0 gap-2 self-start"
-              onClick={() => void copyLink()}
-            >
-              {copiedLink ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <Link2 className="h-4 w-4" />
-              )}
-              {copiedLink ? "Copied link" : "Copy link"}
-            </Button>
+    <div className="pub-page min-h-svh bg-background text-foreground">
+      {/* Inject scoped keyframes */}
+      <style>{`
+        @keyframes pub-fade-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
+      <div className="mx-auto flex w-full max-w-3xl flex-col px-4 py-10 md:px-6 md:py-16">
+        {/* ── Hero header ───────────────────────────────────────── */}
+        <header
+          className="flex flex-col"
+          style={{ animation: "pub-fade-in 500ms ease-out both" }}
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/80">
+            Public Roundtable
+          </p>
+
+          <h1 className="mt-3 font-display text-3xl font-bold leading-tight tracking-tight md:text-[2.5rem] md:leading-[1.15]">
+            {payload.title}
+          </h1>
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+            <span>Closed {formatDate(payload.closedAt)}</span>
+            <span className="hidden text-border sm:inline">·</span>
+            <span className="hidden sm:inline">
+              {payload.entries.length} messages
+            </span>
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          {/* ── Participants strip ──────────────────────────────── */}
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             {payload.participants.map((participant) => (
               <div
                 key={`${participant.name}-${participant.avatarUrl ?? "none"}`}
-                className="flex items-center gap-3 rounded-full border border-border/80 bg-background px-3 py-2"
+                className="flex items-center gap-2.5 rounded-full border border-border/50 bg-muted/30 px-3 py-1.5 transition-colors hover:bg-muted/60"
               >
-                <TranscriptAvatar
+                <ParticipantAvatar
                   avatarUrl={participant.avatarUrl}
                   name={participant.name}
+                  size="sm"
                 />
-                <span className="text-sm font-medium">{participant.name}</span>
+                <span className="text-[13px] font-medium">
+                  {participant.name}
+                </span>
               </div>
             ))}
           </div>
+
+          {/* ── Share bar ───────────────────────────────────────── */}
+          <div className="mt-6 flex items-center gap-3 border-t border-border/40 pt-5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-2 rounded-full px-4 text-xs"
+              onClick={() => void copyLink()}
+            >
+              {copiedLink ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Link2 className="h-3.5 w-3.5" />
+              )}
+              {copiedLink ? "Copied link" : "Share link"}
+            </Button>
+          </div>
         </header>
 
+        {/* ── Divider ───────────────────────────────────────────── */}
+        <div className="my-8 h-px bg-border/40 md:my-10" />
+
+        {/* ── Transcript ────────────────────────────────────────── */}
         <section className="flex flex-col gap-4">
-          {payload.entries.map((entry) => {
-            const isPrompt = entry.role === "user";
-            const isFinalSynthesis = entry.isFinalSynthesis;
-            const speakerName =
-              entry.speakerName ??
-              (isPrompt ? "Prompt" : isFinalSynthesis ? "The Council" : "Reply");
+          {entriesWithSeparators.map((item) => {
+            if (item.kind === "separator") {
+              return (
+                <div
+                  key={item.key}
+                  className="flex items-center gap-3 py-2"
+                  style={{
+                    animation: `pub-fade-in 420ms ease-out ${item.delay}ms both`,
+                  }}
+                >
+                  <div className="h-px flex-1 bg-border/30" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/60">
+                    Round {item.roundNumber}
+                  </span>
+                  <div className="h-px flex-1 bg-border/30" />
+                </div>
+              );
+            }
 
             return (
-              <article
-                key={`${entry.sequence}-${entry.createdAt}`}
-                className="rounded-[24px] border border-border/70 bg-card px-4 py-4 shadow-sm md:px-5"
-              >
-                <div className="flex items-start gap-3">
-                  {entry.role === "member" ? (
-                    <TranscriptAvatar
-                      avatarUrl={entry.speakerAvatarUrl}
-                      name={speakerName}
-                    />
-                  ) : (
-                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-background text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                      {isFinalSynthesis ? "TC" : "Q"}
-                    </div>
-                  )}
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {speakerName}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {typeof entry.roundNumber === "number"
-                            ? `Round ${entry.roundNumber} · `
-                            : ""}
-                          {formatDateTime(entry.createdAt)}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 gap-2 self-start text-muted-foreground"
-                        onClick={() => void copyEntry(entry)}
-                      >
-                        {copiedEntrySequence === entry.sequence ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
-                        )}
-                        {copiedEntrySequence === entry.sequence
-                          ? "Copied"
-                          : "Copy"}
-                      </Button>
-                    </div>
-
-                    <div className="mt-4 text-sm leading-relaxed">
-                      <MarkdownMessage content={entry.content} />
-                    </div>
-                  </div>
-                </div>
-              </article>
+              <EntryCard
+                key={`${item.entry.sequence}-${item.entry.createdAt}`}
+                entry={item.entry}
+                copiedEntrySequence={copiedEntrySequence}
+                onCopy={(e) => void copyEntry(e)}
+                animationDelay={item.delay}
+              />
             );
           })}
         </section>
+
+        {/* ── Footer ────────────────────────────────────────────── */}
+        <footer className="mt-12 flex flex-col items-center gap-2 border-t border-border/30 pt-8 text-center md:mt-16">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground/50">
+            The Council
+          </p>
+          <p className="text-[11px] text-muted-foreground/40">
+            Published {formatDate(payload.publishedAt)}
+          </p>
+        </footer>
       </div>
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helpers – build a flat list with round separators interleaved      */
+/* ------------------------------------------------------------------ */
+
+type TranscriptItem =
+  | { kind: "entry"; entry: PublicRoundtableEntry; delay: number }
+  | { kind: "separator"; roundNumber: number; key: string; delay: number };
+
+function buildEntriesWithRoundLabels(
+  entries: PublicRoundtableEntry[],
+): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  let lastRound: number | undefined;
+  let delayIndex = 0;
+  const DELAY_STEP = 40; // ms between items
+  const MAX_ANIMATED = 12; // cap animation to first N items
+
+  for (const entry of entries) {
+    const round = entry.roundNumber;
+    if (round !== undefined && round !== lastRound) {
+      const delay = delayIndex < MAX_ANIMATED ? delayIndex * DELAY_STEP : 0;
+      items.push({
+        kind: "separator",
+        roundNumber: round,
+        key: `round-${round}`,
+        delay,
+      });
+      delayIndex += 1;
+      lastRound = round;
+    }
+
+    const delay = delayIndex < MAX_ANIMATED ? delayIndex * DELAY_STEP : 0;
+    items.push({ kind: "entry", entry, delay });
+    delayIndex += 1;
+  }
+
+  return items;
 }

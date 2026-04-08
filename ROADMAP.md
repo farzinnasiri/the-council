@@ -278,7 +278,6 @@ Wizard for member creation
 
 byok for Gemini and free tier
 
-state of the world context -> daily, montly, weekly, etc breif? something to keep the chat or member updated so it doens't hellunicate facts. it should be personalized. 
 
 
 
