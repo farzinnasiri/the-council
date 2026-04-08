@@ -1,5 +1,5 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Bug, LoaderCircle, Lock, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
+import { Bug, Check, Copy, Link2, LoaderCircle, Lock, Menu, NotebookPen, Pause, Pin, Play, Plus, SkipForward, UserCircle2, Volume2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -20,6 +20,7 @@ import {
 } from '../../constants/presence';
 import { useChatSpeech } from '../../features/chat/ChatSpeechProvider';
 import { ENABLE_PROMPT_TRACE_DEBUG } from '../../../../shared/featureFlags';
+import type { PublicRoundtablePublicationStatus } from '../../repository/CouncilRepository';
 
 interface TopBarProps {
   conversation?: Conversation;
@@ -57,6 +58,7 @@ export function TopBar({
   );
   const promptDebugMode = useAppStore((state) => state.promptDebugMode);
   const setPromptDebugMode = useAppStore((state) => state.setPromptDebugMode);
+  const showToast = useAppStore((state) => state.showToast);
   const participantIds = conversation ? hallParticipantsByConversation[conversation.id] ?? [] : [];
   const participantIdsKey = participantIds.join('|');
   const participants = useMemo(
@@ -78,6 +80,11 @@ export function TopBar({
   const [isChamberTypingVisible, setIsChamberTypingVisible] = useState(false);
   const [isPinnedManagerOpen, setIsPinnedManagerOpen] = useState(false);
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
+  const [publicationStatus, setPublicationStatus] = useState<PublicRoundtablePublicationStatus | null>(null);
+  const [publicationStatusLoading, setPublicationStatusLoading] = useState(false);
+  const [publishingPublicPage, setPublishingPublicPage] = useState(false);
+  const [unpublishingPublicPage, setUnpublishingPublicPage] = useState(false);
+  const [copiedPublicLink, setCopiedPublicLink] = useState(false);
   const [runningBriefAvailableByMember, setRunningBriefAvailableByMember] = useState<Record<string, boolean>>({});
   const typingVisibilityTimerRef = useRef<number | null>(null);
   const {
@@ -195,7 +202,80 @@ export function TopBar({
     );
   const isHall = conversation?.kind === 'hall';
   const isHallClosed = Boolean(conversation?.kind === 'hall' && conversation.closedAt);
+  const canManagePublicRoundtable =
+    Boolean(conversation?.kind === 'hall' && conversation.closedAt && conversation.hallMode === 'roundtable');
   const isClosingHall = Boolean(conversation && closingConversationId === conversation.id);
+
+  useEffect(() => {
+    if (!conversation || !canManagePublicRoundtable) {
+      setPublicationStatus(null);
+      setPublicationStatusLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPublicationStatusLoading(true);
+    void convexRepository
+      .getPublicRoundtablePublicationStatus(conversation.id)
+      .then((status) => {
+        if (cancelled) return;
+        setPublicationStatus(status);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPublicationStatus(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setPublicationStatusLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManagePublicRoundtable, conversation?.id]);
+
+  const copyPublicLink = async (slug: string) => {
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/public/roundtable/${slug}`,
+      );
+      setCopiedPublicLink(true);
+      showToast('Public link copied.');
+      window.setTimeout(() => setCopiedPublicLink(false), 1200);
+    } catch {
+      setCopiedPublicLink(false);
+      showToast('Could not copy the public link.');
+    }
+  };
+
+  const publishPublicRoundtable = async () => {
+    if (!conversation || publishingPublicPage) return;
+    setPublishingPublicPage(true);
+    try {
+      const status = await convexRepository.publishClosedRoundtable(conversation.id);
+      setPublicationStatus(status);
+      showToast('Public roundtable page published.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not publish this public roundtable page.');
+    } finally {
+      setPublishingPublicPage(false);
+    }
+  };
+
+  const unpublishPublicRoundtable = async () => {
+    if (!conversation || unpublishingPublicPage) return;
+    setUnpublishingPublicPage(true);
+    try {
+      await convexRepository.unpublishClosedRoundtable(conversation.id);
+      setPublicationStatus(null);
+      showToast('Public roundtable page unpublished.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not unpublish this public roundtable page.');
+    } finally {
+      setUnpublishingPublicPage(false);
+    }
+  };
 
   const playbackControls = (
     <>
@@ -528,6 +608,55 @@ export function TopBar({
             <Lock className="h-3.5 w-3.5" />
             Closed
           </span>
+        ) : null}
+        {canManagePublicRoundtable && publicationStatus ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 shrink-0 gap-2 px-3 text-xs"
+              onClick={() => void copyPublicLink(publicationStatus.slug)}
+            >
+              {copiedPublicLink ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Link2 className="h-3.5 w-3.5" />
+              )}
+              {copiedPublicLink ? 'Copied link' : 'Copy public link'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-9 shrink-0 gap-2 px-3 text-xs text-muted-foreground"
+              disabled={unpublishingPublicPage}
+              onClick={() => void unpublishPublicRoundtable()}
+            >
+              {unpublishingPublicPage ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {unpublishingPublicPage ? 'Unpublishing...' : 'Unpublish'}
+            </Button>
+          </>
+        ) : null}
+        {canManagePublicRoundtable && !publicationStatus ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 shrink-0 gap-2 px-3 text-xs"
+            disabled={publicationStatusLoading || publishingPublicPage}
+            onClick={() => void publishPublicRoundtable()}
+          >
+            {publicationStatusLoading || publishingPublicPage ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Link2 className="h-3.5 w-3.5" />
+            )}
+            {publicationStatusLoading || publishingPublicPage
+              ? 'Publishing...'
+              : 'Publish public page'}
+          </Button>
         ) : null}
         {showHallParticipants ? (
           <CouncilMembersMenu

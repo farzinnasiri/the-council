@@ -174,6 +174,12 @@ export interface KbDocumentLifecycle {
   updatedAt: number;
 }
 
+export interface PublicRoundtablePublicationStatus {
+  publicationId: string;
+  slug: string;
+  publishedAt: number;
+}
+
 export interface CouncilRepository {
   init(): Promise<void>;
   getSnapshot(): Promise<CouncilSnapshot>;
@@ -293,6 +299,13 @@ export interface CouncilRepository {
   closeHall(
     conversationId: string,
   ): Promise<{ conversation: Conversation; closingMessage: Message }>;
+  getPublicRoundtablePublicationStatus(
+    conversationId: string,
+  ): Promise<PublicRoundtablePublicationStatus | null>;
+  publishClosedRoundtable(
+    conversationId: string,
+  ): Promise<PublicRoundtablePublicationStatus>;
+  unpublishClosedRoundtable(conversationId: string): Promise<void>;
   clearChamberByMember(memberId: string): Promise<void>;
   listConversationGuidanceDirectives(
     conversationId: string,

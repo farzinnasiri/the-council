@@ -51,6 +51,7 @@ import type {
   MessageSpeechResult,
   MemberChatResult,
   MemberSpecialtiesResult,
+  PublicRoundtablePublicationStatus,
   RouteResult,
   UpdateMemberPatch,
 } from "./CouncilRepository";
@@ -1036,6 +1037,46 @@ class ConvexCouncilRepository implements CouncilRepository {
       conversation: toConversation(result.conversation),
       closingMessage: toMessage(result.closingMessage),
     };
+  }
+
+  async getPublicRoundtablePublicationStatus(
+    conversationId: string,
+  ): Promise<PublicRoundtablePublicationStatus | null> {
+    const doc = await this.clientAny.query(
+      "publicRoundtables:getPublicationStatus",
+      {
+        conversationId: conversationId as Id<"conversations">,
+      },
+    );
+    return doc
+      ? {
+          publicationId: doc.publicationId,
+          slug: doc.slug,
+          publishedAt: doc.publishedAt,
+        }
+      : null;
+  }
+
+  async publishClosedRoundtable(
+    conversationId: string,
+  ): Promise<PublicRoundtablePublicationStatus> {
+    const doc = await this.clientAny.mutation(
+      "publicRoundtables:publishClosedRoundtable",
+      {
+        conversationId: conversationId as Id<"conversations">,
+      },
+    );
+    return {
+      publicationId: doc.publicationId,
+      slug: doc.slug,
+      publishedAt: doc.publishedAt,
+    };
+  }
+
+  async unpublishClosedRoundtable(conversationId: string): Promise<void> {
+    await this.clientAny.mutation("publicRoundtables:unpublishClosedRoundtable", {
+      conversationId: conversationId as Id<"conversations">,
+    });
   }
 
   async createChamberThread(memberId: string): Promise<Conversation> {

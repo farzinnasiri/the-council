@@ -258,6 +258,38 @@ export default defineSchema({
     .index('by_conversation', ['conversationId'])
     .index('by_user_conversation', ['userId', 'conversationId']),
 
+  publishedRoundtables: defineTable({
+    userId: v.id('users'),
+    conversationId: v.id('conversations'),
+    slug: v.string(),
+    title: v.string(),
+    hallMode: v.literal('roundtable'),
+    closedAt: v.number(),
+    publishedAt: v.number(),
+    unpublishedAt: v.optional(v.number()),
+    participants: v.array(
+      v.object({
+        memberId: v.id('members'),
+        name: v.string(),
+        avatarStorageId: v.optional(v.id('_storage')),
+      })
+    ),
+  })
+    .index('by_slug', ['slug'])
+    .index('by_conversation', ['conversationId']),
+
+  publishedRoundtableEntries: defineTable({
+    publicationId: v.id('publishedRoundtables'),
+    sequence: v.number(),
+    role: v.union(v.literal('user'), v.literal('member'), v.literal('system')),
+    speakerName: v.optional(v.string()),
+    speakerAvatarStorageId: v.optional(v.id('_storage')),
+    content: v.string(),
+    roundNumber: v.optional(v.number()),
+    createdAt: v.number(),
+    isFinalSynthesis: v.boolean(),
+  }).index('by_publication_sequence', ['publicationId', 'sequence']),
+
   conversationGuidanceDirectives: defineTable({
     userId: v.id('users'),
     conversationId: v.id('conversations'),
