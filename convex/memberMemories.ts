@@ -62,6 +62,7 @@ const refreshStateDoc = v.object({
 const refreshQueueResult = v.object({
   scheduled: v.boolean(),
 });
+const MEMORY_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const episodeUpdateInput = v.object({
   episodeId: v.id('memberUserEpisodes'),
@@ -744,7 +745,7 @@ export const commitRefreshInternal = internalMutation({
       await ctx.db.patch(refreshState._id, {
         processing: false,
         processingStartedAt: undefined,
-        nextEligibleAt: now + 6 * 60 * 60 * 1000,
+        nextEligibleAt: now + MEMORY_REFRESH_INTERVAL_MS,
         lastSuccessAt: now,
         retryCount: 0,
         lastProcessedMessageAt: args.latestMessageAt,
@@ -771,7 +772,7 @@ export const markRefreshSkippedInternal = internalMutation({
     await ctx.db.patch(row._id, {
       processing: false,
       processingStartedAt: undefined,
-      nextEligibleAt: now + 6 * 60 * 60 * 1000,
+      nextEligibleAt: now + MEMORY_REFRESH_INTERVAL_MS,
       lastSuccessAt: row.lastSuccessAt,
       lastProcessedMessageAt: args.latestMessageAt ?? row.lastProcessedMessageAt,
       updatedAt: now,

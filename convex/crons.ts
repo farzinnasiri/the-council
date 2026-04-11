@@ -5,7 +5,7 @@ const crons = cronJobs();
 
 crons.interval(
   'refresh chamber member memories',
-  { hours: 6 },
+  { hours: 24 },
   internal.ai.memberMemory.refreshDuePairs,
   {},
 );
