@@ -42,3 +42,4 @@ tmp/
 # Project local state
 .state/
 .vercel
+.kilo/agent-manager.json

@@ -278,6 +278,18 @@ Wizard for member creation
 
 byok for Gemini and free tier
 
+pinning memebrs in list, 
+members list based on latest activlity, up and down, both in chabmers and quick acess
+
+api's with api key to use the council via external service, or change stuff
+
+memebrs settings page, instead of side thing, open a box to change stuff
+
+sticky kb/ cached kb, keep some kb search results in context, don't forget them -> needs more thinking
+
+in the hall/roundtabe , on avery N rounds (say N = 5), do a redistriubtion of models + an re-evaultion mechinsm so the members don't get stuck with the same ideas or iterate them (needs more thinking)
+
+bugs in the hall where the typing indcator comes after a member replies, 
 
 
 

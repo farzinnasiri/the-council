@@ -422,9 +422,8 @@ export async function chatWithMemberUseCase(ctx: any, args: ChatWithMemberInput)
 
   const provider = createAiProvider();
   const personalSourcesAllowed =
-    conversation.kind === 'chamber' &&
     Boolean(member.personalSourcesPermissionEnabled) &&
-    conversation.personalSourcesEnabled !== false;
+    (conversation.kind === 'chamber' ? conversation.personalSourcesEnabled !== false : true);
   const openingHallDefaults = resolveOpeningHallDefaults({
     isOpeningRound: isOpeningHallRound,
     chatProfile: args.chatProfile,

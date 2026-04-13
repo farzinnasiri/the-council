@@ -5,7 +5,7 @@ import type { Id } from '../../../_generated/dataModel';
 import { ensureMemberStore } from '../../../ai/kbIngest';
 import { resolveHallRawRoundTail } from '../../../ai/hallMemoryPolicy';
 import { assertHallConversationOpen, requireAuthUser, requireOwnedConversation } from '../../shared/auth';
-import { createAiProvider, createKnowledgeRetriever, toKBDigestHints, withTimeout } from '../../shared/convexGateway';
+import { createAiProvider, createKnowledgeRetriever, createPersonalSourceRetriever, toKBDigestHints, withTimeout } from '../../shared/convexGateway';
 import type { MemberListRow, MessageRow, RoundCandidateRow, RoundtableSpeakerResult } from '../../shared/types';
 import { normalizeHallMode } from '../domain/hallMode';
 import { resolveOpeningHallDefaults } from '../domain/openingRoundDefaults';
@@ -148,6 +148,7 @@ export async function runRoundtableSpeakerContribution(
 
   try {
     const userId = await requireAuthUser(options.ctx);
+    const user = await options.ctx.runQuery(api.users.viewer, {});
     const runningBriefContext = await options.ctx.runQuery(internal.runningBriefs.getPromptContextInternal, {
       userId,
       conversationId: options.conversationId,
@@ -172,7 +173,9 @@ export async function runRoundtableSpeakerContribution(
           query: roundPrompt,
           storeName: effectiveStoreName,
           knowledgeRetriever: createKnowledgeRetriever(options.ctx, options.memberId),
-          personalSourceRetriever: undefined,
+          personalSourceRetriever: member.personalSourcesPermissionEnabled
+            ? createPersonalSourceRetriever(options.ctx, userId, user?.name)
+            : undefined,
           identityContext: undefined,
           memoryHint: undefined,
             kbDigests: toKBDigestHints(kbDigests),
