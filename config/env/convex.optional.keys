@@ -1,0 +1,4 @@
+# Optional keys after merge (convex.defaults.env + .env.convex.local).
+# One key per line. Values can be provided as KEY, KEY__DEV, or KEY__PROD.
+
+AUTH_ALLOWED_REDIRECT_ORIGINS

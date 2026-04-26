@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULTS_FILE="${DEFAULTS_FILE:-$ROOT_DIR/config/env/convex.defaults.env}"
 LOCAL_FILE="${LOCAL_FILE:-$ROOT_DIR/.env.convex.local}"
 REQUIRED_FILE="${REQUIRED_FILE:-$ROOT_DIR/config/env/convex.required.keys}"
+OPTIONAL_FILE="${OPTIONAL_FILE:-$ROOT_DIR/config/env/convex.optional.keys}"
 
 TARGET="dev"
 PRINT_RESOLVED=0
@@ -163,6 +164,9 @@ if [[ "$PRINT_RESOLVED" -eq 0 ]]; then
   echo "  Defaults: $DEFAULTS_FILE"
   echo "  Local overrides: $LOCAL_FILE"
   echo "  Required keys: $REQUIRED_FILE"
+  if [[ -f "$OPTIONAL_FILE" ]]; then
+    echo "  Optional keys: $OPTIONAL_FILE"
+  fi
 fi
 
 missing=()
@@ -181,6 +185,20 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     resolved_lines+=("$key=$value")
   fi
 done < "$REQUIRED_FILE"
+
+if [[ -f "$OPTIONAL_FILE" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" ]] && continue
+    [[ "${line:0:1}" == "#" ]] && continue
+
+    key="$line"
+    value="$(resolve_value "$key")"
+    if [[ -n "$value" ]]; then
+      resolved_lines+=("$key=$value")
+    fi
+  done < "$OPTIONAL_FILE"
+fi
 
 extra_chat_response_keys=()
 while IFS='=' read -r raw_key _raw_value || [[ -n "${raw_key:-}" ]]; do

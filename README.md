@@ -69,6 +69,7 @@ Required keys are defined in `config/env/convex.required.keys`.
 
 Important:
 - `SITE_URL` must be set in `.env.convex.local` (do not rely on defaults).
+- `AUTH_ALLOWED_REDIRECT_ORIGINS` can be set to a comma-separated list of extra trusted frontend origins when one Convex deployment must support multiple frontends, such as local dev plus a Vercel preview.
 - `JWT_PRIVATE_KEY` and `JWKS` are managed by `npx @convex-dev/auth` and should not be manually set in `.env.convex.local`.
 - Response-model slots use `AI_MODEL_CHAT_RESPONSE` for slot 1, then `AI_MODEL_CHAT_RESPONSE_2`, `AI_MODEL_CHAT_RESPONSE_3`, and so on. There is no `AI_MODEL_CHAT_RESPONSE_1`.
 - `openai:*` and `google:*` response models use the native integrations already in the app.
@@ -112,6 +113,8 @@ Deploy targets also run the matching env sync automatically before pushing Conve
 
 - Convex runtime `SITE_URL` should match your deployed frontend URL (for OAuth callbacks), for example:
   - `SITE_URL=https://the-council-hazel.vercel.app`
+- If the same Convex deployment also needs local OAuth redirects, add:
+  - `AUTH_ALLOWED_REDIRECT_ORIGINS=http://localhost:43112,https://the-council-hazel.vercel.app`
 
 ### Local/manual Vercel ops
 
