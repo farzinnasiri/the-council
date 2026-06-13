@@ -1158,7 +1158,7 @@ export function MembersPage() {
                         >
                           {(chatResponseModelSlots.length > 0
                             ? chatResponseModelSlots
-                            : [{ slot: 1, envKey: 'AI_MODEL_CHAT_RESPONSE', modelSpec: 'openai:gpt-5.3-chat-latest', isDefault: true }]
+                            : [{ slot: 1, envKey: 'AI_MODEL_CHAT_RESPONSE', modelSpec: 'openai:chat-latest', isDefault: true }]
                           ).map((slot) => (
                             <option key={slot.slot} value={slot.slot}>
                               {`Slot ${slot.slot}${slot.isDefault ? ' (default / fallback)' : ''} - ${slot.modelSpec}`}

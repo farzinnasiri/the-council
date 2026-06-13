@@ -5,6 +5,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { ChatOpenRouter } from '@langchain/openrouter';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ModelTarget } from '../modelConfig';
+import type { ResponseReasoningEffort } from './responseReasoning';
 import { wideEventError } from '../../observability/errors';
 
 function shouldForceResponsesApi(target: ModelTarget): boolean {
@@ -51,17 +52,19 @@ function normalizeOpenRouterModel(model: string): string {
 
 export function createChatModel(
   target: ModelTarget,
-  options?: { temperature?: number; thinkingBudget?: number }
+  options?: { temperature?: number; thinkingBudget?: number; reasoningEffort?: ResponseReasoningEffort }
 ): BaseChatModel {
   const temperature = options?.temperature;
+  const reasoning = options?.reasoningEffort ? { effort: options.reasoningEffort } : undefined;
   if (target.provider === 'openai') {
-    const useResponsesApi = shouldForceResponsesApi(target);
-    // GPT-5.2 chat models in this project deployment currently reject custom temperature values.
+    const useResponsesApi = Boolean(reasoning) || shouldForceResponsesApi(target);
+    // OpenAI chat/reasoning models in this project deployment currently reject custom temperature values.
     // Let the provider use its model default instead of forcing a value.
     return new ChatOpenAI({
       apiKey: resolveOpenAiKey(),
       model: target.model,
       useResponsesApi,
+      ...(reasoning ? { reasoning } : {}),
     });
   }
 
@@ -70,6 +73,7 @@ export function createChatModel(
       apiKey: resolveOpenRouterKey(),
       model: normalizeOpenRouterModel(target.model),
       temperature,
+      ...(reasoning ? { modelKwargs: { reasoning } } : {}),
     });
   }
 
@@ -77,6 +81,7 @@ export function createChatModel(
     apiKey: resolveGeminiKey(),
     model: target.model,
     temperature,
+    ...(options?.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
     ...(typeof options?.thinkingBudget === 'number'
       ? { thinkingConfig: { thinkingBudget: options.thinkingBudget } }
       : {}),

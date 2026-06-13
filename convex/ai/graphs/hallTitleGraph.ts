@@ -3,7 +3,7 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { createChatModel } from '../runtime/modelFactory';
 import { invokeText } from '../runtime/structured';
-import { hallTitleModelCandidates } from '../modelConfig';
+import { hallTitleModelTargetCandidates } from '../modelConfig';
 
 interface HallTitleState {
   message: string;
@@ -41,7 +41,7 @@ async function runConversationTitleGraph(input: {
   const graph = new StateGraph(HallTitleStateAnnotation)
     .addNode('generate', async (state) => {
       const fallback = fallbackTitle(state.message, input.emptyFallback);
-      const candidateModels = hallTitleModelCandidates(state.model);
+      const candidateModels = hallTitleModelTargetCandidates(state.model);
 
       const prompt = [
         `Generate a concise title for this ${input.promptLabel}.`,
@@ -57,9 +57,9 @@ async function runConversationTitleGraph(input: {
         'Return only the title text.',
       ].join('\n');
 
-      for (const modelId of candidateModels) {
+      for (const target of candidateModels) {
         try {
-          const model = createChatModel({ provider: 'google', model: modelId }, { temperature: 0.2 });
+          const model = createChatModel(target, { temperature: 0.2 });
           const raw = await invokeText(model, prompt);
           const cleaned = raw
             .replace(/^["'`]+|["'`]+$/g, '')
@@ -69,7 +69,7 @@ async function runConversationTitleGraph(input: {
           if (cleaned.length >= 3) {
             return {
               title: cleaned.slice(0, 72),
-              usedModel: modelId,
+              usedModel: target.model,
             };
           }
         } catch {
@@ -79,7 +79,7 @@ async function runConversationTitleGraph(input: {
 
       return {
         title: fallback,
-        usedModel: candidateModels[0] ?? 'heuristic',
+        usedModel: candidateModels[0]?.model ?? 'heuristic',
       };
     })
     .addEdge(START, 'generate')

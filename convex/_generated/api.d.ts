@@ -50,6 +50,7 @@ import type * as ai_routing from "../ai/routing.js";
 import type * as ai_runtime_messages from "../ai/runtime/messages.js";
 import type * as ai_runtime_modelFactory from "../ai/runtime/modelFactory.js";
 import type * as ai_runtime_modelRegistry from "../ai/runtime/modelRegistry.js";
+import type * as ai_runtime_responseReasoning from "../ai/runtime/responseReasoning.js";
 import type * as ai_runtime_structured from "../ai/runtime/structured.js";
 import type * as ai_runtime_types from "../ai/runtime/types.js";
 import type * as ai_voice from "../ai/voice.js";
@@ -173,6 +174,7 @@ declare const fullApi: ApiFromModules<{
   "ai/runtime/messages": typeof ai_runtime_messages;
   "ai/runtime/modelFactory": typeof ai_runtime_modelFactory;
   "ai/runtime/modelRegistry": typeof ai_runtime_modelRegistry;
+  "ai/runtime/responseReasoning": typeof ai_runtime_responseReasoning;
   "ai/runtime/structured": typeof ai_runtime_structured;
   "ai/runtime/types": typeof ai_runtime_types;
   "ai/voice": typeof ai_voice;

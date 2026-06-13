@@ -9,6 +9,7 @@ import {
 } from '../retrievalStrategyConfig';
 import { modelRegistry } from '../runtime/modelRegistry';
 import { createChatModel } from '../runtime/modelFactory';
+import { resolveResponseReasoningEffort, shouldUseResponseReasoning } from '../runtime/responseReasoning';
 import { formatContextMessages } from '../runtime/messages';
 import { invokeStructured, invokeText } from '../runtime/structured';
 import {
@@ -1570,11 +1571,17 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
       : requestedChatProfile === 'think' || requestedChatProfile === 'deep_dive'
         ? 'think'
         : 'instant';
-  const responseModelTarget = modelRegistry.resolve(
-    effectiveChatProfile === 'think' ? 'chatThinking' : 'chatResponse',
-    input.responseModel,
-  );
+  const responseModelTarget = modelRegistry.resolve('chatResponse', input.responseModel);
   const retrievalModelTarget = modelRegistry.resolve('retrieval', input.retrievalModel);
+  const responseReasoningEffort = resolveResponseReasoningEffort(
+    responseModelTarget,
+    shouldUseResponseReasoning({
+      chatProfile: effectiveChatProfile,
+      retrievalStrategy: effectiveRetrievalStrategy,
+    })
+      ? 'thinking'
+      : 'standard',
+  );
 
   const [{ docs, error: listError }, personalSourceState] = await Promise.all([
     safeListDocuments(input),
@@ -1667,6 +1674,7 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
   setMainSpanAttributes({
     'ai.chat_profile': effectiveChatProfile,
     'ai.retrieval_strategy': effectiveRetrievalStrategy,
+    'ai.response.reasoning_effort': responseReasoningEffort,
     'ai.turn_type': planner.turnType,
     'ai.retrieval_skipped': planner.skipRetrieval,
     'knowledge.planner.status': planning.plannerStatus,
@@ -1907,7 +1915,7 @@ export async function runMemberChatGraph(input: MemberChatInput): Promise<Member
 
   const model = createChatModel(responseModelTarget, {
     temperature: input.temperature ?? 0.35,
-    thinkingBudget: effectiveChatProfile === 'think' ? 2048 : undefined,
+    reasoningEffort: responseReasoningEffort,
   });
   const answer = (await invokeText(model, answerPrompt)) || 'I could not generate a response.';
   const finalEvidence = mergeEvidencePacks([

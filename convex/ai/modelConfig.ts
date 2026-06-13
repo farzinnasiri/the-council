@@ -90,33 +90,33 @@ const LEGACY_GEMINI_ENV_KEYS: Partial<Record<ModelSlot, string[]>> = {
 };
 
 const SLOT_DEFAULTS: Record<ModelSlot, ModelTarget> = {
-  chatResponse: { provider: 'openai', model: 'gpt-5.3-chat-latest' },
-  chatThinking: { provider: 'google', model: 'gemini-3-flash-preview' },
-  hallClosure: { provider: 'google', model: 'gemini-3-flash-preview' },
+  chatResponse: { provider: 'openai', model: 'chat-latest' },
+  chatThinking: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
+  hallClosure: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
   transcription: { provider: 'google', model: 'gemini-2.5-flash' },
-  retrieval: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  router: { provider: 'google', model: 'gemini-2.5-flash' },
-  roundtableBid: { provider: 'google', model: 'gemini-2.5-flash' },
-  archiveParse: { provider: 'google', model: 'gemini-3-flash-preview' },
-  hallTitle: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  hallMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
-  hallThreadSeed: { provider: 'google', model: 'gemini-3-flash-preview' },
-  specialties: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  summary: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  chamberMemory: { provider: 'google', model: 'gemini-3-flash-preview' },
-  kbGate: { provider: 'google', model: 'gemma-3-12b-it' },
-  kbQueryRewrite: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  personalSourceQueryRewrite: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  kbDigest: { provider: 'google', model: 'gemini-2.5-flash-lite' },
+  retrieval: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  router: { provider: 'openrouter', model: 'google/gemini-2.5-flash' },
+  roundtableBid: { provider: 'openrouter', model: 'google/gemini-2.5-flash' },
+  archiveParse: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
+  hallTitle: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  hallMemory: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
+  hallThreadSeed: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
+  specialties: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  summary: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  chamberMemory: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
+  kbGate: { provider: 'openrouter', model: 'google/gemma-3-12b-it' },
+  kbQueryRewrite: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  personalSourceQueryRewrite: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  kbDigest: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
   tts: { provider: 'google', model: 'gemini-2.5-flash-preview-tts' },
-  voicePersona: { provider: 'google', model: 'gemini-2.5-flash-lite' },
-  guidanceProfile: { provider: 'google', model: 'gemini-2.5-flash' },
-  guidanceReflection: { provider: 'google', model: 'gemini-3-flash-preview' },
+  voicePersona: { provider: 'openrouter', model: 'google/gemini-2.5-flash-lite' },
+  guidanceProfile: { provider: 'openrouter', model: 'google/gemini-2.5-flash' },
+  guidanceReflection: { provider: 'openrouter', model: 'google/gemini-3-flash-preview' },
 };
 
 function modelTargetToSpec(target: ModelTarget): string {
   if (target.provider === 'openrouter') {
-    return target.model;
+    return `openrouter:${target.model}`;
   }
   return `${target.provider}:${target.model}`;
 }
@@ -131,6 +131,9 @@ function parseModelSpec(raw?: string | null, options?: { allowOpenRouter?: boole
     const model = rest.join(':').trim();
     if ((provider === 'openai' || provider === 'google') && model) {
       return { provider, model } as ModelTarget;
+    }
+    if (provider === 'openrouter' && model) {
+      return { provider: 'openrouter', model };
     }
     if (options?.allowOpenRouter && provider && model) {
       return { provider: 'openrouter', model: `${provider}:${model}` };
@@ -153,6 +156,13 @@ function readLegacyGeminiModel(slot: ModelSlot): string | undefined {
   return undefined;
 }
 
+function legacyGeminiTarget(slot: ModelSlot, model: string): ModelTarget {
+  if (slot === 'tts' || slot === 'transcription') {
+    return { provider: 'google', model };
+  }
+  return { provider: 'openrouter', model: `google/${model}` };
+}
+
 export function resolveModelTarget(slot: ModelSlot, override?: string): ModelTarget {
   const overrideTarget = parseModelSpec(override, { allowOpenRouter: allowOpenRouterForSlot(slot) });
   if (overrideTarget) return overrideTarget;
@@ -167,7 +177,7 @@ export function resolveModelTarget(slot: ModelSlot, override?: string): ModelTar
     if (slot === 'chatResponse') {
       return SLOT_DEFAULTS.chatResponse;
     }
-    return { provider: 'google', model: legacyGeminiModel };
+    return legacyGeminiTarget(slot, legacyGeminiModel);
   }
 
   return SLOT_DEFAULTS[slot];
@@ -203,10 +213,20 @@ export function resolveModel(slot: ModelSlot, override?: string): string {
 }
 
 export function hallTitleModelCandidates(override?: string): string[] {
-  const explicit = resolveModelTarget('hallTitle', override).model;
-  return [explicit, resolveModel('router'), SLOT_DEFAULTS.hallTitle.model].filter(
-    (value, index, list): value is string => Boolean(value) && list.indexOf(value) === index
-  );
+  return hallTitleModelTargetCandidates(override).map((target) => target.model);
+}
+
+export function hallTitleModelTargetCandidates(override?: string): ModelTarget[] {
+  const explicit = resolveModelTarget('hallTitle', override);
+  const router = resolveModelTarget('router');
+  const candidates = [explicit, router, SLOT_DEFAULTS.hallTitle];
+  const seen = new Set<string>();
+  return candidates.filter((target) => {
+    const key = modelTargetToSpec(target);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function getModelEnvKey(slot: ModelSlot): string {

@@ -21,7 +21,7 @@ Status: In Progress (as of February 27, 2026)
 - Add model-aware usage accounting so caps can be defined in turns, credits, or estimated conversation hours.
 - Baseline cost assumptions (to validate with real telemetry before launch):
   - Gemini 3 Flash Preview: `$0.00967/turn`, `$0.213/hour` (SD `$0.068`)
-  - GPT-5.2-chat-latest: `$0.03462/turn`, `$0.762/hour` (SD `$0.244`)
+  - Chat Latest: `$0.03462/turn`, `$0.762/hour` (SD `$0.244`)
   - Claude Sonnet 4.6: `$0.05736/turn`, `$1.262/hour` (SD `$0.401`)
   - Grok 4 Fast (non-thinking): `$0.00371/turn`, `$0.082/hour` (SD `$0.026`)
 
@@ -198,7 +198,7 @@ Status: Completed (March 20, 2026)
 ### 3.1 Migrate Core Chat Stack to LangChain/LangGraph
 Status: Completed (February 25, 2026)
 - LangChain/LangGraph orchestration is now the core runtime architecture.
-- OpenAI is the default for chat-generation tasks (gpt-5.2-chat-latest).
+- OpenAI is the default for chat-generation tasks (chat-latest).
 - Google models remain for selected non-chat tasks (routing, summaries, KB utility flows).
 - Preserve existing Convex action contracts during migration.
 
@@ -291,5 +291,30 @@ in the hall/roundtabe , on avery N rounds (say N = 5), do a redistriubtion of mo
 
 bugs in the hall where the typing indcator comes after a member replies, 
 
+search member names
+
+global chat(thread+hall)/member search via shrotcut like shitf + cmd + p 
+
+pagination for threads and hall chats. 
+
+ai note polisher: for chat notes, have a button to just polish the note, make it more concise, readable, better fromated and organized, while keeping the original meaning intact, keeping the original substance, even verbatium if possible ...
 
 
+image inputs in composer (up to 3 images per turn) + the model should write down details in the text first and put them in the context 
+
+on long threads, the app becomes slow, even hard to wrote down in the composer
+
+thinking modes and other modes that use thinking for creating response should use the thinking of the base model, not gemini
+
+halls with profile memoery/personal sources or not option
+
+brainstorm mode responses are very short, they should be more verbose
+
+aliases in the coucnil url for fast access -> url:///elon ... -> opens a new chat with elon 
+
+
+improve the observer in the council -> say stuff that the llm is not addressing like: you should let that girl go... it should work like a break, refelectio etc mechanism for the llm
+
+helps, explantions for differnt features - council
+
+improve kb serach -> bring in whole files, do agentic search etc

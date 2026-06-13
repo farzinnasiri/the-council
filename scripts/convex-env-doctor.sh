@@ -228,6 +228,15 @@ if [[ -n "$primary_chat_response_value" ]] && uses_openrouter_spec "$primary_cha
   conditional_keys+=("OPENROUTER_API_KEY")
 fi
 
+for entry in "${resolved_lines[@]:-}"; do
+  key="${entry%%=*}"
+  value="${entry#*=}"
+  [[ "$key" == AI_MODEL_* ]] || continue
+  if uses_openrouter_spec "$value"; then
+    conditional_keys+=("OPENROUTER_API_KEY")
+  fi
+done
+
 if (( ${#conditional_keys[@]} > 0 )); then
   unique_conditional_keys=()
   for key in "${conditional_keys[@]}"; do
